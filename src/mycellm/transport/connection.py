@@ -1,0 +1,111 @@
+"""Authenticated peer connection wrapping QUIC protocol."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+
+from mycellm.protocol.capabilities import Capabilities
+from mycellm.protocol.envelope import MessageEnvelope, MessageType
+from mycellm.protocol.node_hello import NodeHello
+from mycellm.transport.quic import MycellmQuicProtocol
+
+logger = logging.getLogger("mycellm.transport.connection")
+
+
+class PeerState(str, Enum):
+    DISCOVERED = "discovered"
+    DIALABLE = "dialable"
+    AUTHENTICATED = "authenticated"
+    ROUTABLE = "routable"
+    SERVING = "serving"
+    DISCONNECTED = "disconnected"
+
+
+@dataclass
+class PeerConnection:
+    """An authenticated, framed connection to a peer."""
+
+    peer_id: str
+    protocol: MycellmQuicProtocol
+    hello: NodeHello
+    state: PeerState = PeerState.AUTHENTICATED
+    connected_at: float = field(default_factory=time.time)
+    last_ping: float = 0.0
+    last_pong: float = 0.0
+    _pending_responses: dict[str, asyncio.Future] = field(default_factory=dict)
+    _max_concurrent: int = 4
+    _active_requests: int = 0
+
+    @property
+    def capabilities(self) -> Capabilities:
+        return self.hello.capabilities
+
+    @property
+    def role(self) -> str:
+        return self.hello.cert.role
+
+    @property
+    def is_overloaded(self) -> bool:
+        return self._active_requests >= self._max_concurrent
+
+    async def send(self, msg: MessageEnvelope) -> None:
+        """Send a message to this peer."""
+        await self.protocol.send_message(msg)
+
+    async def request(self, msg: MessageEnvelope, timeout: float = 30.0) -> MessageEnvelope:
+        """Send a request and wait for the response."""
+        if self.is_overloaded:
+            from mycellm.protocol.errors import ErrorCode, ProtocolError
+            raise ProtocolError(ErrorCode.OVERLOADED, "Peer at max concurrent requests")
+
+        future: asyncio.Future[MessageEnvelope] = asyncio.get_event_loop().create_future()
+        self._pending_responses[msg.id] = future
+        self._active_requests += 1
+
+        try:
+            await self.protocol.send_message(msg)
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            self._active_requests -= 1
+            self._pending_responses.pop(msg.id, None)
+
+    def handle_response(self, msg: MessageEnvelope) -> bool:
+        """Handle an incoming message that may be a response to a pending request.
+
+        Returns True if it was consumed as a response.
+        """
+        future = self._pending_responses.get(msg.id)
+        if future and not future.done():
+            future.set_result(msg)
+            return True
+        return False
+
+    async def ping(self) -> float:
+        """Send a ping and measure round-trip time."""
+        ping_msg = MessageEnvelope(
+            type=MessageType.PING,
+            from_peer=self.peer_id,
+            payload={},
+        )
+        self.last_ping = time.time()
+
+        try:
+            resp = await self.request(ping_msg, timeout=10.0)
+            self.last_pong = time.time()
+            rtt = self.last_pong - self.last_ping
+            return rtt
+        except asyncio.TimeoutError:
+            self.state = PeerState.DISCONNECTED
+            return -1.0
+
+    def close(self) -> None:
+        """Close the connection."""
+        self.state = PeerState.DISCONNECTED
+        for future in self._pending_responses.values():
+            if not future.done():
+                future.cancel()
+        self._pending_responses.clear()

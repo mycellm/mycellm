@@ -1,0 +1,92 @@
+"""PeerRegistry — in-memory validated peer state indexed by model."""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass, field
+
+from mycellm.protocol.capabilities import Capabilities
+from mycellm.transport.connection import PeerConnection, PeerState
+
+logger = logging.getLogger("mycellm.router")
+
+
+@dataclass
+class PeerEntry:
+    """A tracked peer with its connection and metadata."""
+
+    peer_id: str
+    connection: PeerConnection | None = None
+    capabilities: Capabilities = field(default_factory=Capabilities)
+    state: PeerState = PeerState.DISCOVERED
+    addresses: list[str] = field(default_factory=list)
+    last_seen: float = field(default_factory=time.time)
+    failure_count: int = 0
+
+
+class PeerRegistry:
+    """In-memory peer registry indexed by model capability."""
+
+    def __init__(self):
+        self._peers: dict[str, PeerEntry] = {}  # peer_id -> PeerEntry
+        self._model_index: dict[str, set[str]] = {}  # model_name -> set of peer_ids
+
+    def register(
+        self,
+        peer_id: str,
+        connection: PeerConnection | None = None,
+        capabilities: Capabilities | None = None,
+        addresses: list[str] | None = None,
+    ) -> PeerEntry:
+        """Register or update a peer."""
+        entry = self._peers.get(peer_id)
+        if entry is None:
+            entry = PeerEntry(peer_id=peer_id)
+            self._peers[peer_id] = entry
+
+        if connection:
+            entry.connection = connection
+            entry.state = connection.state
+        if capabilities:
+            # Remove old model index entries
+            self._remove_from_model_index(peer_id)
+            entry.capabilities = capabilities
+            # Add new model index entries
+            for model in capabilities.models:
+                self._model_index.setdefault(model.name, set()).add(peer_id)
+        if addresses:
+            entry.addresses = addresses
+
+        entry.last_seen = time.time()
+        return entry
+
+    def unregister(self, peer_id: str) -> None:
+        self._remove_from_model_index(peer_id)
+        self._peers.pop(peer_id, None)
+
+    def get(self, peer_id: str) -> PeerEntry | None:
+        return self._peers.get(peer_id)
+
+    def peers_for_model(self, model_name: str) -> list[PeerEntry]:
+        """Get all peers that can serve a given model."""
+        peer_ids = self._model_index.get(model_name, set())
+        entries = []
+        for pid in peer_ids:
+            entry = self._peers.get(pid)
+            if entry and entry.state in (PeerState.ROUTABLE, PeerState.SERVING):
+                entries.append(entry)
+        return entries
+
+    def all_peers(self) -> list[PeerEntry]:
+        return list(self._peers.values())
+
+    def connected_peers(self) -> list[PeerEntry]:
+        return [
+            p for p in self._peers.values()
+            if p.state in (PeerState.AUTHENTICATED, PeerState.ROUTABLE, PeerState.SERVING)
+        ]
+
+    def _remove_from_model_index(self, peer_id: str) -> None:
+        for model_peers in self._model_index.values():
+            model_peers.discard(peer_id)

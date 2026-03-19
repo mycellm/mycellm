@@ -1,0 +1,72 @@
+"""Node management API endpoints."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
+
+router = APIRouter()
+
+
+@router.get("/status")
+async def node_status(request: Request):
+    """Get comprehensive node status."""
+    node = request.app.state.node
+    status = node.get_status()
+    status["credits"] = await node.get_credits()
+    return status
+
+
+@router.get("/peers")
+async def node_peers(request: Request):
+    """List connected peers."""
+    node = request.app.state.node
+    return {"peers": node.get_status().get("peers", [])}
+
+
+@router.get("/credits")
+async def node_credits(request: Request):
+    """Get credit balance and history."""
+    node = request.app.state.node
+    return await node.get_credits()
+
+
+@router.get("/credits/history")
+async def credit_history(request: Request, limit: int = 50):
+    """Get credit transaction history."""
+    node = request.app.state.node
+    if node.ledger:
+        return {"transactions": await node.ledger.history(node.peer_id, limit)}
+    return {"transactions": []}
+
+
+@router.post("/models/load")
+async def load_model(request: Request):
+    """Load a model."""
+    node = request.app.state.node
+    body = await request.json()
+    model_path = body.get("model_path", "")
+    name = body.get("name")
+    if not model_path:
+        return {"error": "model_path required"}
+
+    try:
+        loaded_name = await node.inference.load_model(model_path, name=name)
+        # Update capabilities
+        node.capabilities.models = node.inference.loaded_models
+        return {"status": "loaded", "model": loaded_name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/models/unload")
+async def unload_model(request: Request):
+    """Unload a model."""
+    node = request.app.state.node
+    body = await request.json()
+    model_name = body.get("model", "")
+    if not model_name:
+        return {"error": "model name required"}
+
+    await node.inference.unload_model(model_name)
+    node.capabilities.models = node.inference.loaded_models
+    return {"status": "unloaded", "model": model_name}

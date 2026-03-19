@@ -1,0 +1,94 @@
+"""Capability advertisement schema — signed by device key, exchanged over authenticated transport."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import cbor2
+
+
+@dataclass
+class ModelCapability:
+    """A model this node can serve."""
+
+    name: str
+    quant: str = ""
+    ctx_len: int = 4096
+    backend: str = "llama.cpp"
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "quant": self.quant,
+            "ctx_len": self.ctx_len,
+            "backend": self.backend,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ModelCapability:
+        return cls(
+            name=d["name"],
+            quant=d.get("quant", ""),
+            ctx_len=d.get("ctx_len", 4096),
+            backend=d.get("backend", "llama.cpp"),
+        )
+
+
+@dataclass
+class HardwareInfo:
+    """Hardware description for capability advertisement."""
+
+    gpu: str = "none"
+    vram_gb: float = 0.0
+    backend: str = "cpu"
+
+    def to_dict(self) -> dict:
+        return {"gpu": self.gpu, "vram_gb": self.vram_gb, "backend": self.backend}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> HardwareInfo:
+        return cls(
+            gpu=d.get("gpu", "none"),
+            vram_gb=d.get("vram_gb", 0.0),
+            backend=d.get("backend", "cpu"),
+        )
+
+
+@dataclass
+class Capabilities:
+    """Full capability advertisement for a node."""
+
+    models: list[ModelCapability] = field(default_factory=list)
+    hardware: HardwareInfo = field(default_factory=HardwareInfo)
+    max_concurrent: int = 2
+    est_tok_s: float = 0.0
+    role: str = "seeder"
+    version: str = "0.1.0"
+
+    def to_dict(self) -> dict:
+        return {
+            "models": [m.to_dict() for m in self.models],
+            "hardware": self.hardware.to_dict(),
+            "max_concurrent": self.max_concurrent,
+            "est_tok_s": self.est_tok_s,
+            "role": self.role,
+            "version": self.version,
+        }
+
+    def to_cbor(self) -> bytes:
+        return cbor2.dumps(self.to_dict())
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Capabilities:
+        return cls(
+            models=[ModelCapability.from_dict(m) for m in d.get("models", [])],
+            hardware=HardwareInfo.from_dict(d.get("hardware", {})),
+            max_concurrent=d.get("max_concurrent", 2),
+            est_tok_s=d.get("est_tok_s", 0.0),
+            role=d.get("role", "seeder"),
+            version=d.get("version", "0.1.0"),
+        )
+
+    @classmethod
+    def from_cbor(cls, data: bytes) -> Capabilities:
+        return cls.from_dict(cbor2.loads(data))

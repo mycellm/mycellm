@@ -1,0 +1,33 @@
+version: "3.8"
+
+services:
+  mycellm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: mycellm-node
+    restart: unless-stopped
+    ports:
+      - "8420:8420"       # API + Dashboard
+      - "8421:8421/udp"   # QUIC transport
+      - "8422:8422/udp"   # DHT discovery
+    volumes:
+      - mycellm-data:/data/mycellm
+    environment:
+      - MYCELLM_NODE_NAME=docker-node
+      - MYCELLM_API_HOST=0.0.0.0
+      - MYCELLM_API_PORT=8420
+      - MYCELLM_QUIC_PORT=8421
+      - MYCELLM_DHT_PORT=8422
+      - MYCELLM_BOOTSTRAP_PEERS=${BOOTSTRAP_PEERS:-}
+    # For GPU support, uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  mycellm-data:
