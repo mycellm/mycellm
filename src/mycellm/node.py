@@ -124,9 +124,12 @@ class MycellmNode:
         )
 
     def _detect_hardware(self) -> HardwareInfo:
-        """Detect GPU hardware."""
+        """Detect GPU hardware (CUDA, Metal, or CPU)."""
+        import platform
+        import subprocess
+
+        # NVIDIA CUDA
         try:
-            import subprocess
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5,
@@ -139,6 +142,30 @@ class MycellmNode:
                 )
         except Exception:
             pass
+
+        # Apple Metal (macOS ARM64)
+        if platform.system() == "Darwin" and platform.machine() == "arm64":
+            try:
+                result = subprocess.run(
+                    ["sysctl", "-n", "hw.memsize"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    total_ram_gb = int(result.stdout.strip()) / (1024 ** 3)
+                    # Metal uses unified memory — report total RAM as available
+                    chip = "Apple Silicon"
+                    brand = subprocess.run(
+                        ["sysctl", "-n", "machdep.cpu.brand_string"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if brand.returncode == 0:
+                        chip = brand.stdout.strip()
+                    return HardwareInfo(
+                        gpu=chip, vram_gb=round(total_ram_gb, 1), backend="metal"
+                    )
+            except Exception:
+                pass
+
         return HardwareInfo(gpu="CPU", vram_gb=0.0, backend="cpu")
 
     async def _init_accounting(self) -> None:
@@ -423,6 +450,21 @@ class MycellmNode:
 
         # Start API server (blocks)
         await self._start_api()
+
+    async def announce_capabilities(self) -> None:
+        """Re-announce capabilities to all connected peers (e.g. after model load)."""
+        from mycellm.transport.messages import peer_announce
+
+        msg = peer_announce(
+            self.peer_id,
+            [f"{self.api_host}:{self.quic_port}"],
+            self.capabilities.to_dict(),
+        )
+        for conn in self._peer_connections.values():
+            try:
+                await conn.send(msg)
+            except Exception as e:
+                logger.debug(f"Failed to announce to {conn.peer_id[:16]}: {e}")
 
     async def shutdown(self) -> None:
         """Graceful shutdown."""

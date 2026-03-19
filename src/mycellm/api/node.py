@@ -51,8 +51,9 @@ async def load_model(request: Request):
 
     try:
         loaded_name = await node.inference.load_model(model_path, name=name)
-        # Update capabilities
+        # Update capabilities and announce to peers
         node.capabilities.models = node.inference.loaded_models
+        await node.announce_capabilities()
         return {"status": "loaded", "model": loaded_name}
     except Exception as e:
         return {"error": str(e)}
@@ -69,4 +70,5 @@ async def unload_model(request: Request):
 
     await node.inference.unload_model(model_name)
     node.capabilities.models = node.inference.loaded_models
+    await node.announce_capabilities()
     return {"status": "unloaded", "model": model_name}
