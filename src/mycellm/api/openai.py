@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from typing import Optional
+
+logger = logging.getLogger("mycellm.api")
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -342,20 +345,67 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             })
         else:
-            yield json.dumps({
-                "id": chunk_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": body.model or "none",
-                "choices": [{
-                    "index": 0,
-                    "delta": {
-                        "role": "assistant",
-                        "content": "[mycellm] No model available.",
-                    },
-                    "finish_reason": "stop",
-                }],
-            })
+            # Try fleet streaming
+            import httpx
+            fleet_handled = False
+            for entry in node.node_registry.values():
+                if entry.get("status") != "approved" or not entry.get("api_addr"):
+                    continue
+                caps = entry.get("capabilities", {})
+                fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
+                if body.model and body.model not in fleet_models:
+                    continue
+
+                addr = entry["api_addr"]
+                base = f"http://{addr}" if not addr.startswith("http") else addr
+                url = f"{base}/v1/chat/completions"
+
+                try:
+                    headers = {"Content-Type": "application/json"}
+                    from mycellm.config import get_settings
+                    settings = get_settings()
+                    if settings.api_key:
+                        headers["Authorization"] = f"Bearer {settings.api_key}"
+
+                    payload = {
+                        "model": body.model,
+                        "messages": messages,
+                        "temperature": body.temperature,
+                        "max_tokens": body.max_tokens or 2048,
+                        "stream": True,
+                    }
+
+                    async with httpx.AsyncClient(timeout=120) as client:
+                        async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                            if resp.status_code == 200:
+                                fleet_handled = True
+                                async for line in resp.aiter_lines():
+                                    if line.startswith("data: "):
+                                        data = line[6:]
+                                        if data == "[DONE]":
+                                            yield "[DONE]"
+                                            return
+                                        yield data
+                                return
+                except Exception as e:
+                    logging.getLogger("mycellm.router").debug(f"Fleet stream to {addr} failed: {e}")
+                    continue
+
+            if not fleet_handled:
+                yield json.dumps({
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": body.model or "none",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "content": "[mycellm] No model available.",
+                        },
+                        "finish_reason": "stop",
+                    }],
+                })
 
         yield "[DONE]"
 
@@ -428,10 +478,13 @@ async def _route_via_fleet(
                         tokens = usage.get("completion_tokens", 0)
                         from mycellm.accounting.pricing import compute_cost
                         cost = compute_cost(max(tokens, 1))
-                        await node.ledger.debit(
-                            node.peer_id, cost, "inference_consumed",
-                            counterparty_id=entry.get("peer_id", ""),
-                        )
+                        try:
+                            await node.ledger.debit(
+                                node.peer_id, cost, "inference_consumed",
+                                counterparty_id=entry.get("peer_id", ""),
+                            )
+                        except ValueError as e:
+                            logger.warning(f"Credit debit failed: {e}")
                         from mycellm.activity import EventType as _ET
                         node.activity.record(_ET.CREDIT_SPENT, amount=cost, reason="inference_consumed")
 
@@ -519,3 +572,42 @@ async def list_models(request: Request):
                 seen.add(name)
 
     return {"object": "list", "data": models}
+
+
+@router.post("/embeddings")
+async def create_embeddings(request: Request):
+    """OpenAI-compatible embeddings endpoint."""
+    from fastapi.responses import JSONResponse
+
+    node = request.app.state.node
+    body = await request.json()
+    model = body.get("model", "")
+    input_text = body.get("input", "")
+
+    model_name = node.inference.resolve_model_name(model)
+    if not model_name:
+        return JSONResponse(status_code=400, content={"error": {"message": "No model available for embeddings"}})
+
+    backend = node.inference.get_backend(model_name)
+    if not backend:
+        return JSONResponse(status_code=400, content={"error": {"message": f"Model '{model_name}' not found"}})
+
+    try:
+        from mycellm.inference.base import EmbeddingRequest
+        req = EmbeddingRequest(input=input_text, model=model_name)
+        result = await backend.embed(req)
+
+        data = []
+        for i, emb in enumerate(result.embeddings):
+            data.append({"object": "embedding", "index": i, "embedding": emb})
+
+        return {
+            "object": "list",
+            "data": data,
+            "model": model_name,
+            "usage": {"prompt_tokens": result.total_tokens, "total_tokens": result.total_tokens},
+        }
+    except NotImplementedError:
+        return JSONResponse(status_code=400, content={"error": {"message": f"Model '{model_name}' doesn't support embeddings"}})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": {"message": str(e)}})

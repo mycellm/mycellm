@@ -64,11 +64,22 @@ class LocalLedger:
         counterparty_id: str = "",
         receipt_signature: str = "",
     ) -> str:
-        """Deduct credits from an account. Returns transaction ID."""
+        """Deduct credits from an account. Returns transaction ID.
+
+        Raises ValueError if balance would go negative.
+        """
         tx_id = uuid.uuid4().hex[:16]
         now = time.time()
 
         async with aiosqlite.connect(self._db_path) as db:
+            # Check balance first
+            cursor = await db.execute(
+                "SELECT balance FROM accounts WHERE peer_id = ?", (peer_id,)
+            )
+            row = await cursor.fetchone()
+            if row and row[0] < amount:
+                raise ValueError(f"Insufficient credits: balance={row[0]:.4f}, cost={amount:.4f}")
+
             await db.execute(
                 "UPDATE accounts SET balance = balance - ?, total_spent = total_spent + ?, updated_at = ? WHERE peer_id = ?",
                 (amount, amount, now, peer_id),

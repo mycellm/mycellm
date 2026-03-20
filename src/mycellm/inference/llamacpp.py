@@ -146,6 +146,22 @@ class LlamaCppBackend(InferenceBackend):
             if content or finish:
                 yield InferenceChunk(text=content, finish_reason=finish)
 
+    async def embed(self, request):
+        from mycellm.inference.base import EmbeddingResult
+        model_name = request.model
+        model = self._models.get(model_name)
+        if not model:
+            model = next(iter(self._models.values()), None)
+        if not model:
+            raise RuntimeError("No model loaded for embeddings")
+
+        inputs = request.input if isinstance(request.input, list) else [request.input]
+        result = await asyncio.to_thread(model.create_embedding, inputs)
+
+        embeddings = [d["embedding"] for d in result["data"]]
+        total_tokens = result.get("usage", {}).get("total_tokens", 0)
+        return EmbeddingResult(embeddings=embeddings, total_tokens=total_tokens)
+
     def get_loaded_models(self) -> list[str]:
         return list(self._models.keys())
 

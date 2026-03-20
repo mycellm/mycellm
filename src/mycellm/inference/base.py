@@ -41,6 +41,18 @@ class InferenceResult:
     finish_reason: str = "stop"
 
 
+@dataclass
+class EmbeddingRequest:
+    input: str | list[str]
+    model: str = ""
+
+
+@dataclass
+class EmbeddingResult:
+    embeddings: list[list[float]]
+    total_tokens: int = 0
+
+
 class InferenceBackend(ABC):
     """Abstract interface for inference backends."""
 
@@ -67,3 +79,7 @@ class InferenceBackend(ABC):
     @abstractmethod
     def get_capabilities(self) -> dict:
         """Return hardware/capability information."""
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        """Generate embeddings. Override in backends that support it."""
+        raise NotImplementedError("This backend doesn't support embeddings")

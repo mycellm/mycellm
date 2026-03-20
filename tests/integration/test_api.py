@@ -20,13 +20,25 @@ class FakeNode:
 
         from mycellm.inference.manager import InferenceManager
         from mycellm.router.registry import PeerRegistry
+        from mycellm.activity import ActivityTracker
 
         self.inference = InferenceManager()
         self.registry = PeerRegistry()
         self.node_registry = {}
-        self._settings = type("S", (), {"node_name": "test-node", "api_key": ""})()
+        self.activity = ActivityTracker()
+        self.model_resolver = None
+        self.federation = None
+        self.peer_manager = type("PM", (), {"get_connections": lambda self: []})()
+        self._settings = type("S", (), {
+            "node_name": "test-node", "api_key": "",
+            "data_dir": type("P", (), {"__truediv__": lambda s, x: s})(),
+        })()
         self._start_time = 1000000.0
         self._running = True
+        self.reputation = type("R", (), {})()
+        self.device_key = None
+        self.device_cert = None
+        self.account_key = None
 
     @property
     def uptime(self):
@@ -51,6 +63,9 @@ class FakeNode:
 
     async def route_inference(self, model, messages, **kwargs):
         return None
+
+    async def announce_capabilities(self):
+        pass
 
 
 @pytest.fixture
