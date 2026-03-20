@@ -1673,6 +1673,7 @@ function ModelsTab({ status, onRefresh }) {
             quant: m.quant || '', ctx: m.ctx_len || 4096,
             size: onDisk ? `${onDisk.size_gb}GB` : m.param_count_b ? `~${(m.param_count_b * 0.5).toFixed(1)}GB` : '',
             hasFile: !!onDisk, filename: onDisk?.filename, filePath: onDisk?.path,
+            features: m.features || m.tags || [],
           })
         }
 
@@ -1753,6 +1754,7 @@ function ModelsTab({ status, onRefresh }) {
                     <th className="text-left py-2 px-4 hidden md:table-cell">Backend</th>
                     <th className="text-left py-2 px-4 hidden md:table-cell">Quant</th>
                     <th className="text-left py-2 px-4 hidden md:table-cell">Size</th>
+                    <th className="text-left py-2 px-4 hidden lg:table-cell">Features</th>
                     <th className="text-left py-2 px-4 hidden lg:table-cell">Status</th>
                     <th className="text-right py-2 px-4">Actions</th>
                   </tr>
@@ -1779,6 +1781,15 @@ function ModelsTab({ status, onRefresh }) {
                       <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.backend}</td>
                       <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell font-mono">{m.quant || '-'}</td>
                       <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.size || '-'}</td>
+                      <td className="py-2.5 px-4 hidden lg:table-cell">
+                        {(m.features && m.features.length > 0) ? (
+                          <div className="flex flex-wrap gap-1">
+                            {m.features.map(f => (
+                              <span key={f} className="text-xs px-1 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5">{f}</span>
+                            ))}
+                          </div>
+                        ) : <span className="text-gray-600">-</span>}
+                      </td>
                       <td className="py-2.5 px-4 hidden lg:table-cell">{stateBadge[m.state]}</td>
                       <td className="py-2.5 px-4 text-right space-x-2 whitespace-nowrap">
                         {m.state === 'active' && (
@@ -2137,6 +2148,10 @@ function ChatTab() {
   const [model, setModel] = useState('auto')  // 'auto' = best available
   const [models, setModels] = useState([])
   const [sending, setSending] = useState(false)
+  const [showRouting, setShowRouting] = useState(false)
+  const [routingOpts, setRoutingOpts] = useState({
+    min_tier: '', required_tags: [], routing: 'best', fallback: 'downgrade'
+  })
   const endRef = useRef(null)
 
   // Fetch models on mount + poll (includes fleet)
@@ -2167,6 +2182,14 @@ function ChatTab() {
           model: model === 'auto' ? '' : model,  // empty = auto-route
           messages: history.map(m => ({ role: m.role, content: m.content })),
           max_tokens: 2048,
+          ...(model === 'auto' && (routingOpts.min_tier || routingOpts.required_tags.length > 0) ? {
+            mycellm: {
+              min_tier: routingOpts.min_tier || undefined,
+              required_tags: routingOpts.required_tags.length > 0 ? routingOpts.required_tags : undefined,
+              routing: routingOpts.routing,
+              fallback: routingOpts.fallback,
+            }
+          } : {}),
         }),
       })
       const text = resp.choices?.[0]?.message?.content || '[no response]'
@@ -2206,11 +2229,63 @@ function ChatTab() {
           </optgroup>}
         </select>
         <span className="text-xs text-gray-600">{models.length} model{models.length !== 1 ? 's' : ''} on network</span>
+        <button onClick={() => setShowRouting(r => !r)}
+          className={`text-xs px-2 py-1 rounded border transition-colors ${showRouting ? 'border-spore/30 text-spore bg-spore/5' : 'border-white/10 text-gray-600 hover:text-gray-400'}`}>
+          {showRouting ? 'Hide routing' : 'Routing options'}
+        </button>
         <button onClick={() => setMessages([])}
           className="ml-auto text-xs text-gray-500 hover:text-gray-300 flex items-center space-x-1">
           <Trash2 size={12} /><span>Clear</span>
         </button>
       </div>
+
+      {/* Routing Options Panel */}
+      {showRouting && (
+        <div className="border-b border-white/10 bg-black/30 px-4 py-2 flex items-center space-x-4 text-xs">
+          <div className="flex items-center space-x-1.5">
+            <span className="text-gray-500">Min quality:</span>
+            <select value={routingOpts.min_tier} onChange={e => setRoutingOpts(r => ({...r, min_tier: e.target.value}))}
+              className="bg-black border border-white/10 rounded px-1.5 py-0.5 text-white font-mono focus:outline-none">
+              <option value="">Any</option>
+              <option value="tiny">Tiny (1B+)</option>
+              <option value="fast">Fast (3B+)</option>
+              <option value="capable">Capable (13B+)</option>
+              <option value="frontier">Frontier (65B+)</option>
+            </select>
+          </div>
+          <div className="flex items-center space-x-1.5">
+            <span className="text-gray-500">Tags:</span>
+            {['code', 'reasoning', 'vision'].map(tag => (
+              <button key={tag} onClick={() => setRoutingOpts(r => ({
+                ...r, required_tags: r.required_tags.includes(tag)
+                  ? r.required_tags.filter(t => t !== tag)
+                  : [...r.required_tags, tag]
+              }))}
+                className={`px-1.5 py-0.5 rounded border transition-colors ${
+                  routingOpts.required_tags.includes(tag)
+                    ? 'border-spore/30 text-spore bg-spore/5'
+                    : 'border-white/10 text-gray-600 hover:text-gray-400'
+                }`}>{tag}</button>
+            ))}
+          </div>
+          <div className="flex items-center space-x-1.5">
+            <span className="text-gray-500">Mode:</span>
+            <select value={routingOpts.routing} onChange={e => setRoutingOpts(r => ({...r, routing: e.target.value}))}
+              className="bg-black border border-white/10 rounded px-1.5 py-0.5 text-white font-mono focus:outline-none">
+              <option value="best">Best quality</option>
+              <option value="fastest">Fastest</option>
+            </select>
+          </div>
+          <div className="flex items-center space-x-1.5">
+            <span className="text-gray-500">If unavailable:</span>
+            <select value={routingOpts.fallback} onChange={e => setRoutingOpts(r => ({...r, fallback: e.target.value}))}
+              className="bg-black border border-white/10 rounded px-1.5 py-0.5 text-white font-mono focus:outline-none">
+              <option value="downgrade">Use next best</option>
+              <option value="reject">Reject request</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar">
@@ -2238,9 +2313,10 @@ function ChatTab() {
             }`}>
               <div className="whitespace-pre-wrap">{m.content}</div>
               {m.model && (
-                <div className="mt-2 pt-2 border-t border-white/5 text-xs text-gray-500 flex space-x-3">
+                <div className="mt-2 pt-2 border-t border-white/5 text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
                   <span>via {m.model}</span>
                   {m.tokens && <span>{m.tokens} tokens</span>}
+                  {m.routed_to && m.routed_to !== m.model && <span>routed to {m.routed_to}</span>}
                 </div>
               )}
             </div>
