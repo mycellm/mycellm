@@ -370,6 +370,7 @@ function NetworkTab({ status }) {
   }, [])
 
   // Poll remote node statuses + system info
+  const nodeAddrs = nodes.map(n => n.addr).join(',')
   useEffect(() => {
     if (nodes.length === 0) return
     const fetchRemote = async () => {
@@ -391,7 +392,7 @@ function NetworkTab({ status }) {
     fetchRemote()
     const iv = setInterval(fetchRemote, 10000)
     return () => clearInterval(iv)
-  }, [nodes])
+  }, [nodeAddrs])
 
   const handleAddNode = () => {
     if (!newAddr.trim()) return
