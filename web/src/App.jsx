@@ -420,15 +420,6 @@ function NetworkTab({ status }) {
     } catch {}
   }
 
-  // Also sync registry nodes into the managed nodes (for Models tab targeting)
-  useEffect(() => {
-    for (const rn of registryNodes) {
-      if (rn.api_addr && rn.status === 'approved') {
-        addNode(rn.api_addr, rn.node_name || rn.api_addr)
-      }
-    }
-  }, [registryNodes])
-
   return (
     <div className="space-y-6">
       {/* Auto-discovered Nodes (from registry) */}
@@ -595,12 +586,22 @@ function NetworkTab({ status }) {
 // ── Models Tab (with remote node targeting) ──
 
 function ModelsTab({ status, onRefresh }) {
-  const { nodes } = useNodeRegistry()
+  const [fleetNodes, setFleetNodes] = useState([])
   const [targetNode, setTargetNode] = useState('') // '' = local
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [backendType, setBackendType] = useState('openai')
   const [remoteModels, setRemoteModels] = useState(null)
+
+  // Fetch approved nodes from server registry
+  useEffect(() => {
+    const fetch_ = () => api('/v1/admin/nodes')
+      .then(d => setFleetNodes((d.nodes || []).filter(n => n.status === 'approved' && n.api_addr)))
+      .catch(() => {})
+    fetch_()
+    const iv = setInterval(fetch_, 10000)
+    return () => clearInterval(iv)
+  }, [])
 
   const [form, setForm] = useState({
     name: '', model_path: '',
@@ -675,13 +676,13 @@ function ModelsTab({ status, onRefresh }) {
 
   const allNodes = [
     { addr: '', label: 'This node (local)' },
-    ...nodes,
+    ...fleetNodes.map(n => ({ addr: n.api_addr, label: n.node_name || n.api_addr })),
   ]
 
   return (
     <div className="space-y-6">
       {/* Node Selector */}
-      {nodes.length > 0 && (
+      {fleetNodes.length > 0 && (
         <div className="flex items-center space-x-3 p-3 bg-[#111] border border-white/10 rounded-xl">
           <MonitorSmartphone size={16} className="text-gray-500" />
           <span className="text-xs text-gray-500">Target node:</span>
