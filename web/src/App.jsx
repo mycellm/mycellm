@@ -1647,159 +1647,189 @@ function ModelsTab({ status, onRefresh }) {
         </table>
       </div>
 
-      {/* Models on this node — unified view of loaded + on-disk */}
-      <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between">
-          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest">
-            Models ({models.length} loaded{localFiles.length > 0 ? `, ${localFiles.filter(f => !f.loaded).length} on disk` : ''})
-          </h2>
-        </div>
-        {models.length > 0 || localFiles.length > 0 || savedConfigs.some(c => !c.loaded) ? (
-          <table className="w-full text-sm">
-            <thead className="bg-black/30">
-              <tr className="text-xs text-gray-500 font-mono uppercase">
-                <th className="text-left py-2 px-4 w-5"></th>
-                <th className="text-left py-2 px-4">Name</th>
-                <th className="text-left py-2 px-4">Backend</th>
-                <th className="text-left py-2 px-4 hidden md:table-cell">Quant</th>
-                <th className="text-left py-2 px-4 hidden md:table-cell">Size</th>
-                <th className="text-left py-2 px-4 hidden lg:table-cell">Context</th>
-                <th className="text-left py-2 px-4 hidden lg:table-cell">Status</th>
-                <th className="text-right py-2 px-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Active loaded models (API backends + loaded GGUF) */}
-              {models.map((m, i) => {
-                const onDisk = localFiles.find(f => f.model_name === m.name)
-                return (
-                  <tr key={`loaded-${i}`} className="border-t border-white/5 hover:bg-white/[0.02]">
-                    <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-spore" title="Loaded" /></td>
-                    <td className="py-2.5 px-4 font-mono text-white">{m.name}</td>
-                    <td className="py-2.5 px-4 text-gray-400">{m.backend || 'llama.cpp'}</td>
-                    <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell font-mono">{m.quant || '-'}</td>
-                    <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">
-                      {onDisk ? `${onDisk.size_gb}GB` : m.param_count_b ? `~${(m.param_count_b * 0.5).toFixed(1)}GB` : '-'}
-                    </td>
-                    <td className="py-2.5 px-4 text-gray-500 hidden lg:table-cell">{(m.ctx_len || 4096).toLocaleString()}</td>
-                    <td className="py-2.5 px-4 hidden lg:table-cell">
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-spore/10 text-spore">active</span>
-                    </td>
-                    <td className="py-2.5 px-4 text-right space-x-2">
-                      <button onClick={() => handleUnload(m.name)}
-                        className="text-xs text-gray-500 hover:text-ledger transition-colors">unload</button>
-                      {onDisk && (
-                        <button onClick={async () => {
-                          if (confirm(`Delete ${onDisk.filename}? This will unload and remove the file.`)) {
-                            await doApi('/v1/node/models/delete-file', { filename: onDisk.filename })
-                            nodeApi('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
-                            onRefresh()
-                          }
-                        }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
-                      )}
-                    </td>
+      {/* Models — single unified reactive table */}
+      {(() => {
+        // Merge all sources into one list, one entry per model name
+        const merged = new Map() // name -> unified entry
+
+        // 1. Load statuses (highest priority for loading/failed)
+        for (const s of loadStatuses) {
+          if (s.status === 'loading' || s.status === 'failed') {
+            merged.set(s.model, {
+              name: s.model, state: s.status, backend: s.backend || 'llama.cpp',
+              phase: s.phase, error: s.error, elapsed: s.elapsed,
+              quant: '', size: '', ctx: 0,
+            })
+          }
+        }
+
+        // 2. Active loaded models
+        for (const m of models) {
+          const existing = merged.get(m.name)
+          if (existing?.state === 'loading') continue // loading takes precedence
+          const onDisk = localFiles.find(f => f.model_name === m.name)
+          merged.set(m.name, {
+            name: m.name, state: 'active', backend: m.backend || 'llama.cpp',
+            quant: m.quant || '', ctx: m.ctx_len || 4096,
+            size: onDisk ? `${onDisk.size_gb}GB` : m.param_count_b ? `~${(m.param_count_b * 0.5).toFixed(1)}GB` : '',
+            hasFile: !!onDisk, filename: onDisk?.filename, filePath: onDisk?.path,
+          })
+        }
+
+        // 3. On-disk GGUF files (not already in merged)
+        for (const f of localFiles) {
+          if (!merged.has(f.model_name)) {
+            merged.set(f.model_name, {
+              name: f.model_name, state: 'on-disk', backend: 'llama.cpp',
+              quant: f.quant || '', ctx: f.ctx_len || 0,
+              size: `${f.size_gb}GB`, hasFile: true, filename: f.filename, filePath: f.path,
+            })
+          }
+        }
+
+        // 4. Saved API configs (not already in merged)
+        for (const c of savedConfigs) {
+          if (!merged.has(c.name) && c.backend !== 'llama.cpp') {
+            merged.set(c.name, {
+              name: c.name, state: 'disabled', backend: c.backend,
+              quant: '', ctx: c.ctx_len || 4096, size: '',
+            })
+          }
+        }
+
+        const allModels = [...merged.values()]
+
+        // Sort: loading first, then active, then failed, then on-disk, then disabled
+        const stateOrder = { loading: 0, active: 1, failed: 2, 'on-disk': 3, disabled: 4 }
+        allModels.sort((a, b) => (stateOrder[a.state] ?? 9) - (stateOrder[b.state] ?? 9))
+
+        // Shape indicators by state
+        const stateIndicator = {
+          active:   <svg width="10" height="10" className="inline-block"><circle cx="5" cy="5" r="4" fill="#22C55E" /></svg>,
+          loading:  <svg width="10" height="10" className="inline-block animate-pulse"><polygon points="5,1 9,9 1,9" fill="#FACC15" /></svg>,
+          'on-disk': <svg width="10" height="10" className="inline-block"><rect x="1" y="1" width="8" height="8" fill="#666" rx="1" /></svg>,
+          disabled: <svg width="10" height="10" className="inline-block"><polygon points="5,0 10,5 5,10 0,5" fill="none" stroke="#666" strokeWidth="1.5" /></svg>,
+          failed:   <svg width="10" height="10" className="inline-block"><line x1="2" y1="2" x2="8" y2="8" stroke="#EF4444" strokeWidth="2" /><line x1="8" y1="2" x2="2" y2="8" stroke="#EF4444" strokeWidth="2" /></svg>,
+        }
+
+        const stateBadge = {
+          active:   <span className="text-xs px-1.5 py-0.5 rounded bg-spore/10 text-spore">active</span>,
+          loading:  <span className="text-xs px-1.5 py-0.5 rounded bg-ledger/10 text-ledger animate-pulse">loading</span>,
+          'on-disk': <span className="text-xs px-1.5 py-0.5 rounded bg-white/5 text-gray-500">on disk</span>,
+          disabled: <span className="text-xs px-1.5 py-0.5 rounded bg-white/5 text-gray-500">disabled</span>,
+          failed:   <span className="text-xs px-1.5 py-0.5 rounded bg-compute/10 text-compute">failed</span>,
+        }
+
+        const stateNameColor = {
+          active: 'text-white', loading: 'text-ledger', 'on-disk': 'text-gray-400',
+          disabled: 'text-gray-400', failed: 'text-compute',
+        }
+
+        const activeCount = allModels.filter(m => m.state === 'active').length
+        const loadingCount = allModels.filter(m => m.state === 'loading').length
+
+        // Refresh helper
+        const refreshAll = () => {
+          onRefresh()
+          nodeApi('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
+          nodeApi('/v1/node/models/saved').then(d => setSavedConfigs(d.configs || [])).catch(() => {})
+        }
+
+        return (
+          <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between">
+              <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest flex items-center space-x-3">
+                <span>Models</span>
+                {activeCount > 0 && <span className="text-spore">● {activeCount} active</span>}
+                {loadingCount > 0 && <span className="text-ledger animate-pulse">▲ {loadingCount} loading</span>}
+              </h2>
+            </div>
+            {allModels.length > 0 ? (
+              <table className="w-full text-sm">
+                <thead className="bg-black/30">
+                  <tr className="text-xs text-gray-500 font-mono uppercase">
+                    <th className="text-left py-2 px-4 w-7"></th>
+                    <th className="text-left py-2 px-4">Name</th>
+                    <th className="text-left py-2 px-4 hidden md:table-cell">Backend</th>
+                    <th className="text-left py-2 px-4 hidden md:table-cell">Quant</th>
+                    <th className="text-left py-2 px-4 hidden md:table-cell">Size</th>
+                    <th className="text-left py-2 px-4 hidden lg:table-cell">Status</th>
+                    <th className="text-right py-2 px-4">Actions</th>
                   </tr>
-                )
-              })}
-              {/* Loading in progress */}
-              {loadStatuses.filter(s => s.status === 'loading').map((s, i) => (
-                <tr key={`loading-${i}`} className="border-t border-white/5 bg-ledger/[0.03]">
-                  <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-ledger animate-pulse" title="Loading..." /></td>
-                  <td className="py-2.5 px-4 font-mono text-ledger">{s.model}</td>
-                  <td className="py-2.5 px-4 text-gray-400">{s.backend || 'llama.cpp'}</td>
-                  <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell" colSpan={2}>
-                    <span className="text-xs text-ledger">{s.phase}</span>
-                  </td>
-                  <td className="py-2.5 px-4 text-gray-500 hidden lg:table-cell">-</td>
-                  <td className="py-2.5 px-4 hidden lg:table-cell">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-ledger/10 text-ledger animate-pulse">loading</span>
-                  </td>
-                  <td className="py-2.5 px-4 text-right text-xs text-gray-500 font-mono">{s.elapsed ? `${s.elapsed}s` : '...'}</td>
-                </tr>
-              ))}
-              {/* Failed loads */}
-              {loadStatuses.filter(s => s.status === 'failed').map((s, i) => (
-                <tr key={`failed-${i}`} className="border-t border-white/5 bg-compute/[0.03]">
-                  <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-compute" title="Failed" /></td>
-                  <td className="py-2.5 px-4 font-mono text-compute">{s.model}</td>
-                  <td className="py-2.5 px-4 text-gray-400">{s.backend || 'llama.cpp'}</td>
-                  <td className="py-2.5 px-4 text-compute hidden md:table-cell text-xs" colSpan={2} title={s.error}>{(s.error || 'unknown error').slice(0, 60)}</td>
-                  <td className="py-2.5 px-4 text-gray-500 hidden lg:table-cell">-</td>
-                  <td className="py-2.5 px-4 hidden lg:table-cell">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-compute/10 text-compute">failed</span>
-                  </td>
-                  <td className="py-2.5 px-4 text-right"></td>
-                </tr>
-              ))}
-              {/* On-disk but not loaded GGUF files */}
-              {localFiles.filter(f => !f.loaded).map((f, i) => (
-                <tr key={`disk-${i}`} className="border-t border-white/5 hover:bg-white/[0.02] opacity-70">
-                  <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-gray-600" title="On disk (not loaded)" /></td>
-                  <td className="py-2.5 px-4 font-mono text-gray-400">{f.model_name}</td>
-                  <td className="py-2.5 px-4 text-gray-500">llama.cpp</td>
-                  <td className="py-2.5 px-4 text-gray-600 hidden md:table-cell font-mono">{f.quant || '-'}</td>
-                  <td className="py-2.5 px-4 text-gray-600 hidden md:table-cell">{f.size_gb}GB</td>
-                  <td className="py-2.5 px-4 text-gray-600 hidden lg:table-cell">{f.ctx_len ? f.ctx_len.toLocaleString() : '-'}</td>
-                  <td className="py-2.5 px-4 hidden lg:table-cell">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-white/5 text-gray-500">on disk</span>
-                  </td>
-                  <td className="py-2.5 px-4 text-right space-x-2">
-                    <button onClick={async () => {
-                      try {
-                        await doApi('/v1/node/models/load', {
-                          model_path: f.path, name: f.model_name, backend: 'llama.cpp',
-                          ctx_len: f.ctx_len || 4096,
-                        })
-                        onRefresh()
-                        nodeApi('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
-                      } catch (e) { setResult({ error: e.message }) }
-                    }} className="text-xs text-spore hover:text-spore/80 transition-colors">load</button>
-                    <button onClick={async () => {
-                      if (confirm(`Delete ${f.filename}?`)) {
-                        await doApi('/v1/node/models/delete-file', { filename: f.filename })
-                        nodeApi('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
-                      }
-                    }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
-                  </td>
-                </tr>
-              ))}
-              {/* Unloaded API model configs (no file on disk) */}
-              {savedConfigs.filter(c => !c.loaded && c.backend !== 'llama.cpp').map((c, i) => (
-                <tr key={`saved-${i}`} className="border-t border-white/5 hover:bg-white/[0.02] opacity-70">
-                  <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-gray-600 border border-gray-500" title="Saved config (not loaded)" /></td>
-                  <td className="py-2.5 px-4 font-mono text-gray-400">{c.name}</td>
-                  <td className="py-2.5 px-4 text-gray-500">{c.backend}</td>
-                  <td className="py-2.5 px-4 text-gray-600 hidden md:table-cell font-mono">-</td>
-                  <td className="py-2.5 px-4 text-gray-600 hidden md:table-cell">-</td>
-                  <td className="py-2.5 px-4 text-gray-600 hidden lg:table-cell">{(c.ctx_len || 4096).toLocaleString()}</td>
-                  <td className="py-2.5 px-4 hidden lg:table-cell">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-white/5 text-gray-500">disabled</span>
-                  </td>
-                  <td className="py-2.5 px-4 text-right space-x-2">
-                    <button onClick={async () => {
-                      try {
-                        await doApi('/v1/node/models/reload', { model: c.name })
-                        onRefresh()
-                        nodeApi('/v1/node/models/saved').then(d => setSavedConfigs(d.configs || [])).catch(() => {})
-                      } catch (e) { setResult({ error: e.message }) }
-                    }} className="text-xs text-spore hover:text-spore/80 transition-colors">enable</button>
-                    <button onClick={async () => {
-                      if (confirm(`Remove config for ${c.name}?`)) {
-                        await doApi('/v1/node/models/remove-config', { model: c.name })
-                        nodeApi('/v1/node/models/saved').then(d => setSavedConfigs(d.configs || [])).catch(() => {})
-                      }
-                    }} className="text-xs text-gray-600 hover:text-compute transition-colors">remove</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="px-5 py-8 text-center text-sm text-gray-600">
-            No models on this node. Search HuggingFace below to get started.
+                </thead>
+                <tbody>
+                  {allModels.map((m) => (
+                    <tr key={m.name}
+                      className={`border-t border-white/5 transition-all duration-300 ${
+                        m.state === 'loading' ? 'bg-ledger/[0.03]' :
+                        m.state === 'failed' ? 'bg-compute/[0.03]' :
+                        m.state === 'active' ? 'hover:bg-white/[0.02]' :
+                        'hover:bg-white/[0.02] opacity-70'
+                      }`}>
+                      <td className="py-2.5 px-4" title={m.state}>{stateIndicator[m.state]}</td>
+                      <td className={`py-2.5 px-4 font-mono ${stateNameColor[m.state]}`}>
+                        {m.name}
+                        {m.state === 'loading' && m.phase && (
+                          <div className="text-xs text-ledger/70 font-sans mt-0.5">{m.phase}{m.elapsed ? ` · ${m.elapsed}s` : ''}</div>
+                        )}
+                        {m.state === 'failed' && m.error && (
+                          <div className="text-xs text-compute/70 font-sans mt-0.5 truncate max-w-[250px]" title={m.error}>{m.error}</div>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.backend}</td>
+                      <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell font-mono">{m.quant || '-'}</td>
+                      <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.size || '-'}</td>
+                      <td className="py-2.5 px-4 hidden lg:table-cell">{stateBadge[m.state]}</td>
+                      <td className="py-2.5 px-4 text-right space-x-2 whitespace-nowrap">
+                        {m.state === 'active' && (
+                          <>
+                            <button onClick={async () => { await doApi('/v1/node/models/unload', { model: m.name }); refreshAll() }}
+                              className="text-xs text-gray-500 hover:text-ledger transition-colors">unload</button>
+                            {m.hasFile && (
+                              <button onClick={async () => {
+                                if (confirm(`Delete ${m.filename}? This will unload and remove the file.`)) {
+                                  await doApi('/v1/node/models/delete-file', { filename: m.filename }); refreshAll()
+                                }
+                              }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
+                            )}
+                          </>
+                        )}
+                        {m.state === 'on-disk' && (
+                          <>
+                            <button onClick={async () => {
+                              await doApi('/v1/node/models/load', { model_path: m.filePath, name: m.name, backend: 'llama.cpp', ctx_len: m.ctx || 4096 })
+                              refreshAll()
+                            }} className="text-xs text-spore hover:text-spore/80 transition-colors">load</button>
+                            <button onClick={async () => {
+                              if (confirm(`Delete ${m.filename}?`)) { await doApi('/v1/node/models/delete-file', { filename: m.filename }); refreshAll() }
+                            }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
+                          </>
+                        )}
+                        {m.state === 'disabled' && (
+                          <>
+                            <button onClick={async () => { await doApi('/v1/node/models/reload', { model: m.name }); refreshAll() }}
+                              className="text-xs text-spore hover:text-spore/80 transition-colors">enable</button>
+                            <button onClick={async () => {
+                              if (confirm(`Remove config for ${m.name}?`)) { await doApi('/v1/node/models/remove-config', { model: m.name }); refreshAll() }
+                            }} className="text-xs text-gray-600 hover:text-compute transition-colors">remove</button>
+                          </>
+                        )}
+                        {m.state === 'loading' && (
+                          <span className="text-xs text-gray-600 font-mono">{m.elapsed ? `${m.elapsed}s` : '...'}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="px-5 py-8 text-center text-sm text-gray-600">
+                No models on this node. Search HuggingFace below to get started.
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        )
+      })()}
 
       {/* Add Model */}
       <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
