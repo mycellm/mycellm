@@ -1364,11 +1364,13 @@ function ModelsTab({ status, onRefresh }) {
   useEffect(() => {
     const fetchDevices = async () => {
       const localHw = status?.hardware || {}
+      // Determine this node's reachable address
+      const selfAddr = window.location.hostname + ':' + (window.location.port || '8420')
       const localDevice = {
-        id: 'local', name: status?.node_name || 'this node', addr: 'local',
+        id: 'local', name: status?.node_name || 'this node', addr: selfAddr,
         gpu: localHw.gpu || 'CPU', backend: localHw.backend || 'cpu',
         ram: localHw.vram_gb || 0, models: status?.models || [],
-        online: true, role: status?.role || 'bootstrap',
+        online: true, role: status?.role || 'bootstrap', isSelf: true,
       }
 
       let fleet = []
@@ -1397,7 +1399,7 @@ function ModelsTab({ status, onRefresh }) {
 
   // Fetch selected remote node's live models
   const selectedDevice = devices.find(d => d.id === selected || d.addr === selected)
-  const isRemote = selected !== 'local'
+  const isRemote = selected !== 'local' && !selectedDevice?.isSelf
 
   useEffect(() => {
     if (!isRemote || !selectedDevice?.addr) { setRemoteStatus(null); return }
@@ -1417,6 +1419,9 @@ function ModelsTab({ status, onRefresh }) {
   }
 
   const sorted = [...devices].sort((a, b) => {
+    // Self always first
+    if (a.isSelf) return -1
+    if (b.isSelf) return 1
     let va = a[sortBy], vb = b[sortBy]
     if (typeof va === 'string') va = va.toLowerCase()
     if (typeof vb === 'string') vb = vb.toLowerCase()
@@ -1959,10 +1964,20 @@ function AuthGate({ onAuth }) {
 export default function App() {
   const [appState, setAppState] = useState('checking') // checking → auth | booting → dashboard
   const [tab, _setTab] = useState(() => {
-    const hash = window.location.hash.slice(1)
-    return TABS.find(t => t.id === hash) ? hash : 'overview'
+    const path = window.location.pathname.slice(1)
+    return TABS.find(t => t.id === path) ? path : 'overview'
   })
-  const setTab = (id) => { _setTab(id); window.location.hash = id }
+  const setTab = (id) => { _setTab(id); window.history.pushState(null, '', `/${id}`) }
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const onPop = () => {
+      const path = window.location.pathname.slice(1)
+      _setTab(TABS.find(t => t.id === path) ? path : 'overview')
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   const [status, setStatus] = useState(null)
   const [credits, setCredits] = useState({ balance: 0, earned: 0, spent: 0 })
   const [logs, setLogs] = useState([])
