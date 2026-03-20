@@ -516,7 +516,7 @@ class MycellmNode:
         sys_info = self.get_system_info()
         payload = {
             "peer_id": self.peer_id,
-            "node_name": self._settings.node_name or self.device_name,
+            "node_name": self._settings.node_name,
             "api_addr": f"{self.api_host}:{self.api_port}",
             "role": self.capabilities.role,
             "capabilities": self.capabilities.to_dict(),
@@ -651,7 +651,7 @@ class MycellmNode:
         credits = {"balance": 0.0, "earned": 0.0, "spent": 0.0}
 
         return {
-            "node_name": self._settings.node_name or self.device_name,
+            "node_name": self._settings.node_name,
             "peer_id": self.peer_id,
             "uptime_seconds": self.uptime,
             "role": self.capabilities.role,

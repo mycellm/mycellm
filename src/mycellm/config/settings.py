@@ -2,13 +2,47 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import platform
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Word lists for generating memorable node names
+_ADJECTIVES = [
+    "amber", "bold", "calm", "dark", "eager", "fast", "gold", "hazy",
+    "iron", "keen", "lime", "mild", "nova", "opal", "peak", "quick",
+    "rare", "sage", "teal", "vast", "warm", "zinc", "blue", "ruby",
+    "jade", "onyx", "pure", "deep", "high", "soft", "wild", "cool",
+]
+_NOUNS = [
+    "mycel", "spore", "grove", "nexus", "bloom", "coral", "drift", "ember",
+    "frost", "glyph", "haven", "knoll", "lumen", "marsh", "north", "orbit",
+    "prism", "quill", "ridge", "shard", "terra", "umbra", "vault", "wisp",
+    "cedar", "delta", "flint", "helix", "brook", "crest", "dusk", "fern",
+]
+
+
+def _generate_node_name() -> str:
+    """Generate a memorable node name from hostname, falling back to a hash-derived name."""
+    hostname = platform.node().split(".")[0].lower().strip()
+
+    # If hostname is usable (not generic), use it
+    generic = {"localhost", "default", "unknown", "computer", "pc", "mac", ""}
+    if hostname and hostname not in generic and not hostname.startswith("ip-"):
+        return hostname
+
+    # Generate a deterministic name from machine ID
+    seed = hostname + os.getenv("USER", "") + str(os.getpid())
+    h = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
+    adj = _ADJECTIVES[h % len(_ADJECTIVES)]
+    noun = _NOUNS[(h >> 8) % len(_NOUNS)]
+    return f"{adj}-{noun}"
 
 
 def _xdg_data_home() -> Path:
@@ -48,7 +82,7 @@ class MycellmSettings(BaseSettings):
     dht_port: int = 8422
 
     # Node identity
-    node_name: Optional[str] = None
+    node_name: str = Field(default_factory=_generate_node_name)
 
     # Inference
     model_dir: Optional[Path] = None
