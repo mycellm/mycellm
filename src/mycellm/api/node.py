@@ -119,6 +119,38 @@ async def unload_model(request: Request):
     return {"status": "unloaded", "model": model_name}
 
 
+@router.get("/models/{model_name}/config")
+async def model_config(model_name: str, request: Request):
+    """Get a loaded model's config (for edit). API key is masked."""
+    node = request.app.state.node
+    backend = node.inference.get_backend(model_name)
+    if not backend:
+        return {"error": "model not found"}
+
+    info = node.inference._model_info.get(model_name)
+    result = {
+        "name": model_name,
+        "backend": info.backend if info else "unknown",
+        "ctx_len": info.ctx_len if info else 4096,
+    }
+
+    # For openai backends, include api_base and api_model
+    from mycellm.inference.openai_compat import OpenAICompatibleBackend
+    if isinstance(backend, OpenAICompatibleBackend):
+        remote = backend._models.get(model_name)
+        if remote:
+            result["api_base"] = remote.api_base
+            result["api_model"] = remote.api_model
+            # Mask API key — show last 4 chars only
+            auth = remote.client.headers.get("authorization", "")
+            if auth.startswith("Bearer ") and len(auth) > 15:
+                result["api_key_hint"] = f"...{auth[-4:]}"
+            else:
+                result["api_key_hint"] = ""
+
+    return result
+
+
 @router.get("/logs")
 async def get_logs(request: Request, limit: int = 100):
     """Get recent log entries."""

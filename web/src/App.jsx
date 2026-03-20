@@ -609,6 +609,7 @@ function ModelsTab({ status, onRefresh }) {
   const [form, setForm] = useState({
     name: '', model_path: '',
     api_base: 'https://openrouter.ai/api/v1', api_key: '', api_model: '', ctx_len: 4096,
+    api_key_hint: '',
   })
   const [showKey, setShowKey] = useState(false)
 
@@ -706,11 +707,31 @@ function ModelsTab({ status, onRefresh }) {
 
   const [editingModel, setEditingModel] = useState(null) // name of model being edited
 
-  const handleEdit = (m) => {
+  const handleEdit = async (m) => {
     setEditingModel(m.name)
     setBackendType(m.backend === 'llama.cpp' ? 'llama.cpp' : 'openai')
-    setForm(f => ({ ...f, name: m.name, api_model: '', api_key: '', ctx_len: m.ctx_len || 4096 }))
     setResult(null)
+
+    // Fetch full config from the node
+    try {
+      const fetcher = isRemote
+        ? () => remoteApi(selectedDevice.addr, `/v1/node/models/${encodeURIComponent(m.name)}/config`)
+        : () => api(`/v1/node/models/${encodeURIComponent(m.name)}/config`)
+      const cfg = await fetcher()
+      setForm(f => ({
+        ...f,
+        name: cfg.name || m.name,
+        api_base: cfg.api_base || f.api_base,
+        api_model: cfg.api_model || '',
+        api_key: '', // never pre-fill — user must re-enter
+        api_key_hint: cfg.api_key_hint || '',
+        ctx_len: cfg.ctx_len || 4096,
+        model_path: cfg.model_path || '',
+      }))
+    } catch {
+      // Fallback: just fill what we know
+      setForm(f => ({ ...f, name: m.name, ctx_len: m.ctx_len || 4096 }))
+    }
   }
 
   const handleUnload = async (modelName) => {
@@ -868,7 +889,7 @@ function ModelsTab({ status, onRefresh }) {
                   <div className="relative">
                     <input type={showKey ? 'text' : 'password'} value={form.api_key}
                       onChange={e => setForm(f => ({ ...f, api_key: e.target.value }))}
-                      placeholder="API key"
+                      placeholder={editingModel && form.api_key_hint ? `Current key: ${form.api_key_hint} (re-enter to update)` : 'API key'}
                       className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
                     <button onClick={() => setShowKey(!showKey)}
                       className="absolute right-2 top-2 text-gray-500 hover:text-gray-300">
