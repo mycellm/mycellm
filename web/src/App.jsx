@@ -476,20 +476,51 @@ function connectionStateDot(state) {
 // ── Network Health Bar ──
 
 function NetworkHealthBar({ connections, peers, fleetNodes }) {
-  const totalPeers = peers.length
   const routableConns = connections.filter(c => c.state === 'routable').length
   const totalConns = connections.length
   const approvedFleet = fleetNodes.filter(n => n.status === 'approved').length
+  const totalFleet = fleetNodes.length
+  const totalPeers = peers.length
 
-  // Health score: weighted combination
-  const connHealth = totalConns > 0 ? routableConns / totalConns : 0
-  const peerHealth = totalPeers > 0 ? 1 : 0
-  const fleetHealth = approvedFleet > 0 ? 1 : 0.5 // no fleet isn't unhealthy per se
-  const score = Math.round((connHealth * 0.5 + peerHealth * 0.3 + fleetHealth * 0.2) * 100)
+  // Adaptive health: use whatever connectivity data is available
+  const hasConnections = totalConns > 0
+  const hasFleet = totalFleet > 0
+  const hasPeers = totalPeers > 0
 
-  const barColor = score >= 80 ? 'bg-spore' : score >= 50 ? 'bg-ledger' : 'bg-compute'
-  const label = score >= 80 ? 'Healthy' : score >= 50 ? 'Degraded' : 'Unhealthy'
-  const labelColor = score >= 80 ? 'text-spore' : score >= 50 ? 'text-ledger' : 'text-compute'
+  let score = 0
+  let weights = 0
+
+  if (hasConnections) {
+    score += (routableConns / totalConns) * 50
+    weights += 50
+  }
+  if (hasFleet) {
+    score += (approvedFleet / Math.max(totalFleet, 1)) * 40
+    weights += 40
+  }
+  if (hasPeers) {
+    score += 30 // peers exist = good
+    weights += 30
+  }
+
+  // If nothing is connected, base score on whether we have local models
+  if (weights === 0) {
+    score = 20 // node is alive but isolated
+    weights = 100
+  } else {
+    score = Math.round((score / weights) * 100)
+  }
+
+  const barColor = score >= 70 ? 'bg-spore' : score >= 40 ? 'bg-ledger' : 'bg-compute'
+  const label = score >= 70 ? 'Healthy' : score >= 40 ? 'Degraded' : score > 0 ? 'Limited' : 'Offline'
+  const labelColor = score >= 70 ? 'text-spore' : score >= 40 ? 'text-ledger' : 'text-compute'
+
+  // Build status summary
+  const parts = []
+  if (hasConnections) parts.push(`${routableConns}/${totalConns} QUIC`)
+  if (hasFleet) parts.push(`${approvedFleet}/${totalFleet} fleet`)
+  if (hasPeers) parts.push(`${totalPeers} peers`)
+  if (parts.length === 0) parts.push('No connections')
 
   return (
     <div className="border border-white/10 bg-[#111] rounded-xl p-5">
@@ -507,10 +538,124 @@ function NetworkHealthBar({ connections, peers, fleetNodes }) {
         <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${score}%` }} />
       </div>
       <div className="flex justify-between mt-3 text-xs text-gray-500">
-        <span>{routableConns}/{totalConns} connections up</span>
-        <span>{totalPeers} peers authenticated</span>
-        <span>{approvedFleet} fleet nodes</span>
+        {parts.map((p, i) => <span key={i}>{p}</span>)}
       </div>
+    </div>
+  )
+}
+
+// ── Sparkline & Activity Feed ──
+
+function Sparkline({ data, color = '#22C55E', height = 32, width = 120 }) {
+  if (!data || data.length === 0) return <div style={{ width, height }} />
+  const max = Math.max(...data, 1)
+  const points = data.map((v, i) => {
+    const x = (i / Math.max(data.length - 1, 1)) * width
+    const y = height - (v / max) * (height - 4) - 2
+    return `${x},${y}`
+  }).join(' ')
+
+  return (
+    <svg width={width} height={height} className="opacity-80">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function ActivityFeed({ events }) {
+  const endRef = useRef(null)
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [events])
+
+  const typeColors = {
+    inference_complete: 'text-compute',
+    inference_start: 'text-compute/50',
+    inference_failed: 'text-red-400',
+    route_decision: 'text-relay',
+    peer_connected: 'text-spore',
+    peer_disconnected: 'text-gray-500',
+    model_loaded: 'text-spore',
+    model_unloaded: 'text-gray-500',
+    credit_earned: 'text-ledger',
+    credit_spent: 'text-ledger/70',
+    announce_ok: 'text-spore/50',
+    announce_failed: 'text-compute/50',
+    fleet_node_joined: 'text-relay',
+  }
+
+  const typeIcons = {
+    inference_complete: '\u26A1',
+    inference_start: '\u2192',
+    inference_failed: '\u2717',
+    route_decision: '\u2197',
+    peer_connected: '\u25CF',
+    peer_disconnected: '\u25CB',
+    model_loaded: '+',
+    model_unloaded: '\u2212',
+    credit_earned: '\u2191',
+    credit_spent: '\u2193',
+    announce_ok: '\uD83D\uDCE1',
+    announce_failed: '\u26A0',
+    fleet_node_joined: '\uD83C\uDF10',
+  }
+
+  function eventLabel(e) {
+    switch (e.type) {
+      case 'inference_complete':
+        return `${e.model || '?'} \u2192 ${e.source || '?'} (${e.tokens || 0} tok, ${e.latency_ms ? e.latency_ms + 'ms' : '?'})`
+      case 'inference_failed':
+        return `${e.model || '?'} failed: ${e.error || 'unknown'}`
+      case 'route_decision':
+        return `Routed ${e.model || '?'} \u2192 ${(e.routed_to || '').slice(0, 12) || e.target || '?'}`
+      case 'peer_connected':
+        return `Peer ${(e.peer_id || '').slice(0, 12)}... (${e.role || 'unknown'})`
+      case 'peer_disconnected':
+        return `Peer ${(e.peer_id || '').slice(0, 12)}... disconnected`
+      case 'model_loaded':
+        return `Loaded ${e.model || '?'} (${e.backend || '?'})`
+      case 'model_unloaded':
+        return `Unloaded ${e.model || '?'}`
+      case 'credit_earned':
+        return `+${(e.amount || 0).toFixed(4)} from ${(e.peer || '').slice(0, 12) || 'local'}`
+      case 'credit_spent':
+        return `-${(e.amount || 0).toFixed(4)} to ${(e.peer || '').slice(0, 12) || 'network'}`
+      case 'announce_ok':
+        return `Announced to ${e.target || 'bootstrap'}`
+      case 'announce_failed':
+        return `Announce failed: ${e.target || 'bootstrap'}`
+      case 'fleet_node_joined':
+        return `${e.node_name || 'node'} joined fleet`
+      default:
+        return e.type.replace(/_/g, ' ')
+    }
+  }
+
+  return (
+    <div className="space-y-1 max-h-[250px] overflow-y-auto custom-scrollbar text-xs font-mono">
+      {events.length === 0 && (
+        <div className="text-gray-600 text-center py-4">No activity yet. Send an inference request to see events.</div>
+      )}
+      {events.map((e, i) => (
+        <div key={i} className="flex items-center space-x-2 py-1 hover:bg-white/[0.02] rounded px-1">
+          <span className="text-gray-600 w-14 shrink-0">{e.time || ''}</span>
+          <span className={`w-4 shrink-0 ${typeColors[e.type] || 'text-gray-500'}`}>
+            {typeIcons[e.type] || '\u00B7'}
+          </span>
+          <span className={typeColors[e.type] || 'text-gray-400'}>
+            {eventLabel(e)}
+          </span>
+        </div>
+      ))}
+      <div ref={endRef} />
     </div>
   )
 }
@@ -520,6 +665,8 @@ function NetworkHealthBar({ connections, peers, fleetNodes }) {
 function OverviewTab({ status, credits, fleetNodes }) {
   const [sysInfo, setSysInfo] = useState(null)
   const [connections, setConnections] = useState([])
+  const [activity, setActivity] = useState({ events: [], stats: {}, sparklines: {} })
+  const [liveEvents, setLiveEvents] = useState([])
   const peers = status?.peers || []
   const models = status?.models || []
   const uptime = status?.uptime_seconds || 0
@@ -528,7 +675,7 @@ function OverviewTab({ status, credits, fleetNodes }) {
     api('/v1/node/system').then(setSysInfo).catch(() => {})
   }, [])
 
-  // Poll connections endpoint
+  // Poll connections
   useEffect(() => {
     const fetch_ = () => api('/v1/node/connections').then(d => setConnections(d.connections || [])).catch(() => {})
     fetch_()
@@ -536,9 +683,33 @@ function OverviewTab({ status, credits, fleetNodes }) {
     return () => clearInterval(iv)
   }, [])
 
-  // Aggregate stats
+  // Poll activity
+  useEffect(() => {
+    const fetch_ = () => api('/v1/node/activity?limit=100').then(setActivity).catch(() => {})
+    fetch_()
+    const iv = setInterval(fetch_, 3000)
+    return () => clearInterval(iv)
+  }, [])
+
+  // SSE activity stream
+  useEffect(() => {
+    const es = new EventSource('/v1/node/activity/stream')
+    es.onmessage = (event) => {
+      try {
+        const e = JSON.parse(event.data)
+        setLiveEvents(prev => {
+          const next = [...prev, e]
+          return next.length > 200 ? next.slice(-200) : next
+        })
+      } catch {}
+    }
+    return () => es.close()
+  }, [])
+
+  const allEvents = [...(activity.events || []), ...liveEvents]
+  const stats = activity.stats || {}
+  const sparklines = activity.sparklines || {}
   const routableConns = connections.filter(c => c.state === 'routable')
-  const totalModels = models.length
   const networkModels = new Set()
   for (const p of peers) {
     for (const m of (p.models || [])) networkModels.add(m)
@@ -546,15 +717,31 @@ function OverviewTab({ status, credits, fleetNodes }) {
 
   return (
     <div className="space-y-6">
-      {/* Top stat cards */}
+      {/* Top stat cards with sparklines */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard label="Uptime" value={formatUptime(uptime)} icon={Clock} color="text-gray-300" />
-        <StatCard label="Connections" value={`${routableConns.length}/${connections.length}`} icon={Wifi} color="text-relay"
-          sub={connections.length === 0 ? 'No outbound' : `${connections.filter(c=>c.state==='disconnected').length} down`} />
-        <StatCard label="Models" value={totalModels} icon={Boxes} color="text-spore"
+        <div className="border p-5 rounded-xl border-white/10 bg-[#111]">
+          <h3 className="font-mono text-xs text-gray-500 mb-1">Requests</h3>
+          <div className="flex items-end justify-between">
+            <div>
+              <span className="text-2xl font-mono text-compute">{stats.total_requests || 0}</span>
+              <div className="text-xs text-gray-500 mt-0.5">{stats.requests_per_min || 0}/min</div>
+            </div>
+            <Sparkline data={sparklines.requests || []} color="#EF4444" height={28} width={80} />
+          </div>
+        </div>
+        <div className="border p-5 rounded-xl border-white/10 bg-[#111]">
+          <h3 className="font-mono text-xs text-gray-500 mb-1">Tokens</h3>
+          <div className="flex items-end justify-between">
+            <div>
+              <span className="text-2xl font-mono text-poison">{stats.total_tokens || 0}</span>
+              <div className="text-xs text-gray-500 mt-0.5">{stats.tokens_per_min || 0}/min</div>
+            </div>
+            <Sparkline data={sparklines.tokens || []} color="#A855F7" height={28} width={80} />
+          </div>
+        </div>
+        <StatCard label="Models" value={models.length} icon={Boxes} color="text-spore"
           sub={networkModels.size > 0 ? `+${networkModels.size} on network` : 'local only'} />
-        <StatCard label="Credits" value={credits.balance?.toFixed(1)} icon={Key} color="text-ledger"
-          sub={`+${credits.earned?.toFixed(1) || '0'} / -${credits.spent?.toFixed(1) || '0'}`} />
         <StatCard label="Inference" value={`${status?.inference?.active || 0}/${status?.inference?.max_concurrent || 2}`}
           icon={Zap} color="text-compute"
           highlight={status?.inference?.active > 0} />
@@ -562,6 +749,18 @@ function OverviewTab({ status, credits, fleetNodes }) {
 
       {/* Network Health */}
       <NetworkHealthBar connections={connections} peers={peers} fleetNodes={fleetNodes || []} />
+
+      {/* Activity Feed */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3 flex items-center space-x-2">
+          <Activity size={12} />
+          <span>Activity Feed</span>
+          {stats.requests_per_min > 0 && (
+            <span className="text-compute animate-pulse ml-2">● {stats.requests_per_min}/min</span>
+          )}
+        </h2>
+        <ActivityFeed events={allEvents.slice(-100)} />
+      </div>
 
       {/* Connection Diagnostics */}
       {connections.length > 0 && (
