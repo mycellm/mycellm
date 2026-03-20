@@ -953,166 +953,167 @@ function OverviewTab({ status, credits, fleetNodes }) {
   const [connections, setConnections] = useState([])
   const [activity, setActivity] = useState({ events: [], stats: {}, sparklines: {} })
   const [liveEvents, setLiveEvents] = useState([])
+  const [federation, setFederation] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const peers = status?.peers || []
   const models = status?.models || []
   const uptime = status?.uptime_seconds || 0
 
+  useEffect(() => { api('/v1/node/system').then(setSysInfo).catch(() => {}) }, [])
   useEffect(() => {
-    api('/v1/node/system').then(setSysInfo).catch(() => {})
+    const f = () => api('/v1/node/connections').then(d => setConnections(d.connections || [])).catch(() => {})
+    f(); const iv = setInterval(f, 5000); return () => clearInterval(iv)
   }, [])
-
-  // Poll connections
   useEffect(() => {
-    const fetch_ = () => api('/v1/node/connections').then(d => setConnections(d.connections || [])).catch(() => {})
-    fetch_()
-    const iv = setInterval(fetch_, 5000)
-    return () => clearInterval(iv)
+    const f = () => api('/v1/node/activity?limit=100').then(setActivity).catch(() => {})
+    f(); const iv = setInterval(f, 3000); return () => clearInterval(iv)
   }, [])
-
-  // Poll activity
-  useEffect(() => {
-    const fetch_ = () => api('/v1/node/activity?limit=100').then(setActivity).catch(() => {})
-    fetch_()
-    const iv = setInterval(fetch_, 3000)
-    return () => clearInterval(iv)
-  }, [])
-
-  // SSE activity stream
+  useEffect(() => { api('/v1/node/federation').then(setFederation).catch(() => {}) }, [])
   useEffect(() => {
     const es = new EventSource('/v1/node/activity/stream')
-    es.onmessage = (event) => {
-      try {
-        const e = JSON.parse(event.data)
-        setLiveEvents(prev => {
-          const next = [...prev, e]
-          return next.length > 200 ? next.slice(-200) : next
-        })
-      } catch {}
-    }
+    es.onmessage = (e) => { try { setLiveEvents(p => [...p.slice(-199), JSON.parse(e.data)]) } catch {} }
     return () => es.close()
   }, [])
 
   const allEvents = [...(activity.events || []), ...liveEvents]
   const stats = activity.stats || {}
   const sparklines = activity.sparklines || {}
-  const routableConns = connections.filter(c => c.state === 'routable')
-  const networkModels = new Set()
-  for (const p of peers) {
-    for (const m of (p.models || [])) networkModels.add(m)
-  }
+  const approvedFleet = (fleetNodes || []).filter(n => n.status === 'approved')
+
+  // Build node list for fleet grid
+  const fleetGrid = [
+    {
+      id: 'self', name: status?.node_name || 'This node', role: status?.role || 'bootstrap',
+      status: 'online', models: models, type: 'self',
+      system: sysInfo, modelCount: models.length,
+    },
+    ...peers.map(p => ({
+      id: p.peer_id, name: (p.peer_id || '').slice(0, 12) + '...', role: p.role,
+      status: p.status, models: p.models || [], type: 'quic', modelCount: (p.models || []).length,
+    })),
+    ...approvedFleet.map(f => ({
+      id: f.peer_id || f.node_name, name: f.node_name || (f.peer_id || '').slice(0, 12),
+      role: f.capabilities?.role || 'seeder', status: 'fleet', type: 'fleet',
+      models: (f.capabilities?.models || []).map(m => m.name || m),
+      modelCount: (f.capabilities?.models || []).length, system: f.system,
+    })),
+  ]
+
+  const roleIcons = { bootstrap: '\u{1F451}', seeder: '\u{1F5A5}\uFE0F', consumer: '\u{1F4BB}', relay: '\u{1F500}' }
+  const statusDots = { online: 'bg-spore', routable: 'bg-spore', fleet: 'bg-ledger', disconnected: 'bg-compute' }
 
   return (
-    <div className="space-y-6">
-      {/* Top stat cards with sparklines */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Uptime" value={formatUptime(uptime)} icon={Clock} color="text-gray-300" />
-        <div className="border p-5 rounded-xl border-white/10 bg-[#111]">
-          <h3 className="font-mono text-xs text-gray-500 mb-1">Requests</h3>
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-2xl font-mono text-compute">{stats.total_requests || 0}</span>
-              <div className="text-xs text-gray-500 mt-0.5">{stats.requests_per_min || 0}/min</div>
+    <div className="space-y-5">
+      {/* Network Identity */}
+      <div className="flex items-center justify-between bg-[#111] border border-white/10 rounded-xl p-4">
+        <div className="flex items-center space-x-4">
+          <div className="w-10 h-10 rounded-lg bg-spore/10 border border-spore/20 flex items-center justify-center text-spore text-lg">
+            {roleIcons[status?.role] || '\u{1F5A5}\uFE0F'}
+          </div>
+          <div>
+            <h2 className="text-white font-mono font-bold text-sm">{status?.node_name || 'mycellm-node'}</h2>
+            <div className="flex items-center space-x-3 text-xs text-gray-500 mt-0.5">
+              <span>{federation?.network_name || 'Standalone'}</span>
+              {federation?.network_id && <span className="font-mono">{federation.network_id.slice(0, 8)}...</span>}
+              <span>&middot;</span>
+              <span>{formatUptime(uptime)} uptime</span>
             </div>
-            <Sparkline data={sparklines.requests || []} color="#EF4444" height={28} width={80} />
           </div>
         </div>
-        <div className="border p-5 rounded-xl border-white/10 bg-[#111]">
-          <h3 className="font-mono text-xs text-gray-500 mb-1">Tokens</h3>
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-2xl font-mono text-poison">{stats.total_tokens || 0}</span>
-              <div className="text-xs text-gray-500 mt-0.5">{stats.tokens_per_min || 0}/min</div>
-            </div>
-            <Sparkline data={sparklines.tokens || []} color="#A855F7" height={28} width={80} />
+        <div className="flex items-center space-x-4 text-xs">
+          <div className="text-center">
+            <div className="text-xl font-mono text-white">{fleetGrid.length}</div>
+            <div className="text-gray-500">nodes</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-mono text-spore">{models.length}</div>
+            <div className="text-gray-500">models</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-mono text-ledger">{credits.balance?.toFixed(1)}</div>
+            <div className="text-gray-500">credits</div>
           </div>
         </div>
-        <StatCard label="Models" value={models.length} icon={Boxes} color="text-spore"
-          sub={networkModels.size > 0 ? `+${networkModels.size} on network` : 'local only'} />
-        <StatCard label="Inference" value={`${status?.inference?.active || 0}/${status?.inference?.max_concurrent || 2}`}
-          icon={Zap} color="text-compute"
-          highlight={status?.inference?.active > 0} />
+      </div>
+
+      {/* Stats Row with Sparklines */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="border border-white/10 bg-[#111] rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs text-gray-500 font-mono">REQUESTS</div>
+              <div className="text-2xl font-mono text-compute mt-1">{stats.total_requests || 0}</div>
+              <div className="text-xs text-gray-600">{stats.requests_per_min || 0}/min</div>
+            </div>
+            <Sparkline data={sparklines.requests || []} color="#EF4444" height={32} width={70} />
+          </div>
+        </div>
+        <div className="border border-white/10 bg-[#111] rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs text-gray-500 font-mono">TOKENS</div>
+              <div className="text-2xl font-mono text-poison mt-1">{stats.total_tokens || 0}</div>
+              <div className="text-xs text-gray-600">{stats.tokens_per_min || 0}/min</div>
+            </div>
+            <Sparkline data={sparklines.tokens || []} color="#A855F7" height={32} width={70} />
+          </div>
+        </div>
+        <div className="border border-white/10 bg-[#111] rounded-xl p-4">
+          <div className="text-xs text-gray-500 font-mono">CREDITS</div>
+          <div className="text-2xl font-mono text-ledger mt-1">{credits.balance?.toFixed(1)}</div>
+          <div className="text-xs text-gray-600">+{credits.earned?.toFixed(1) || '0'} / -{credits.spent?.toFixed(1) || '0'}</div>
+        </div>
+        <div className="border border-white/10 bg-[#111] rounded-xl p-4">
+          <div className="text-xs text-gray-500 font-mono">INFERENCE</div>
+          <div className={`text-2xl font-mono mt-1 ${(status?.inference?.active || 0) > 0 ? 'text-compute animate-pulse' : 'text-gray-400'}`}>
+            {status?.inference?.active || 0}/{status?.inference?.max_concurrent || 2}
+          </div>
+          <div className="text-xs text-gray-600">{(status?.inference?.active || 0) > 0 ? 'processing' : 'idle'}</div>
+        </div>
       </div>
 
       {/* Network Health */}
       <NetworkHealthBar connections={connections} peers={peers} fleetNodes={fleetNodes || []} />
 
-      {/* Network Topology */}
-      <NetworkTopology status={status} fleetNodes={fleetNodes} onNodeClick={setSelectedNode} />
-      {selectedNode && <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />}
+      {/* Fleet Grid */}
+      {fleetGrid.length > 1 && (
+        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3">Fleet ({fleetGrid.length} nodes)</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+            {fleetGrid.map(node => (
+              <button key={node.id} onClick={() => setSelectedNode(node)}
+                className={`text-left bg-black border rounded-lg p-3 hover:bg-white/[0.03] transition-colors ${
+                  node.type === 'self' ? 'border-spore/30' : node.status === 'fleet' ? 'border-ledger/20' : 'border-white/10'
+                }`}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm">{roleIcons[node.role] || '\u{1F5A5}\uFE0F'}</span>
+                    <span className="font-mono text-xs text-white truncate max-w-[100px]">{node.name}</span>
+                  </div>
+                  <div className={`w-2 h-2 rounded-full ${statusDots[node.status] || 'bg-gray-600'}`} />
+                </div>
+                <div className="text-xs text-gray-500">
+                  {node.modelCount} model{node.modelCount !== 1 ? 's' : ''}
+                  <span className="mx-1">&middot;</span>
+                  <span className={node.type === 'self' ? 'text-spore' : node.type === 'fleet' ? 'text-ledger' : 'text-relay'}>{node.type}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Activity Feed */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
         <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3 flex items-center space-x-2">
           <Activity size={12} />
-          <span>Activity Feed</span>
-          {stats.requests_per_min > 0 && (
-            <span className="text-compute animate-pulse ml-2">● {stats.requests_per_min}/min</span>
-          )}
+          <span>Activity</span>
+          {stats.requests_per_min > 0 && <span className="text-compute animate-pulse">&bull; {stats.requests_per_min}/min</span>}
         </h2>
-        <ActivityFeed events={allEvents.slice(-100)} />
+        <ActivityFeed events={allEvents.slice(-80)} />
       </div>
 
-      {/* Connection Diagnostics */}
-      {connections.length > 0 && (
-        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4 flex items-center space-x-2">
-            <Gauge size={12} />
-            <span>Connections ({connections.length})</span>
-          </h2>
-          <div className="space-y-2">
-            {connections.map((c, i) => (
-              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg text-sm">
-                <div className="flex items-center space-x-3">
-                  <div className={`w-2 h-2 rounded-full ${connectionStateDot(c.state)}`} />
-                  <span className="font-mono text-gray-300">{c.address}</span>
-                  {c.peer_id && <span className="font-mono text-xs text-gray-600">{c.peer_id.slice(0, 12)}...</span>}
-                </div>
-                <div className="flex items-center space-x-4 text-xs">
-                  <span className={connectionStateColor(c.state)}>{c.state}</span>
-                  {c.rtt_ms != null && <span className="text-gray-500">{c.rtt_ms}ms</span>}
-                  {c.uptime_seconds > 0 && <span className="text-gray-600">{formatUptime(c.uptime_seconds)}</span>}
-                  {c.reconnect_attempts > 0 && (
-                    <span className="text-compute text-xs">{c.reconnect_attempts} retries</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Peers */}
-      {peers.length > 0 && (
-        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Authenticated Peers ({peers.length})</h2>
-          <div className="space-y-2">
-            {peers.map((p, i) => (
-              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg text-sm">
-                <div className="flex items-center space-x-3">
-                  <div className={`w-2 h-2 rounded-full ${p.status === 'routable' ? 'bg-spore' : 'bg-gray-600'}`} />
-                  <span className="font-mono text-gray-300">{p.peer_id?.slice(0, 16)}...</span>
-                </div>
-                <div className="flex items-center space-x-4 text-xs text-gray-500">
-                  <span>{p.role}</span>
-                  <span>{p.models?.length || 0} models</span>
-                  <span className={p.status === 'routable' ? 'text-spore' : 'text-gray-600'}>{p.status}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* System Info */}
-      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">System</h2>
-        {sysInfo ? <SystemInfoPanel sysInfo={sysInfo} /> : (
-          <div className="text-sm text-gray-500 flex items-center space-x-2">
-            <Loader2 size={14} className="animate-spin" /><span>Loading system info...</span>
-          </div>
-        )}
-      </div>
+      {selectedNode && <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />}
     </div>
   )
 }
@@ -1350,13 +1351,17 @@ function ModelsTab({ status, onRefresh }) {
   const [sortDir, setSortDir] = useState('asc')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
-  const [backendType, setBackendType] = useState('openai')
   const [remoteStatus, setRemoteStatus] = useState(null)
+  const [addMode, setAddMode] = useState('browse') // 'browse' | 'local' | 'api'
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [repoFiles, setRepoFiles] = useState(null) // { repo_id, files }
+  const [downloadStatus, setDownloadStatus] = useState({})
 
   const [form, setForm] = useState({
     name: '', model_path: '',
     api_base: 'https://openrouter.ai/api/v1', api_key: '', api_model: '', ctx_len: 4096,
-    api_key_hint: '',
   })
   const [showKey, setShowKey] = useState(false)
 
@@ -1364,7 +1369,6 @@ function ModelsTab({ status, onRefresh }) {
   useEffect(() => {
     const fetchDevices = async () => {
       const localHw = status?.hardware || {}
-      // Determine this node's reachable address
       const selfAddr = window.location.hostname + ':' + (window.location.port || '8420')
       const localDevice = {
         id: 'local', name: status?.node_name || 'this node', addr: selfAddr,
@@ -1419,7 +1423,6 @@ function ModelsTab({ status, onRefresh }) {
   }
 
   const sorted = [...devices].sort((a, b) => {
-    // Self always first
     if (a.isSelf) return -1
     if (b.isSelf) return 1
     let va = a[sortBy], vb = b[sortBy]
@@ -1435,64 +1438,96 @@ function ModelsTab({ status, onRefresh }) {
     return isRemote ? remoteApi(selectedDevice.addr, path, opts) : api(path, opts)
   }
 
-  const handleLoad = async () => {
-    setLoading(true); setResult(null)
+  const handleUnload = async (modelName) => {
     try {
-      // If editing, unload old model first
-      if (editingModel) {
-        await doApi('/v1/node/models/unload', { model: editingModel })
+      await doApi('/v1/node/models/unload', { model: modelName })
+      onRefresh()
+    }
+    catch (e) { setResult({ error: e.message }) }
+  }
+
+  // Search HuggingFace
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return
+    setSearching(true)
+    try {
+      const data = await api(`/v1/node/models/search?q=${encodeURIComponent(searchQuery)}&limit=12`)
+      setSearchResults(data.models || [])
+    } catch (e) {
+      setSearchResults([])
+    }
+    setSearching(false)
+  }
+
+  // Browse repo files
+  const handleBrowseRepo = async (repoId) => {
+    try {
+      const data = await api(`/v1/node/models/search/${encodeURIComponent(repoId)}/files`)
+      setRepoFiles(data)
+    } catch {}
+  }
+
+  // Download a GGUF file
+  const handleDownload = async (repoId, filename) => {
+    try {
+      const data = await api('/v1/node/models/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_id: repoId, filename }),
+      })
+      if (data.download_id) {
+        setDownloadStatus(prev => ({ ...prev, [data.download_id]: data }))
+        const pollId = setInterval(async () => {
+          try {
+            const st = await api('/v1/node/models/downloads')
+            const dl = (st.downloads || []).find(d => d.download_id === data.download_id)
+            if (dl) {
+              setDownloadStatus(prev => ({ ...prev, [data.download_id]: dl }))
+              if (dl.status === 'complete' || dl.status === 'failed') {
+                clearInterval(pollId)
+                onRefresh()
+              }
+            }
+          } catch {}
+        }, 2000)
       }
-      const body = { backend: backendType, name: form.name }
-      if (backendType === 'llama.cpp') { body.model_path = form.model_path }
-      else {
-        body.api_base = form.api_base; body.api_key = form.api_key
-        body.api_model = form.api_model; body.ctx_len = parseInt(form.ctx_len) || 4096
-      }
-      const resp = await doApi('/v1/node/models/load', body)
-      const target = isRemote ? ` on ${selectedDevice.name}` : ''
-      const action = editingModel ? 'Updated' : 'Loaded'
-      setResult(resp.error ? { error: resp.error } : { success: `${action} "${resp.model}"${target}` })
-      if (!resp.error) { setEditingModel(null); onRefresh() }
+    } catch {}
+  }
+
+  // Load local GGUF file
+  const handleLoadLocal = async () => {
+    if (!form.model_path) return
+    setLoading(true)
+    try {
+      const data = await doApi('/v1/node/models/load', {
+        model_path: form.model_path,
+        name: form.name || undefined,
+        backend: 'llama.cpp',
+        ctx_len: form.ctx_len || 4096,
+      })
+      setResult(data)
+      if (!data.error) onRefresh()
     } catch (e) { setResult({ error: e.message }) }
     setLoading(false)
   }
 
-  const [editingModel, setEditingModel] = useState(null) // name of model being edited
-
-  const handleEdit = async (m) => {
-    setEditingModel(m.name)
-    setBackendType(m.backend === 'llama.cpp' ? 'llama.cpp' : 'openai')
-    setResult(null)
-
-    // Fetch full config from the node
+  // Connect remote API
+  const handleLoadApi = async () => {
+    if (!form.name || !form.api_base) return
+    setLoading(true)
     try {
-      const fetcher = isRemote
-        ? () => remoteApi(selectedDevice.addr, `/v1/node/models/${encodeURIComponent(m.name)}/config`)
-        : () => api(`/v1/node/models/${encodeURIComponent(m.name)}/config`)
-      const cfg = await fetcher()
-      setForm(f => ({
-        ...f,
-        name: cfg.name || m.name,
-        api_base: cfg.api_base || f.api_base,
-        api_model: cfg.api_model || '',
-        api_key: '', // never pre-fill — user must re-enter
-        api_key_hint: cfg.api_key_hint || '',
-        ctx_len: cfg.ctx_len || 4096,
-        model_path: cfg.model_path || '',
-      }))
-    } catch {
-      // Fallback: just fill what we know
-      setForm(f => ({ ...f, name: m.name, ctx_len: m.ctx_len || 4096 }))
-    }
-  }
-
-  const handleUnload = async (modelName) => {
-    try {
-      await doApi('/v1/node/models/unload', { model: modelName })
-      if (editingModel === modelName) setEditingModel(null)
-      onRefresh()
-    }
-    catch (e) { setResult({ error: e.message }) }
+      const data = await doApi('/v1/node/models/load', {
+        name: form.name,
+        backend: 'openai',
+        api_base: form.api_base,
+        api_key: form.api_key,
+        api_model: form.api_model || form.name,
+        ctx_len: form.ctx_len || 4096,
+      })
+      setResult(data)
+      if (!data.error) onRefresh()
+    } catch (e) { setResult({ error: e.message }) }
+    setLoading(false)
   }
 
   const thClass = 'text-left font-mono text-xs text-gray-500 uppercase tracking-wider py-2 px-3'
@@ -1555,129 +1590,208 @@ function ModelsTab({ status, onRefresh }) {
         </table>
       </div>
 
-      {/* Selected Device — Model Management */}
-      {selectedDevice && (
-        <div className="border border-spore/20 bg-[#111] rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <MonitorSmartphone size={16} className="text-spore" />
-              <h2 className="font-mono text-sm font-medium text-white">{selectedDevice.name}</h2>
-              {isRemote && <span className="text-xs font-mono text-gray-500">{selectedDevice.addr}</span>}
-            </div>
-            <span className="text-xs font-mono text-gray-500">{selectedDevice.gpu} / {selectedDevice.backend}</span>
+      {/* Loaded Models */}
+      <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-white/10">
+          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest">Loaded Models ({models.length})</h2>
+        </div>
+        {models.length > 0 ? (
+          <table className="w-full text-sm">
+            <thead className="bg-black/30">
+              <tr className="text-xs text-gray-500 font-mono uppercase">
+                <th className="text-left py-2 px-4">Name</th>
+                <th className="text-left py-2 px-4">Backend</th>
+                <th className="text-left py-2 px-4 hidden md:table-cell">Context</th>
+                <th className="text-left py-2 px-4 hidden lg:table-cell">Scope</th>
+                <th className="text-right py-2 px-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((m, i) => (
+                <tr key={i} className="border-t border-white/5 hover:bg-white/[0.02]">
+                  <td className="py-2.5 px-4 font-mono text-white">{m.name}</td>
+                  <td className="py-2.5 px-4 text-gray-400">{m.backend || 'llama.cpp'}</td>
+                  <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{(m.ctx_len || 4096).toLocaleString()}</td>
+                  <td className="py-2.5 px-4 hidden lg:table-cell">
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${
+                      m.scope === 'public' ? 'bg-spore/10 text-spore' :
+                      m.scope === 'networks' ? 'bg-relay/10 text-relay' :
+                      'bg-white/5 text-gray-500'
+                    }`}>{m.scope || 'home'}</span>
+                  </td>
+                  <td className="py-2.5 px-4 text-right">
+                    <button onClick={() => handleUnload(m.name)}
+                      className="text-xs text-gray-500 hover:text-compute transition-colors">unload</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="px-5 py-8 text-center text-sm text-gray-600">
+            No models loaded. Search HuggingFace below to get started.
           </div>
+        )}
+      </div>
 
-          {/* Loaded Models */}
-          {models.length > 0 && (
-            <div className="mb-5">
-              <h3 className="font-mono text-xs text-gray-500 mb-2">Loaded Models</h3>
-              <div className="space-y-1.5">
-                {models.map((m, i) => (
-                  <div key={i} className={`flex items-center justify-between p-2.5 rounded-lg border transition-colors ${
-                    editingModel === m.name ? 'bg-relay/10 border-relay/30' : 'bg-black border-white/5'
-                  }`}>
-                    <div className="flex items-center space-x-3 cursor-pointer" onClick={() => handleEdit(m)}>
-                      <Boxes size={13} className="text-spore" />
-                      <span className="font-mono text-sm">{m.name}</span>
-                      <span className="text-xs text-gray-600 bg-white/5 px-1.5 py-0.5 rounded">{m.backend}</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <button onClick={() => handleEdit(m)} title="Edit"
-                        className="text-gray-600 hover:text-relay transition-colors p-1">
-                        <RefreshCw size={13} />
-                      </button>
-                      <button onClick={() => handleUnload(m.name)} title="Unload"
-                        className="text-gray-600 hover:text-compute transition-colors p-1">
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+      {/* Add Model */}
+      <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
+        <div className="flex border-b border-white/10">
+          {[
+            { id: 'browse', label: 'Browse HuggingFace', icon: '\u{1F917}' },
+            { id: 'local', label: 'Local File', icon: '\u{1F4C1}' },
+            { id: 'api', label: 'Remote API', icon: '\u{1F517}' },
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setAddMode(tab.id)}
+              className={`flex items-center space-x-2 px-4 py-3 text-xs font-medium border-b-2 transition-all ${
+                addMode === tab.id ? 'border-spore text-white bg-black/20' : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}>
+              <span>{tab.icon}</span>
+              <span>{tab.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="p-5">
+          {addMode === 'browse' && (
+            <div className="space-y-4">
+              <div className="flex space-x-2">
+                <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                  placeholder="Search models... (e.g. llama 7b, mistral, phi)"
+                  className="flex-1 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                <button onClick={handleSearch} disabled={searching}
+                  className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40">
+                  {searching ? 'Searching...' : 'Search'}
+                </button>
               </div>
+
+              {/* Repo file picker */}
+              {repoFiles && (
+                <div className="bg-black border border-white/10 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-mono text-sm text-white">{repoFiles.repo_id}</span>
+                    <button onClick={() => setRepoFiles(null)} className="text-xs text-gray-500 hover:text-white">&times; close</button>
+                  </div>
+                  <div className="space-y-1 max-h-[200px] overflow-y-auto custom-scrollbar">
+                    {(repoFiles.files || []).map((f, i) => {
+                      const dlKey = `${repoFiles.repo_id}/${f.filename}`.replace(/\//g, '_').slice(0, 32)
+                      const dl = downloadStatus[dlKey]
+                      return (
+                        <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-white/[0.03] text-sm">
+                          <div>
+                            <span className="font-mono text-gray-300">{f.filename}</span>
+                            <span className="text-xs text-gray-600 ml-2">{f.size_gb}GB</span>
+                          </div>
+                          {dl ? (
+                            <span className={`text-xs font-mono ${dl.status === 'complete' ? 'text-spore' : dl.status === 'failed' ? 'text-compute' : 'text-ledger'}`}>
+                              {dl.status === 'downloading' ? `${dl.progress?.toFixed(0)}%` : dl.status}
+                            </span>
+                          ) : (
+                            <button onClick={() => handleDownload(repoFiles.repo_id, f.filename)}
+                              className="text-xs text-spore hover:text-spore/80">Download</button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Search results */}
+              {searchResults.length > 0 && !repoFiles && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {searchResults.map((m, i) => (
+                    <button key={i} onClick={() => handleBrowseRepo(m.repo_id)}
+                      className="text-left bg-black border border-white/10 rounded-lg p-3 hover:border-spore/30 transition-colors">
+                      <div className="font-mono text-sm text-white truncate">{m.repo_id}</div>
+                      <div className="flex items-center space-x-3 mt-1.5 text-xs text-gray-500">
+                        <span>&darr; {m.downloads?.toLocaleString()}</span>
+                        <span>&hearts; {m.likes}</span>
+                        <span>{m.gguf_files?.length || 0} variants</span>
+                      </div>
+                      {m.pipeline_tag && <span className="text-xs text-gray-600 mt-1 inline-block">{m.pipeline_tag}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {searchResults.length === 0 && !searching && searchQuery && (
+                <div className="text-center text-sm text-gray-600 py-4">No GGUF models found for &ldquo;{searchQuery}&rdquo;</div>
+              )}
             </div>
           )}
 
-          {/* Load Model Form */}
-          <div className="border-t border-white/5 pt-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-mono text-xs text-gray-500">
-                {editingModel ? `Edit: ${editingModel}` : 'Load Model'}
-              </h3>
-              {editingModel && (
-                <button onClick={() => { setEditingModel(null); setForm(f => ({ ...f, name: '' })); setResult(null) }}
-                  className="text-xs text-gray-500 hover:text-gray-300">Cancel edit</button>
-              )}
-            </div>
-
-            <div className="flex bg-black rounded-lg p-1 border border-white/10 mb-4">
-              <button onClick={() => setBackendType('openai')}
-                className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
-                  backendType === 'openai' ? 'bg-relay text-white' : 'text-gray-500 hover:text-gray-300'
-                }`}>
-                <Globe size={12} className="inline mr-1.5" />OpenAI API
-              </button>
-              <button onClick={() => setBackendType('llama.cpp')}
-                className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
-                  backendType === 'llama.cpp' ? 'bg-compute text-white' : 'text-gray-500 hover:text-gray-300'
-                }`}>
-                <Cpu size={12} className="inline mr-1.5" />Local GGUF
-              </button>
-            </div>
-
-            <div className="space-y-2.5">
-              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Model name (on network)"
-                className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-
-              {backendType === 'llama.cpp' ? (
-                <input value={form.model_path} onChange={e => setForm(f => ({ ...f, model_path: e.target.value }))}
-                  placeholder="GGUF path on target node"
-                  className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-              ) : (
-                <>
-                  <input value={form.api_base} onChange={e => setForm(f => ({ ...f, api_base: e.target.value }))}
-                    placeholder="API base URL"
+          {addMode === 'local' && (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-500">Load a GGUF model file from the local filesystem.</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-2">
+                  <label className="text-xs text-gray-500 block mb-1">Model path (.gguf)</label>
+                  <input value={form.model_path} onChange={e => setForm(f => ({...f, model_path: e.target.value}))}
+                    placeholder="/path/to/model.gguf"
                     className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-                  <div className="relative">
-                    <input type={showKey ? 'text' : 'password'} value={form.api_key}
-                      onChange={e => setForm(f => ({ ...f, api_key: e.target.value }))}
-                      placeholder={editingModel && form.api_key_hint ? `Current key: ${form.api_key_hint} (re-enter to update)` : 'API key'}
-                      className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-                    <button onClick={() => setShowKey(!showKey)}
-                      className="absolute right-2 top-2 text-gray-500 hover:text-gray-300">
-                      {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
-                  <div className="flex space-x-2">
-                    <input value={form.api_model} onChange={e => setForm(f => ({ ...f, api_model: e.target.value }))}
-                      placeholder="Upstream model ID"
-                      className="flex-grow bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-                    <input type="number" value={form.ctx_len}
-                      onChange={e => setForm(f => ({ ...f, ctx_len: e.target.value }))}
-                      placeholder="ctx"
-                      className="w-24 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-                  </div>
-                </>
-              )}
-
-              <button onClick={handleLoad} disabled={loading || !form.name}
-                className="flex items-center space-x-2 bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-                {loading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                <span>{loading ? 'Loading...' : editingModel ? 'Update Model' : 'Load Model'}</span>
-              </button>
-
-              {result && (
-                <div className={`flex items-center space-x-2 text-sm p-2.5 rounded-lg ${
-                  result.error ? 'bg-compute/10 text-compute' : 'bg-spore/10 text-spore'
-                }`}>
-                  {result.error ? <AlertCircle size={14} /> : <Check size={14} />}
-                  <span>{result.error || result.success}</span>
                 </div>
-              )}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Name (optional)</label>
+                  <input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
+                    placeholder="my-model"
+                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                </div>
+              </div>
+              <button onClick={() => handleLoadLocal()} disabled={loading}
+                className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40">
+                {loading ? 'Loading...' : 'Load Model'}
+              </button>
             </div>
-          </div>
+          )}
+
+          {addMode === 'api' && (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-500">Connect to an OpenAI-compatible API endpoint (OpenRouter, Ollama, vLLM, etc.)</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Model name</label>
+                  <input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
+                    placeholder="claude-sonnet"
+                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">API Base URL</label>
+                  <input value={form.api_base} onChange={e => setForm(f => ({...f, api_base: e.target.value}))}
+                    placeholder="https://openrouter.ai/api/v1"
+                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">API Key</label>
+                  <input type={showKey ? 'text' : 'password'} value={form.api_key} onChange={e => setForm(f => ({...f, api_key: e.target.value}))}
+                    placeholder="sk-..."
+                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Upstream model</label>
+                  <input value={form.api_model} onChange={e => setForm(f => ({...f, api_model: e.target.value}))}
+                    placeholder="anthropic/claude-sonnet-4"
+                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                </div>
+              </div>
+              <button onClick={() => handleLoadApi()} disabled={loading}
+                className="bg-white/10 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/20 disabled:opacity-40">
+                {loading ? 'Connecting...' : 'Connect API'}
+              </button>
+            </div>
+          )}
+
+          {result && (
+            <div className={`flex items-center space-x-2 text-sm p-2.5 rounded-lg mt-3 ${
+              result.error ? 'bg-compute/10 text-compute' : 'bg-spore/10 text-spore'
+            }`}>
+              {result.error ? <AlertCircle size={14} /> : <Check size={14} />}
+              <span>{result.error || result.success}</span>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 }
