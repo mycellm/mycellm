@@ -37,6 +37,7 @@ from mycellm.transport.messages import (
 from mycellm.transport.connection import PeerConnection, PeerState
 from mycellm.transport.peer_manager import PeerManager
 from mycellm.activity import ActivityTracker, EventType
+from mycellm.federation import FederationManager
 
 logger = logging.getLogger("mycellm")
 console = Console()
@@ -138,6 +139,9 @@ class MycellmNode:
 
         # Activity tracker
         self.activity = ActivityTracker()
+
+        # Federation
+        self.federation: FederationManager | None = None
 
         # Managed node registry (bootstrap/admin node tracks announced nodes)
         self.node_registry: dict[str, dict] = {}  # peer_id -> node info
@@ -609,6 +613,13 @@ class MycellmNode:
         """Start the node and all subsystems."""
         self._setup_logging()
         self._load_identity()
+
+        # Initialize federation
+        self.federation = FederationManager(self._settings.data_dir)
+        self.federation.init_network(
+            self.account_key.public_bytes,
+            bootstrap_addrs=[f"{self._settings.quic_host}:{self.quic_port}"],
+        )
 
         # Load cached peers
         self._load_peer_cache()
