@@ -87,7 +87,7 @@ function SporeBackground({ peerCount = 0, inferenceActive = false }) {
         y: Math.random() * canvas.height,
         vx: (Math.random() - 0.5) * 0.3,
         vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.5 + 0.5,
+        r: Math.random() * 2.0 + 0.8,
         phase: Math.random() * Math.PI * 2,
       })
     }
@@ -95,8 +95,8 @@ function SporeBackground({ peerCount = 0, inferenceActive = false }) {
       sporesRef.current.pop()
     }
 
-    const connectionDist = 120
-    const baseAlpha = inferenceActive ? 0.07 : 0.04
+    const connectionDist = 150
+    const baseAlpha = inferenceActive ? 0.14 : 0.08
 
     function draw() {
       const w = canvas.width
