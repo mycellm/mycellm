@@ -53,7 +53,9 @@ mycellm = "mycellm.cli.main:app"
 
 [project.urls]
 Homepage = "https://mycellm.ai"
-Repository = "https://github.com/mycellm/mycellm"
+Documentation = "https://docs.mycellm.dev"
+Repository = "https://repo.mycellm.dev/mycellm/mycellm"
+Issues = "https://repo.mycellm.dev/mycellm/mycellm/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mycellm"]
