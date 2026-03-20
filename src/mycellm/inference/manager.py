@@ -66,6 +66,14 @@ class InferenceManager:
         )
 
         logger.info(f"Model {model_name} loaded via {backend_type}")
+
+        # Auto-save config
+        try:
+            from mycellm.config import get_settings
+            await self.save_model_configs(get_settings().data_dir)
+        except Exception:
+            pass  # don't block load on save failure
+
         return model_name
 
     async def unload_model(self, model_name: str) -> None:
@@ -74,6 +82,13 @@ class InferenceManager:
             await backend.unload_model(model_name)
             self._model_info.pop(model_name, None)
             logger.info(f"Model {model_name} unloaded")
+
+            # Auto-save config
+            try:
+                from mycellm.config import get_settings
+                await self.save_model_configs(get_settings().data_dir)
+            except Exception:
+                pass
 
     def get_backend(self, model_name: str) -> InferenceBackend | None:
         """Get backend for a specific model, or the first available."""
@@ -129,6 +144,74 @@ class InferenceManager:
                     yield chunk
             finally:
                 self._active_count -= 1
+
+    async def save_model_configs(self, data_dir: Path) -> None:
+        """Save current model configs to disk for persistence across restarts."""
+        import json
+        configs = []
+        for name, info in self._model_info.items():
+            backend = self._backends.get(name)
+            config = {
+                "name": name,
+                "backend": info.backend,
+                "ctx_len": info.ctx_len,
+                "quant": info.quant,
+                "tags": getattr(info, 'tags', []),
+                "tier": getattr(info, 'tier', ''),
+                "param_count_b": getattr(info, 'param_count_b', 0.0),
+            }
+            # Save backend-specific config
+            from mycellm.inference.openai_compat import OpenAICompatibleBackend
+            if isinstance(backend, OpenAICompatibleBackend):
+                remote = backend._models.get(name)
+                if remote:
+                    config["api_base"] = remote.api_base
+                    config["api_model"] = remote.api_model
+                    config["api_key"] = remote.api_key  # Will be encrypted in future
+            configs.append(config)
+
+        config_path = data_dir / "model_configs.json"
+        config_path.write_text(json.dumps(configs, indent=2))
+        logger.debug(f"Saved {len(configs)} model configs to {config_path}")
+
+    async def restore_models(self, data_dir: Path) -> int:
+        """Restore models from saved config. Returns count of restored models."""
+        import json
+        config_path = data_dir / "model_configs.json"
+        if not config_path.exists():
+            return 0
+
+        try:
+            configs = json.loads(config_path.read_text())
+        except Exception as e:
+            logger.warning(f"Failed to read model configs: {e}")
+            return 0
+
+        restored = 0
+        for config in configs:
+            name = config.get("name", "")
+            backend_type = config.get("backend", "llama.cpp")
+            try:
+                if backend_type in ("openai", "openai-compatible"):
+                    await self.load_model(
+                        "",
+                        name=name,
+                        backend_type=backend_type,
+                        api_base=config.get("api_base", ""),
+                        api_key=config.get("api_key", ""),
+                        api_model=config.get("api_model", ""),
+                        ctx_len=config.get("ctx_len", 4096),
+                    )
+                else:
+                    # For local models, we'd need the path — skip if not available
+                    logger.info(f"Skipping local model restore for '{name}' (path not stored)")
+                    continue
+                restored += 1
+                logger.info(f"Restored model '{name}' ({backend_type})")
+            except Exception as e:
+                logger.warning(f"Failed to restore model '{name}': {e}")
+
+        return restored
 
     def _create_backend(self, backend_type: str) -> InferenceBackend:
         if backend_type == "llama.cpp":

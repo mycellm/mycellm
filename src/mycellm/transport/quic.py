@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import ssl
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import AsyncIterator, Awaitable, Callable
 
 from aioquic.asyncio import QuicConnectionProtocol, connect, serve
 from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.connection import QuicConnection
 from aioquic.quic.events import (
     ConnectionTerminated,
     HandshakeCompleted,
@@ -185,3 +187,49 @@ async def connect_to_peer(
         if message_handler:
             protocol.set_message_handler(message_handler)
         yield protocol
+
+
+async def dial_peer(
+    host: str,
+    port: int,
+    connection_timeout: float = 10.0,
+    idle_timeout: float = 60.0,
+    message_handler: Callable[[MessageEnvelope, int], Awaitable[None]] | None = None,
+) -> MycellmQuicProtocol:
+    """Dial a peer and return the protocol. Caller owns the lifetime.
+
+    Unlike connect_to_peer(), this is NOT a context manager.
+    The caller is responsible for calling protocol.close() when done.
+    """
+    configuration = QuicConfiguration(
+        is_client=True,
+        alpn_protocols=["mycellm-v1"],
+        idle_timeout=idle_timeout,
+    )
+    configuration.verify_mode = ssl.CERT_NONE
+
+    # Resolve host
+    infos = await asyncio.get_event_loop().getaddrinfo(host, port, type=socket.SOCK_DGRAM)
+    if not infos:
+        raise ConnectionError(f"Could not resolve {host}:{port}")
+    addr = infos[0]
+    server_addr = addr[4]
+
+    connection = QuicConnection(configuration=configuration, server_name=host)
+
+    loop = asyncio.get_event_loop()
+    transport, protocol = await asyncio.wait_for(
+        loop.create_datagram_endpoint(
+            lambda: MycellmQuicProtocol(connection, stream_handler=None),
+            local_addr=("0.0.0.0", 0),
+        ),
+        timeout=connection_timeout,
+    )
+
+    protocol.connect(server_addr)
+
+    if message_handler:
+        protocol.set_message_handler(message_handler)
+
+    await asyncio.wait_for(protocol._handshake_complete.wait(), timeout=connection_timeout)
+    return protocol

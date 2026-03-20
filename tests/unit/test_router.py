@@ -57,8 +57,8 @@ def test_chain_builder_routes_to_best():
 
     cb = ChainBuilder(reg)
     targets = cb.route("model-a")
-    assert len(targets) == 1
-    assert targets[0].peer_id == "fast"
+    assert len(targets) == 2  # Returns all candidates sorted by score
+    assert targets[0].peer_id == "fast"  # Best first
 
 
 def test_chain_builder_no_model():

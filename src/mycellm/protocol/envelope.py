@@ -39,6 +39,12 @@ class MessageType(str, Enum):
     # Accounting
     CREDIT_RECEIPT = "credit_receipt"
 
+    # Multi-hop
+    INFERENCE_RELAY = "inference_relay"
+
+    # Peer exchange
+    PEER_EXCHANGE = "peer_exchange"
+
     # Error
     ERROR = "error"
 

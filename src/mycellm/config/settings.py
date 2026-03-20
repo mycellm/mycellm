@@ -81,6 +81,13 @@ class MycellmSettings(BaseSettings):
     quic_port: int = 8421
     dht_port: int = 8422
 
+    # NAT traversal
+    external_host: str = ""  # Explicit public IP override
+
+    # QUIC tuning
+    quic_idle_timeout: float = 60.0
+    quic_connect_timeout: float = 10.0
+
     # Node identity
     node_name: str = Field(default_factory=_generate_node_name)
 

@@ -23,8 +23,10 @@ from mycellm.protocol.errors import ErrorCode
 from mycellm.router.registry import PeerRegistry
 from mycellm.router.chain import ChainBuilder
 from mycellm.router.health import HealthChecker
+from mycellm.router.model_resolver import ModelResolver
 from mycellm.transport.tls import generate_self_signed_cert
 from mycellm.transport.auth import build_node_hello, build_hello_ack, verify_hello_message
+from mycellm.accounting.reputation import ReputationTracker
 from mycellm.transport.messages import (
     inference_response,
     error_message,
@@ -33,6 +35,7 @@ from mycellm.transport.messages import (
     inference_done,
 )
 from mycellm.transport.connection import PeerConnection, PeerState
+from mycellm.transport.peer_manager import PeerManager
 
 logger = logging.getLogger("mycellm")
 console = Console()
@@ -113,9 +116,14 @@ class MycellmNode:
             max_concurrent=self._settings.max_concurrent_inferences
         )
         self.registry = PeerRegistry()
-        self.chain_builder = ChainBuilder(self.registry)
         self.health_checker = HealthChecker(self.registry)
+        self.chain_builder = ChainBuilder(self.registry, health_checker=self.health_checker)
+        self.model_resolver = ModelResolver(self.registry)
         self.ledger = None  # initialized in run()
+        self.reputation = ReputationTracker()
+
+        # Peer manager
+        self.peer_manager = PeerManager(self)
 
         # Transport state
         self._quic_server = None
@@ -292,6 +300,15 @@ class MycellmNode:
         elif msg.type == MessageType.INFERENCE_REQ:
             await self._handle_inference_request(protocol, msg, stream_id)
 
+        elif msg.type == MessageType.INFERENCE_RELAY:
+            await self._handle_relay(protocol, msg, stream_id)
+
+        elif msg.type == MessageType.CREDIT_RECEIPT:
+            await self._handle_credit_receipt(msg)
+
+        elif msg.type == MessageType.PEER_EXCHANGE:
+            self._handle_peer_exchange(msg)
+
         elif msg.type == MessageType.PEER_ANNOUNCE:
             caps = msg.payload.get("capabilities", {})
             addrs = msg.payload.get("addresses", [])
@@ -367,10 +384,127 @@ class MycellmNode:
                 await self.ledger.credit(self.peer_id, reward, "inference_served",
                                          counterparty_id=msg.from_peer)
 
+                # Send signed credit receipt to consumer
+                if not stream:
+                    import cbor2
+                    receipt_data = cbor2.dumps({
+                        "consumer": msg.from_peer,
+                        "seeder": self.peer_id,
+                        "model": model_name,
+                        "tokens": result.completion_tokens,
+                        "cost": reward,
+                        "ts": time.time(),
+                    })
+                    sig = self.device_key.sign(receipt_data).hex()
+                    from mycellm.transport.messages import signed_credit_receipt
+                    receipt_msg = signed_credit_receipt(
+                        self.peer_id, msg.from_peer, self.peer_id,
+                        model_name, result.completion_tokens, reward,
+                        time.time(), sig,
+                    )
+                    await protocol.send_message(receipt_msg)
+
+                self.reputation.record_success(msg.from_peer, result.completion_tokens if not stream else 0, 0.0)
+
         except Exception as e:
             logger.error(f"{styled_tag('INFER')} Inference failed: {e}")
             err = error_message(self.peer_id, msg.id, ErrorCode.BACKEND_ERROR, str(e))
             await protocol.reply_on_stream(stream_id, err)
+
+    async def _handle_relay(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
+        """Handle a relay request -- forward to target peer."""
+        payload = msg.payload
+        target_peer = payload.get("target_peer", "")
+        via = payload.get("via", [])
+
+        # Prevent loops
+        if self.peer_id in via:
+            err = error_message(self.peer_id, msg.id, ErrorCode.PEER_UNREACHABLE, "Relay loop detected")
+            await protocol.reply_on_stream(stream_id, err)
+            return
+
+        # Find target connection
+        target_conn = self._peer_connections.get(target_peer)
+        if not target_conn:
+            # Try routing through chain builder
+            targets = self.chain_builder.route(payload.get("model", ""))
+            if targets:
+                target_conn = targets[0].entry.connection
+                target_peer = targets[0].peer_id
+
+        if not target_conn:
+            err = error_message(self.peer_id, msg.id, ErrorCode.PEER_UNREACHABLE)
+            await protocol.reply_on_stream(stream_id, err)
+            return
+
+        # Forward the request
+        from mycellm.transport.messages import inference_request
+        fwd = inference_request(
+            self.peer_id,
+            payload.get("model", ""),
+            payload.get("messages", []),
+            temperature=payload.get("temperature", 0.7),
+            max_tokens=payload.get("max_tokens", 2048),
+            stream=payload.get("stream", False),
+        )
+
+        try:
+            resp = await target_conn.request(fwd, timeout=60.0)
+            # Forward response back to originator
+            resp.id = msg.id  # preserve original request ID
+            await protocol.reply_on_stream(stream_id, resp)
+
+            # Earn relay fee (10%)
+            if self.ledger and resp.type == MessageType.INFERENCE_RESP:
+                tokens = resp.payload.get("completion_tokens", 0)
+                from mycellm.accounting.pricing import compute_cost
+                relay_fee = compute_cost(max(tokens, 1)) * 0.1
+                await self.ledger.credit(self.peer_id, relay_fee, "relay_fee",
+                                         counterparty_id=msg.from_peer)
+        except Exception as e:
+            logger.error(f"Relay to {target_peer[:8]} failed: {e}")
+            err = error_message(self.peer_id, msg.id, ErrorCode.BACKEND_ERROR, str(e))
+            await protocol.reply_on_stream(stream_id, err)
+
+    async def _handle_credit_receipt(self, msg: MessageEnvelope) -> None:
+        """Handle a signed credit receipt from a peer."""
+        payload = msg.payload
+        signature = payload.get("signature", "")
+
+        # Verify signature (receipt signed by seeder's device key)
+        # For now, store if from authenticated peer
+        if msg.from_peer in self._peer_connections:
+            if self.ledger:
+                await self.ledger.store_receipt(
+                    tx_id=msg.id,
+                    consumer_id=payload.get("consumer_id", ""),
+                    seeder_id=payload.get("seeder_id", ""),
+                    model=payload.get("model", ""),
+                    tokens=payload.get("tokens", 0),
+                    cost=payload.get("cost", 0.0),
+                    signature=signature,
+                )
+            self.reputation.record_receipt(msg.from_peer)
+            logger.debug(f"Receipt from {msg.from_peer[:8]}: {payload.get('tokens', 0)} tokens")
+
+    def _handle_peer_exchange(self, msg: MessageEnvelope) -> None:
+        """Handle peer exchange -- learn about peers from connected peer."""
+        peers = msg.payload.get("peers", [])
+        for p in peers:
+            peer_id = p.get("peer_id", "")
+            if peer_id and peer_id != self.peer_id and peer_id not in self._peer_connections:
+                addrs = p.get("addresses", [])
+                if addrs:
+                    caps = Capabilities.from_dict(p.get("capabilities", {}))
+                    self.registry.register(peer_id, capabilities=caps, addresses=addrs)
+                    # Try to connect to newly discovered peers
+                    for addr in addrs:
+                        if ":" in addr:
+                            host, port_str = addr.rsplit(":", 1)
+                            try:
+                                self.peer_manager.add_peer(host, int(port_str))
+                            except (ValueError, AttributeError):
+                                pass
 
     async def _start_dht(self) -> None:
         """Start the DHT discovery node."""
@@ -398,57 +532,6 @@ class MycellmNode:
             logger.warning(f"{styled_tag('DHT')} Failed to start: {e}")
             self._dht_node = None
 
-    async def _connect_to_bootstrap_peers(self) -> None:
-        """Connect to known bootstrap peers via QUIC."""
-        from mycellm.transport.quic import connect_to_peer
-
-        peers = self._settings.get_bootstrap_list()
-        for host, port in peers:
-            asyncio.create_task(self._dial_peer(host, port))
-
-    async def _dial_peer(self, host: str, port: int) -> None:
-        """Dial a specific peer, perform NodeHello handshake."""
-        from mycellm.transport.quic import connect_to_peer
-
-        try:
-            async with connect_to_peer(host, port) as protocol:
-                # Send NodeHello
-                hello_msg = build_node_hello(self.device_key, self.device_cert, self.capabilities)
-                ack = await protocol.send_and_wait(hello_msg, timeout=10.0)
-
-                if ack.type == MessageType.ERROR:
-                    logger.warning(f"{styled_tag('P2P')} Peer rejected: {ack.payload}")
-                    return
-
-                if ack.type == MessageType.NODE_HELLO_ACK:
-                    from mycellm.protocol.node_hello import NodeHello
-                    hello_data = ack.payload.get("hello")
-                    if hello_data:
-                        peer_hello = NodeHello.from_cbor(hello_data)
-                        conn = PeerConnection(
-                            peer_id=peer_hello.peer_id,
-                            protocol=protocol,
-                            hello=peer_hello,
-                            state=PeerState.ROUTABLE,
-                        )
-                        self._peer_connections[peer_hello.peer_id] = conn
-                        self.registry.register(
-                            peer_hello.peer_id,
-                            connection=conn,
-                            capabilities=peer_hello.capabilities,
-                        )
-                        logger.info(
-                            f"{styled_tag('P2P')} Connected to {host}:{port} "
-                            f"(peer: {peer_hello.peer_id[:16]}...)"
-                        )
-
-                        # Keep connection alive until it closes
-                        while not protocol._is_closed:
-                            await asyncio.sleep(1)
-
-        except Exception as e:
-            logger.debug(f"{styled_tag('P2P')} Failed to dial {host}:{port}: {e}")
-
     async def _start_api(self) -> None:
         """Start the FastAPI server."""
         import uvicorn
@@ -462,10 +545,56 @@ class MycellmNode:
         logger.info(f"{styled_tag('API')} http://{self.api_host}:{self.api_port}")
         await self._api_server.serve()
 
+    def _save_peer_cache(self) -> None:
+        """Persist known peers to disk."""
+        import json
+        cache = {}
+        for entry in self.registry.all_peers():
+            cache[entry.peer_id] = {
+                "peer_id": entry.peer_id,
+                "addresses": entry.addresses,
+                "capabilities": entry.capabilities.to_dict(),
+                "last_seen": entry.last_seen,
+            }
+        cache_path = self._settings.data_dir / "node_state.json"
+        try:
+            cache_path.write_text(json.dumps(cache, indent=2))
+        except Exception as e:
+            logger.debug(f"Failed to save peer cache: {e}")
+
+    def _load_peer_cache(self) -> None:
+        """Load cached peers and pre-populate registry."""
+        import json
+        cache_path = self._settings.data_dir / "node_state.json"
+        if not cache_path.exists():
+            return
+        try:
+            cache = json.loads(cache_path.read_text())
+            for peer_id, info in cache.items():
+                caps = Capabilities.from_dict(info.get("capabilities", {}))
+                self.registry.register(
+                    peer_id,
+                    capabilities=caps,
+                    addresses=info.get("addresses", []),
+                )
+            if cache:
+                logger.info(f"{styled_tag('BOOT')} Loaded {len(cache)} cached peers")
+        except Exception as e:
+            logger.debug(f"Failed to load peer cache: {e}")
+
     async def run(self) -> None:
         """Start the node and all subsystems."""
         self._setup_logging()
         self._load_identity()
+
+        # Load cached peers
+        self._load_peer_cache()
+
+        # Restore persisted models
+        restored = await self.inference.restore_models(self._settings.data_dir)
+        if restored:
+            self.capabilities.models = self.inference.loaded_models
+            logger.info(f"{styled_tag('BOOT')} Restored {restored} model(s)")
 
         hw = self._detect_hardware()
         self.capabilities = Capabilities(
@@ -494,8 +623,9 @@ class MycellmNode:
         if self.enable_dht:
             await self._start_dht()
 
-        # Connect to bootstrap peers in background
-        asyncio.create_task(self._connect_to_bootstrap_peers())
+        # Connect to bootstrap peers via PeerManager
+        peers = self._settings.get_bootstrap_list()
+        await self.peer_manager.start(peers)
 
         # Announce to bootstrap nodes via HTTP
         self._announce_task = asyncio.create_task(self._announce_to_bootstrap())
@@ -582,12 +712,37 @@ class MycellmNode:
             except Exception as e:
                 logger.debug(f"Failed to announce to {conn.peer_id[:16]}: {e}")
 
+        # Also announce via peer_manager managed connections
+        for peer in self.peer_manager.managed_peers.values():
+            if peer.connection and peer.peer_id not in self._peer_connections:
+                try:
+                    await peer.connection.send(msg)
+                except Exception as e:
+                    logger.debug(f"Failed to announce to managed peer {peer.addr}: {e}")
+
+        # DHT model announcements
+        if self._dht_node:
+            for m in self.capabilities.models:
+                try:
+                    await self._dht_node.announce_model(
+                        m.name, self.peer_id,
+                        [f"{self._settings.quic_host}:{self.quic_port}"],
+                    )
+                except Exception:
+                    pass
+
     async def shutdown(self) -> None:
         """Graceful shutdown."""
         if not self._running:
             return
         self._running = False
         logger.info(f"{styled_tag('NODE')} Shutting down gracefully...")
+
+        # Save peer cache
+        self._save_peer_cache()
+
+        # Stop peer manager
+        await self.peer_manager.stop()
 
         # Stop health checker
         await self.health_checker.stop()
@@ -609,8 +764,26 @@ class MycellmNode:
         raise SystemExit(0)
 
     async def route_inference(self, model: str, messages: list[dict], **kwargs):
-        """Route inference — local if model loaded, otherwise to peer."""
-        model_name = self.inference.resolve_model_name(model)
+        """Route inference — local if model loaded, otherwise to peer.
+
+        Uses ModelResolver for empty model requests to find the best candidate.
+        Supports failover across multiple QUIC peers.
+        """
+        # Resolve empty model via ModelResolver
+        effective_model = model
+        if not model and self.model_resolver:
+            resolved = self.model_resolver.resolve(
+                "", self.inference.loaded_models,
+                fleet_registry=self.node_registry,
+            )
+            if resolved:
+                best = resolved[0]
+                if best.source == "local":
+                    effective_model = best.model_name
+                else:
+                    effective_model = best.model_name
+
+        model_name = self.inference.resolve_model_name(effective_model)
 
         # Try local inference first
         if model_name:
@@ -623,35 +796,50 @@ class MycellmNode:
             )
             return await self.inference.generate(req)
 
-        # Try routing to a peer
+        # Try routing to a peer (with failover)
         from mycellm.transport.messages import inference_request
-        targets = self.chain_builder.route(model)
+        targets = self.chain_builder.route(effective_model)
         if not targets:
             return None
 
-        target = targets[0]
-        if target.entry.connection is None:
-            return None
+        last_error = None
+        for target in targets:
+            if target.entry.connection is None:
+                continue
 
-        req_msg = inference_request(
-            self.peer_id, model, messages,
-            temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 2048),
-        )
-        resp = await target.entry.connection.request(req_msg)
+            req_msg = inference_request(
+                self.peer_id, effective_model, messages,
+                temperature=kwargs.get("temperature", 0.7),
+                max_tokens=kwargs.get("max_tokens", 2048),
+            )
 
-        if resp.type == MessageType.ERROR:
-            return None
+            try:
+                resp = await target.entry.connection.request(req_msg)
 
-        # Debit consumer
-        if self.ledger:
-            tokens = resp.payload.get("completion_tokens", 0)
-            from mycellm.accounting.pricing import compute_cost
-            cost = compute_cost(max(tokens, 1))
-            await self.ledger.debit(self.peer_id, cost, "inference_consumed",
-                                    counterparty_id=target.peer_id)
+                if resp.type == MessageType.ERROR:
+                    target.entry.failure_count += 1
+                    last_error = resp
+                    continue
 
-        return resp.payload
+                # Success — reduce failure count
+                target.entry.failure_count = max(0, target.entry.failure_count - 1)
+
+                # Debit consumer
+                if self.ledger:
+                    tokens = resp.payload.get("completion_tokens", 0)
+                    from mycellm.accounting.pricing import compute_cost
+                    cost = compute_cost(max(tokens, 1))
+                    await self.ledger.debit(self.peer_id, cost, "inference_consumed",
+                                            counterparty_id=target.peer_id)
+
+                return resp.payload
+            except Exception as e:
+                target.entry.failure_count += 1
+                logger.debug(f"Peer {target.peer_id[:16]} routing failed: {e}")
+                last_error = e
+                continue
+
+        return None
 
     def get_status(self) -> dict:
         """Return current node status for the API."""

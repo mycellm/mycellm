@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 logger = logging.getLogger("mycellm.dht")
 
@@ -64,14 +65,73 @@ class DHTNode:
             return json.loads(result)
         return None
 
+    async def announce_model(self, model_name: str, peer_id: str, addresses: list[str]) -> None:
+        """Announce that this peer serves a specific model."""
+        if not self._server:
+            return
+        key = f"model:{model_name}"
+        existing = await self._server.get(key)
+        peers = json.loads(existing) if existing else []
+
+        # Update or add this peer
+        updated = False
+        for p in peers:
+            if p.get("peer_id") == peer_id:
+                p["addresses"] = addresses
+                p["ts"] = time.time()
+                updated = True
+                break
+        if not updated:
+            peers.append({"peer_id": peer_id, "addresses": addresses, "ts": time.time()})
+
+        # Prune stale entries (>10 min old)
+        cutoff = time.time() - 600
+        peers = [p for p in peers if p.get("ts", 0) > cutoff]
+
+        await self._server.set(key, json.dumps(peers))
+        logger.debug(f"Announced model:{model_name} on DHT ({len(peers)} peers)")
+
+    async def find_model_peers(self, model_name: str) -> list[dict]:
+        """Find peers serving a specific model via DHT.
+
+        Returns list of untrusted hints: [{peer_id, addresses, ts}]
+        """
+        if not self._server:
+            return []
+        key = f"model:{model_name}"
+        result = await self._server.get(key)
+        if result:
+            try:
+                peers = json.loads(result)
+                # Filter stale
+                cutoff = time.time() - 600
+                return [p for p in peers if p.get("ts", 0) > cutoff]
+            except json.JSONDecodeError:
+                return []
+        return []
+
     async def find_peers(self) -> list[dict]:
         """Discover peers from DHT neighbors.
 
         Returns list of untrusted hints.
         """
-        # In Phase 1, peers are found via bootstrap list.
-        # DHT discovery is supplementary.
-        return []
+        if not self._server:
+            return []
+        # Query for known peer announcements
+        results = []
+        try:
+            # Get neighbors from the routing table
+            for bucket in self._server.protocol.router.buckets:
+                for node in bucket.get_nodes():
+                    peer_data = await self._server.get(node.id.hex())
+                    if peer_data:
+                        try:
+                            results.append(json.loads(peer_data))
+                        except json.JSONDecodeError:
+                            pass
+        except Exception as e:
+            logger.debug(f"DHT find_peers error: {e}")
+        return results
 
     async def stop(self) -> None:
         if self._server:

@@ -31,6 +31,7 @@ class NodeHello:
     nonce: bytes = field(default_factory=lambda: os.urandom(32))
     timestamp: float = field(default_factory=time.time)
     signature: bytes = b""  # Sig by device key over (nonce + timestamp + peer_id)
+    observed_addr: str = ""
 
     def signable_data(self) -> bytes:
         """Data that gets signed by device key."""
@@ -53,6 +54,7 @@ class NodeHello:
             "nonce": self.nonce,
             "timestamp": self.timestamp,
             "signature": self.signature,
+            "observed_addr": self.observed_addr,
         })
 
     @classmethod
@@ -66,6 +68,7 @@ class NodeHello:
             nonce=obj["nonce"],
             timestamp=obj["timestamp"],
             signature=obj["signature"],
+            observed_addr=obj.get("observed_addr", ""),
         )
 
 

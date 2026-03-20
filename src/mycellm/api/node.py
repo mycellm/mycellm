@@ -151,6 +151,13 @@ async def model_config(model_name: str, request: Request):
     return result
 
 
+@router.get("/connections")
+async def node_connections(request: Request):
+    """Diagnostic endpoint showing per-peer connection state."""
+    node = request.app.state.node
+    return {"connections": node.peer_manager.get_connections()}
+
+
 @router.get("/logs")
 async def get_logs(request: Request, limit: int = 100):
     """Get recent log entries."""

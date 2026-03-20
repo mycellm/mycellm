@@ -26,6 +26,19 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE INDEX IF NOT EXISTS idx_transactions_peer ON transactions(peer_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_ts ON transactions(timestamp);
+
+CREATE TABLE IF NOT EXISTS receipts (
+    tx_id TEXT PRIMARY KEY,
+    consumer_id TEXT NOT NULL,
+    seeder_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    tokens INTEGER NOT NULL,
+    cost REAL NOT NULL,
+    signature TEXT NOT NULL,
+    timestamp REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_receipts_consumer ON receipts(consumer_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_seeder ON receipts(seeder_id);
 """
 
 

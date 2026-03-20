@@ -87,6 +87,40 @@ class PeerRegistry:
             if p.state in (PeerState.AUTHENTICATED, PeerState.ROUTABLE, PeerState.SERVING)
         ]
 
+    def peers_for_tag(self, tag: str) -> list[PeerEntry]:
+        """Get all routable peers that have models with a given tag."""
+        entries = []
+        for entry in self._peers.values():
+            if entry.state not in (PeerState.ROUTABLE, PeerState.SERVING):
+                continue
+            for m in entry.capabilities.models:
+                if tag.lower() in [t.lower() for t in getattr(m, 'tags', [])]:
+                    entries.append(entry)
+                    break
+        return entries
+
+    def peers_for_tier(self, tier: str) -> list[PeerEntry]:
+        """Get all routable peers that have models in a given tier."""
+        entries = []
+        for entry in self._peers.values():
+            if entry.state not in (PeerState.ROUTABLE, PeerState.SERVING):
+                continue
+            for m in entry.capabilities.models:
+                if getattr(m, 'tier', '') == tier.lower():
+                    entries.append(entry)
+                    break
+        return entries
+
+    def all_models(self) -> list[tuple[str, str]]:
+        """Get all (model_name, peer_id) tuples across the network."""
+        result = []
+        for entry in self._peers.values():
+            if entry.state not in (PeerState.ROUTABLE, PeerState.SERVING):
+                continue
+            for m in entry.capabilities.models:
+                result.append((m.name, entry.peer_id))
+        return result
+
     def _remove_from_model_index(self, peer_id: str) -> None:
         for model_peers in self._model_index.values():
             model_peers.discard(peer_id)

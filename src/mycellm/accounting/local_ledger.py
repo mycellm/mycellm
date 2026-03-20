@@ -98,3 +98,37 @@ class LocalLedger:
             )
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+    async def store_receipt(
+        self,
+        tx_id: str,
+        consumer_id: str,
+        seeder_id: str,
+        model: str,
+        tokens: int,
+        cost: float,
+        signature: str,
+    ) -> None:
+        """Store a verified credit receipt."""
+        now = time.time()
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """INSERT OR REPLACE INTO receipts
+                   (tx_id, consumer_id, seeder_id, model, tokens, cost, signature, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (tx_id, consumer_id, seeder_id, model, tokens, cost, signature, now),
+            )
+            await db.commit()
+
+    async def get_receipts(self, peer_id: str, limit: int = 50) -> list[dict]:
+        """Get receipts involving a peer (as consumer or seeder)."""
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM receipts
+                   WHERE consumer_id = ? OR seeder_id = ?
+                   ORDER BY timestamp DESC LIMIT ?""",
+                (peer_id, peer_id, limit),
+            )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

@@ -15,14 +15,24 @@ class ModelCapability:
     quant: str = ""
     ctx_len: int = 4096
     backend: str = "llama.cpp"
+    tags: list[str] = field(default_factory=list)
+    tier: str = ""
+    param_count_b: float = 0.0
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "name": self.name,
             "quant": self.quant,
             "ctx_len": self.ctx_len,
             "backend": self.backend,
         }
+        if self.tags:
+            d["tags"] = self.tags
+        if self.tier:
+            d["tier"] = self.tier
+        if self.param_count_b > 0:
+            d["param_count_b"] = self.param_count_b
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> ModelCapability:
@@ -31,6 +41,9 @@ class ModelCapability:
             quant=d.get("quant", ""),
             ctx_len=d.get("ctx_len", 4096),
             backend=d.get("backend", "llama.cpp"),
+            tags=d.get("tags", []),
+            tier=d.get("tier", ""),
+            param_count_b=d.get("param_count_b", 0.0),
         )
 
 
