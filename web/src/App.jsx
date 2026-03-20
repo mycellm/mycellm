@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react'
 import {
   Terminal, Activity, Server, Globe, Cpu, Database, Zap, Shield, Key,
   Send, Plus, Trash2, RefreshCw, MessageSquare, BarChart3, Network,
   Boxes, ChevronRight, Loader2, AlertCircle, Check, X, Eye, EyeOff,
+  Radio, MonitorSmartphone, ChevronDown,
 } from 'lucide-react'
 
 // ── Constants ──
@@ -47,6 +48,48 @@ async function api(path, opts) {
   const resp = await fetch(path, opts)
   if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`)
   return resp.json()
+}
+
+/** Call a remote node's API directly (browser → peer IP). */
+async function remoteApi(nodeAddr, path, opts) {
+  const base = nodeAddr.startsWith('http') ? nodeAddr : `http://${nodeAddr}`
+  const resp = await fetch(`${base}${path}`, opts)
+  if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`)
+  return resp.json()
+}
+
+// ── Node Context (for managed nodes registry) ──
+
+const NodeRegistryContext = createContext(null)
+
+function useNodeRegistry() {
+  return useContext(NodeRegistryContext)
+}
+
+/** Persistent node registry stored in localStorage */
+function useManagedNodes() {
+  const [nodes, setNodes] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mycellm_managed_nodes')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+
+  const save = (updated) => {
+    setNodes(updated)
+    localStorage.setItem('mycellm_managed_nodes', JSON.stringify(updated))
+  }
+
+  const addNode = (addr, label) => {
+    if (nodes.find(n => n.addr === addr)) return
+    save([...nodes, { addr, label, addedAt: Date.now() }])
+  }
+
+  const removeNode = (addr) => {
+    save(nodes.filter(n => n.addr !== addr))
+  }
+
+  return { nodes, addNode, removeNode }
 }
 
 // ── Boot Screen ──
@@ -106,7 +149,7 @@ function BootScreen({ onDone }) {
   )
 }
 
-// ── Stat Card ──
+// ── Reusable Components ──
 
 function StatCard({ label, value, sub, icon: Icon, color = 'text-white', highlight = false }) {
   return (
@@ -117,6 +160,26 @@ function StatCard({ label, value, sub, icon: Icon, color = 'text-white', highlig
         <span className={`text-3xl font-mono ${color}`}>{value}</span>
       </div>
       {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+    </div>
+  )
+}
+
+function NodeSelector({ selected, onSelect, includeLocal = true }) {
+  const { nodes } = useNodeRegistry()
+  const allNodes = [
+    ...(includeLocal ? [{ addr: '', label: 'This node (local)' }] : []),
+    ...nodes,
+  ]
+  if (allNodes.length <= 1 && includeLocal) return null
+  return (
+    <div className="flex items-center space-x-2 mb-4">
+      <MonitorSmartphone size={14} className="text-gray-500" />
+      <select value={selected} onChange={e => onSelect(e.target.value)}
+        className="bg-black border border-white/10 rounded-lg px-3 py-1.5 text-sm font-mono text-white focus:border-spore/50 focus:outline-none">
+        {allNodes.map(n => (
+          <option key={n.addr} value={n.addr}>{n.label || n.addr}</option>
+        ))}
+      </select>
     </div>
   )
 }
@@ -186,22 +249,146 @@ function OverviewTab({ status, credits }) {
   )
 }
 
-// ── Network Tab ──
+// ── Network Tab (with node management) ──
 
 function NetworkTab({ status }) {
+  const { nodes, addNode, removeNode } = useNodeRegistry()
   const [networkModels, setNetworkModels] = useState([])
+  const [remoteStatuses, setRemoteStatuses] = useState({}) // addr -> status|error
+  const [newAddr, setNewAddr] = useState('')
+  const [newLabel, setNewLabel] = useState('')
   const peers = status?.peers || []
 
+  // Fetch network-wide models from local node
   useEffect(() => {
-    api('/v1/models').then(d => setNetworkModels(d.data || [])).catch(() => {})
-    const iv = setInterval(() => {
-      api('/v1/models').then(d => setNetworkModels(d.data || [])).catch(() => {})
-    }, 5000)
+    const fetch_ = () => api('/v1/models').then(d => setNetworkModels(d.data || [])).catch(() => {})
+    fetch_()
+    const iv = setInterval(fetch_, 5000)
     return () => clearInterval(iv)
   }, [])
 
+  // Poll remote node statuses
+  useEffect(() => {
+    if (nodes.length === 0) return
+    const fetchRemote = async () => {
+      const results = {}
+      await Promise.all(nodes.map(async (n) => {
+        try {
+          const [s, c] = await Promise.all([
+            remoteApi(n.addr, '/v1/node/status'),
+            remoteApi(n.addr, '/v1/node/credits'),
+          ])
+          results[n.addr] = { ...s, credits: c, online: true }
+        } catch (e) {
+          results[n.addr] = { online: false, error: e.message }
+        }
+      }))
+      setRemoteStatuses(results)
+    }
+    fetchRemote()
+    const iv = setInterval(fetchRemote, 5000)
+    return () => clearInterval(iv)
+  }, [nodes])
+
+  const handleAddNode = () => {
+    if (!newAddr.trim()) return
+    // Normalize: ensure it has port
+    let addr = newAddr.trim()
+    if (!addr.includes(':')) addr += ':8420'
+    addNode(addr, newLabel.trim() || addr)
+    setNewAddr('')
+    setNewLabel('')
+  }
+
   return (
     <div className="space-y-6">
+      {/* Add Managed Node */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Managed Nodes</h2>
+        <p className="text-xs text-gray-500 mb-4">
+          Register remote node addresses to manage them from this dashboard.
+          Your browser connects directly to each node's API.
+        </p>
+        <div className="flex space-x-2 mb-4">
+          <input value={newLabel} onChange={e => setNewLabel(e.target.value)}
+            placeholder="Label (e.g. hokulea)"
+            className="w-36 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+          <input value={newAddr} onChange={e => setNewAddr(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAddNode()}
+            placeholder="IP:port (e.g. 10.1.1.11:8420)"
+            className="flex-grow bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+          <button onClick={handleAddNode} disabled={!newAddr.trim()}
+            className="bg-spore text-black px-3 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 transition-all">
+            <Plus size={14} />
+          </button>
+        </div>
+
+        {/* Node cards */}
+        <div className="space-y-3">
+          {nodes.map((n) => {
+            const rs = remoteStatuses[n.addr]
+            const online = rs?.online
+            const hw = rs?.hardware || {}
+            const models = rs?.models || []
+            const peerCount = rs?.peers?.length || 0
+            return (
+              <div key={n.addr} className={`border rounded-xl p-4 ${online ? 'border-white/10 bg-black' : 'border-compute/20 bg-compute/5'}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-spore animate-pulse' : 'bg-compute'}`} />
+                    <span className="font-mono text-sm font-medium">{n.label}</span>
+                    <span className="font-mono text-xs text-gray-500">{n.addr}</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {online && (
+                      <span className="text-xs text-spore font-mono">online</span>
+                    )}
+                    {!online && (
+                      <span className="text-xs text-compute font-mono">offline</span>
+                    )}
+                    <button onClick={() => removeNode(n.addr)}
+                      className="text-gray-600 hover:text-compute transition-colors p-1">
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+                {online && (
+                  <div className="grid grid-cols-4 gap-3 mt-3">
+                    <div className="text-xs">
+                      <span className="text-gray-500">Hardware</span>
+                      <div className="text-gray-300 mt-0.5">{hw.gpu || 'CPU'} / {hw.backend || 'cpu'}</div>
+                    </div>
+                    <div className="text-xs">
+                      <span className="text-gray-500">Memory</span>
+                      <div className="text-gray-300 mt-0.5">{hw.vram_gb > 0 ? `${hw.vram_gb.toFixed(1)} GB` : 'N/A'}</div>
+                    </div>
+                    <div className="text-xs">
+                      <span className="text-gray-500">Models</span>
+                      <div className="text-gray-300 mt-0.5">
+                        {models.length > 0 ? models.map(m => m.name).join(', ') : 'none'}
+                      </div>
+                    </div>
+                    <div className="text-xs">
+                      <span className="text-gray-500">Peers</span>
+                      <div className="text-gray-300 mt-0.5">{peerCount}</div>
+                    </div>
+                  </div>
+                )}
+                {!online && rs?.error && (
+                  <div className="text-xs text-compute/70 mt-1">{rs.error}</div>
+                )}
+              </div>
+            )
+          })}
+          {nodes.length === 0 && (
+            <div className="text-center py-6 text-gray-600 text-sm">
+              <Radio size={24} className="mx-auto mb-2 opacity-30" />
+              No remote nodes registered. Add node addresses above.
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Network Models */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
         <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Models Across Network</h2>
@@ -224,10 +411,10 @@ function NetworkTab({ status }) {
         )}
       </div>
 
-      {/* Peer Details */}
+      {/* QUIC Peers (from protocol) */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
         <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">
-          Peers ({peers.length})
+          QUIC Peers ({peers.length})
         </h2>
         {peers.length > 0 ? (
           <div className="space-y-3">
@@ -252,8 +439,7 @@ function NetworkTab({ status }) {
         ) : (
           <div className="text-center py-8 text-gray-500">
             <Network size={32} className="mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No peers connected yet.</p>
-            <p className="text-xs mt-1">Set MYCELLM_BOOTSTRAP_PEERS on remote nodes to connect.</p>
+            <p className="text-sm">No QUIC peers connected yet.</p>
           </div>
         )}
       </div>
@@ -261,21 +447,52 @@ function NetworkTab({ status }) {
   )
 }
 
-// ── Models Tab ──
+// ── Models Tab (with remote node targeting) ──
 
 function ModelsTab({ status, onRefresh }) {
+  const { nodes } = useNodeRegistry()
+  const [targetNode, setTargetNode] = useState('') // '' = local
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [backendType, setBackendType] = useState('openai')
+  const [remoteModels, setRemoteModels] = useState(null)
 
-  // Form state
   const [form, setForm] = useState({
     name: '', model_path: '',
     api_base: 'https://openrouter.ai/api/v1', api_key: '', api_model: '', ctx_len: 4096,
   })
   const [showKey, setShowKey] = useState(false)
 
-  const models = status?.models || []
+  const localModels = status?.models || []
+  const isRemote = targetNode !== ''
+
+  // Fetch remote node's models when target changes
+  useEffect(() => {
+    if (!isRemote) { setRemoteModels(null); return }
+    const fetch_ = () => remoteApi(targetNode, '/v1/node/status')
+      .then(s => setRemoteModels(s.models || []))
+      .catch(() => setRemoteModels(null))
+    fetch_()
+    const iv = setInterval(fetch_, 5000)
+    return () => clearInterval(iv)
+  }, [targetNode, isRemote])
+
+  const models = isRemote ? (remoteModels || []) : localModels
+
+  const doApi = async (path, body) => {
+    if (isRemote) {
+      return remoteApi(targetNode, path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    }
+    return api(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
 
   const handleLoad = async () => {
     setLoading(true)
@@ -290,12 +507,11 @@ function ModelsTab({ status, onRefresh }) {
         body.api_model = form.api_model
         body.ctx_len = parseInt(form.ctx_len) || 4096
       }
-      const resp = await api('/v1/node/models/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      setResult(resp.error ? { error: resp.error } : { success: `Model "${resp.model}" loaded via ${resp.backend}` })
+      const resp = await doApi('/v1/node/models/load', body)
+      const target = isRemote ? ` on ${targetNode}` : ''
+      setResult(resp.error
+        ? { error: resp.error }
+        : { success: `Model "${resp.model}" loaded via ${resp.backend}${target}` })
       if (!resp.error) onRefresh()
     } catch (e) {
       setResult({ error: e.message })
@@ -305,22 +521,44 @@ function ModelsTab({ status, onRefresh }) {
 
   const handleUnload = async (modelName) => {
     try {
-      await api('/v1/node/models/unload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelName }),
-      })
+      await doApi('/v1/node/models/unload', { model: modelName })
       onRefresh()
     } catch (e) {
       setResult({ error: e.message })
     }
   }
 
+  const allNodes = [
+    { addr: '', label: 'This node (local)' },
+    ...nodes,
+  ]
+
   return (
     <div className="space-y-6">
+      {/* Node Selector */}
+      {nodes.length > 0 && (
+        <div className="flex items-center space-x-3 p-3 bg-[#111] border border-white/10 rounded-xl">
+          <MonitorSmartphone size={16} className="text-gray-500" />
+          <span className="text-xs text-gray-500">Target node:</span>
+          <select value={targetNode} onChange={e => setTargetNode(e.target.value)}
+            className="bg-black border border-white/10 rounded-lg px-3 py-1.5 text-sm font-mono text-white focus:border-spore/50 focus:outline-none">
+            {allNodes.map(n => (
+              <option key={n.addr} value={n.addr}>{n.label || n.addr}</option>
+            ))}
+          </select>
+          {isRemote && (
+            <span className="text-xs text-relay font-mono">
+              managing {targetNode}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Loaded Models */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Loaded Models (This Node)</h2>
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">
+          Loaded Models {isRemote ? `(${targetNode})` : '(This Node)'}
+        </h2>
         {models.length > 0 ? (
           <div className="space-y-2">
             {models.map((m, i) => (
@@ -339,13 +577,15 @@ function ModelsTab({ status, onRefresh }) {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-gray-500">No models loaded on this node.</p>
+          <p className="text-sm text-gray-500">No models loaded{isRemote ? ` on ${targetNode}` : ''}.</p>
         )}
       </div>
 
       {/* Load Model Form */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Load Model</h2>
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">
+          Load Model {isRemote ? `→ ${targetNode}` : ''}
+        </h2>
 
         {/* Backend toggle */}
         <div className="flex bg-black rounded-lg p-1 border border-white/10 mb-5">
@@ -373,7 +613,7 @@ function ModelsTab({ status, onRefresh }) {
 
           {backendType === 'llama.cpp' ? (
             <div>
-              <label className="text-xs text-gray-500 block mb-1">Model Path (GGUF file)</label>
+              <label className="text-xs text-gray-500 block mb-1">Model Path (GGUF file on target node)</label>
               <input value={form.model_path} onChange={e => setForm(f => ({ ...f, model_path: e.target.value }))}
                 placeholder="/path/to/model.gguf"
                 className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
@@ -494,7 +734,11 @@ function ChatTab() {
           {models.map(m => <option key={m.id} value={m.id}>{m.id} ({m.owned_by})</option>)}
           {models.length === 0 && <option value="">No models available</option>}
         </select>
-        <button onClick={() => { setMessages([]); }}
+        <button onClick={() => api('/v1/models').then(d => { setModels(d.data || []) }).catch(() => {})}
+          className="text-gray-500 hover:text-gray-300 transition-colors">
+          <RefreshCw size={12} />
+        </button>
+        <button onClick={() => setMessages([])}
           className="ml-auto text-xs text-gray-500 hover:text-gray-300 flex items-center space-x-1">
           <Trash2 size={12} /><span>Clear</span>
         </button>
@@ -559,14 +803,11 @@ function CreditsTab({ credits }) {
   const [history, setHistory] = useState([])
 
   useEffect(() => {
-    api('/v1/node/credits/history?limit=100')
+    const fetch_ = () => api('/v1/node/credits/history?limit=100')
       .then(d => setHistory(d.transactions || []))
       .catch(() => {})
-    const iv = setInterval(() => {
-      api('/v1/node/credits/history?limit=100')
-        .then(d => setHistory(d.transactions || []))
-        .catch(() => {})
-    }, 5000)
+    fetch_()
+    const iv = setInterval(fetch_, 5000)
     return () => clearInterval(iv)
   }, [])
 
@@ -651,6 +892,7 @@ export default function App() {
   const [credits, setCredits] = useState({ balance: 0, earned: 0, spent: 0 })
   const [logs, setLogs] = useState([])
   const [refreshTick, setRefreshTick] = useState(0)
+  const nodeRegistry = useManagedNodes()
 
   const triggerRefresh = useCallback(() => setRefreshTick(t => t + 1), [])
 
@@ -675,11 +917,7 @@ export default function App() {
   // SSE log stream
   useEffect(() => {
     if (appState !== 'dashboard') return
-
-    // Fetch initial logs
     api('/v1/node/logs?limit=200').then(d => setLogs(d.logs || [])).catch(() => {})
-
-    // Stream new logs
     const es = new EventSource('/v1/node/logs/stream')
     es.onmessage = (event) => {
       try {
@@ -701,62 +939,68 @@ export default function App() {
   const peerId = status?.peer_id || ''
 
   return (
-    <div className="min-h-screen bg-void text-console font-sans">
-      {/* Header */}
-      <header className="border-b border-white/10 bg-void/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <pre className="text-[4px] leading-none text-compute drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
-            <span className="font-mono text-xl font-bold tracking-tighter text-white">
-              mycellm<span className="text-spore">.</span>
-            </span>
-            <div className="h-4 w-px bg-white/20 mx-2" />
-            <span className="font-mono text-xs bg-white/10 text-gray-300 px-2 py-1 rounded">{nodeName}</span>
-            {peerId && <span className="font-mono text-xs text-gray-600 hidden md:inline">{peerId.slice(0, 12)}...</span>}
+    <NodeRegistryContext.Provider value={nodeRegistry}>
+      <div className="min-h-screen bg-void text-console font-sans">
+        {/* Header */}
+        <header className="border-b border-white/10 bg-void/80 backdrop-blur-md sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <pre className="text-[4px] leading-none text-compute drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
+              <span className="font-mono text-xl font-bold tracking-tighter text-white">
+                mycellm<span className="text-spore">.</span>
+              </span>
+              <div className="h-4 w-px bg-white/20 mx-2" />
+              <span className="font-mono text-xs bg-white/10 text-gray-300 px-2 py-1 rounded">{nodeName}</span>
+              {peerId && <span className="font-mono text-xs text-gray-600 hidden md:inline">{peerId.slice(0, 12)}...</span>}
+            </div>
+            <div className="flex items-center space-x-5 font-mono text-sm">
+              <div className="flex items-center space-x-1.5 text-relay">
+                <Activity size={13} />
+                <span>{status?.peers?.length || 0} peers</span>
+              </div>
+              <div className="flex items-center space-x-1.5 text-relay">
+                <Radio size={13} />
+                <span>{nodeRegistry.nodes.length} nodes</span>
+              </div>
+              <div className="flex items-center space-x-1.5 text-ledger drop-shadow-[0_0_8px_rgba(250,204,21,0.15)]">
+                <Key size={13} />
+                <span>{credits.balance?.toFixed(2)}</span>
+              </div>
+              <div className={`flex items-center space-x-1.5 ${status ? 'text-spore' : 'text-gray-600'}`}>
+                <Shield size={13} />
+                <span className="hidden sm:inline">{status ? 'Online' : 'Offline'}</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center space-x-5 font-mono text-sm">
-            <div className="flex items-center space-x-1.5 text-relay">
-              <Activity size={13} />
-              <span>{status?.peers?.length || 0} peers</span>
-            </div>
-            <div className="flex items-center space-x-1.5 text-ledger drop-shadow-[0_0_8px_rgba(250,204,21,0.15)]">
-              <Key size={13} />
-              <span>{credits.balance?.toFixed(2)}</span>
-            </div>
-            <div className={`flex items-center space-x-1.5 ${status ? 'text-spore' : 'text-gray-600'}`}>
-              <Shield size={13} />
-              <span className="hidden sm:inline">{status ? 'Online' : 'Offline'}</span>
-            </div>
+        </header>
+
+        {/* Tab nav */}
+        <nav className="border-b border-white/5 bg-void/60">
+          <div className="max-w-7xl mx-auto px-4 flex space-x-1 overflow-x-auto">
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+                  tab === t.id
+                    ? 'border-spore text-white'
+                    : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}>
+                <t.icon size={14} />
+                <span>{t.label}</span>
+              </button>
+            ))}
           </div>
-        </div>
-      </header>
+        </nav>
 
-      {/* Tab nav */}
-      <nav className="border-b border-white/5 bg-void/60">
-        <div className="max-w-7xl mx-auto px-4 flex space-x-1 overflow-x-auto">
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
-                tab === t.id
-                  ? 'border-spore text-white'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}>
-              <t.icon size={14} />
-              <span>{t.label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {/* Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {tab === 'overview' && <OverviewTab status={status} credits={credits} />}
-        {tab === 'network' && <NetworkTab status={status} />}
-        {tab === 'models' && <ModelsTab status={status} onRefresh={triggerRefresh} />}
-        {tab === 'chat' && <ChatTab />}
-        {tab === 'credits' && <CreditsTab credits={credits} />}
-        {tab === 'logs' && <LogsTab logs={logs} />}
-      </main>
-    </div>
+        {/* Content */}
+        <main className="max-w-7xl mx-auto px-4 py-6">
+          {tab === 'overview' && <OverviewTab status={status} credits={credits} />}
+          {tab === 'network' && <NetworkTab status={status} />}
+          {tab === 'models' && <ModelsTab status={status} onRefresh={triggerRefresh} />}
+          {tab === 'chat' && <ChatTab />}
+          {tab === 'credits' && <CreditsTab credits={credits} />}
+          {tab === 'logs' && <LogsTab logs={logs} />}
+        </main>
+      </div>
+    </NodeRegistryContext.Provider>
   )
 }

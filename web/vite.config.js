@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: '../src/mycellm/web',
-    emptyOutDir: false,
+    emptyOutDir: true,
   },
   server: {
     proxy: {
