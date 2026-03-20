@@ -7,10 +7,10 @@ name = "mycellm"
 version = "0.1.0"
 description = "Distributed LLM inference across heterogeneous hardware"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [
-    { name = "Mycellm Contributors" },
+    { name = "Michael Gifford-Santos", email = "michael@mycellm.ai" },
 ]
 keywords = ["llm", "distributed", "inference", "p2p"]
 classifiers = [
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
