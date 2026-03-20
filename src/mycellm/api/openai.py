@@ -53,9 +53,12 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     """OpenAI-compatible chat completions endpoint."""
     from fastapi.responses import JSONResponse
     from mycellm.router.model_resolver import ModelResolver
+    from mycellm.activity import EventType
 
     node = request.app.state.node
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    start_time = time.time()
+    node.activity.record(EventType.INFERENCE_START, model=body.model, source="api")
 
     if body.stream:
         return await _stream_response(node, body, messages)
@@ -84,6 +87,13 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 if result:
                     text = result.get("text", "") if isinstance(result, dict) else result.text
                     routed_to = f"quic:{best.peer_id[:8]}"
+                    node.activity.record(
+                        EventType.INFERENCE_COMPLETE,
+                        model=best.model_name,
+                        source="quic",
+                        routed_to=routed_to,
+                        latency_ms=round((time.time() - start_time) * 1000),
+                    )
                     resp_data = ChatCompletionResponse(
                         model=best.model_name,
                         choices=[
@@ -118,6 +128,13 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             top_p=body.top_p,
         )
         result = await node.inference.generate(req)
+        node.activity.record(
+            EventType.INFERENCE_COMPLETE,
+            model=model_name,
+            source="local",
+            tokens=result.prompt_tokens + result.completion_tokens,
+            latency_ms=round((time.time() - start_time) * 1000),
+        )
         resp_data = ChatCompletionResponse(
             model=model_name,
             choices=[
@@ -144,6 +161,13 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     )
     if result:
         text = result.get("text", "") if isinstance(result, dict) else result.text
+        node.activity.record(
+            EventType.INFERENCE_COMPLETE,
+            model=body.model,
+            source="quic",
+            routed_to="quic:peer",
+            latency_ms=round((time.time() - start_time) * 1000),
+        )
         resp_data = ChatCompletionResponse(
             model=body.model or "remote",
             choices=[
@@ -162,6 +186,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         return fleet_result
 
     # No model available — descriptive error
+    node.activity.record(EventType.INFERENCE_FAILED, model=body.model, error="no_model_available")
     error_detail = "No model available on the network."
     if body.model:
         error_detail = f"Model '{body.model}' not found. No local, peer, or fleet nodes serve this model."
@@ -322,8 +347,18 @@ async def _route_via_fleet(
                             node.peer_id, cost, "inference_consumed",
                             counterparty_id=entry.get("peer_id", ""),
                         )
+                        from mycellm.activity import EventType as _ET
+                        node.activity.record(_ET.CREDIT_SPENT, amount=cost, reason="inference_consumed")
 
                     routed_to = f"fleet:{node_name}"
+                    from mycellm.activity import EventType as _ET
+                    node.activity.record(
+                        _ET.INFERENCE_COMPLETE,
+                        model=model_to_route or body.model,
+                        source="fleet",
+                        routed_to=routed_to,
+                        tokens=usage.get("total_tokens", 0),
+                    )
                     resp_data = ChatCompletionResponse(
                         model=data.get("model", model_to_route or body.model),
                         choices=[

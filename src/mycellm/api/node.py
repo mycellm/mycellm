@@ -8,6 +8,8 @@ import json
 from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
 
+from mycellm.activity import EventType
+
 router = APIRouter()
 
 
@@ -99,6 +101,7 @@ async def load_model(request: Request):
         # Update capabilities and announce to peers
         node.capabilities.models = node.inference.loaded_models
         await node.announce_capabilities()
+        node.activity.record(EventType.MODEL_LOADED, model=loaded_name, backend=backend_type)
         return {"status": "loaded", "model": loaded_name, "backend": backend_type}
     except Exception as e:
         return {"error": str(e)}
@@ -116,6 +119,7 @@ async def unload_model(request: Request):
     await node.inference.unload_model(model_name)
     node.capabilities.models = node.inference.loaded_models
     await node.announce_capabilities()
+    node.activity.record(EventType.MODEL_UNLOADED, model=model_name)
     return {"status": "unloaded", "model": model_name}
 
 
@@ -181,5 +185,40 @@ async def stream_logs(request: Request):
             pass
         finally:
             node.log_broadcaster.unsubscribe(q)
+
+    return EventSourceResponse(generate())
+
+
+@router.get("/activity")
+async def node_activity(request: Request, limit: int = 50, type: str = None):
+    """Get recent activity events and rolling stats."""
+    node = request.app.state.node
+    return {
+        "events": node.activity.recent(limit=limit, event_type=type),
+        "stats": node.activity.stats(),
+        "sparklines": {
+            "requests": node.activity.sparkline("requests", 30),
+            "tokens": node.activity.sparkline("tokens", 30),
+            "credits_earned": node.activity.sparkline("credits_earned", 30),
+            "credits_spent": node.activity.sparkline("credits_spent", 30),
+        },
+    }
+
+
+@router.get("/activity/stream")
+async def stream_activity(request: Request):
+    """Stream activity events via SSE."""
+    node = request.app.state.node
+    q = node.activity.subscribe()
+
+    async def generate():
+        try:
+            while True:
+                event = await q.get()
+                yield json.dumps(event.to_dict())
+        except asyncio.CancelledError:
+            pass
+        finally:
+            node.activity.unsubscribe(q)
 
     return EventSourceResponse(generate())
