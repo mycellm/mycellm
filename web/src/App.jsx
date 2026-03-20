@@ -946,6 +946,85 @@ function NodeDetailPanel({ node, onClose }) {
   )
 }
 
+// ── Hardware Card ──
+
+function HardwareCard({ node, compact = false }) {
+  const gpuName = node.gpu || 'CPU'
+  const isGpu = gpuName !== 'CPU' && gpuName !== 'none'
+  const vramPct = node.vram_gb > 0 ? Math.min(100, (node.ram_used_pct || 50)) : 0
+
+  const backendColors = { cuda: 'text-spore', metal: 'text-relay', rocm: 'text-poison', cpu: 'text-gray-500' }
+  const backendColor = backendColors[node.backend] || 'text-gray-500'
+
+  if (compact) {
+    return (
+      <div className={`border rounded-lg p-3 transition-colors ${node.online !== false ? 'border-white/10 bg-black' : 'border-white/5 bg-black/50 opacity-50'}`}>
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${node.online !== false ? 'bg-spore' : 'bg-gray-600'}`} />
+            <span className="font-mono text-xs text-white truncate max-w-[120px]">{node.name}</span>
+          </div>
+          {node.tps > 0 && <span className="text-xs font-mono text-compute">{node.tps} T/s</span>}
+        </div>
+        <div className="text-xs text-gray-500 truncate">{gpuName}</div>
+        {node.models && node.models.length > 0 && (
+          <div className="text-xs text-gray-600 mt-1 truncate">{node.models.length} model{node.models.length !== 1 ? 's' : ''}</div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className={`border rounded-xl p-4 transition-colors ${node.online !== false ? 'border-white/10 bg-[#0d0d0d]' : 'border-white/5 bg-black/50 opacity-50'}`}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-2">
+          <div className={`w-2.5 h-2.5 rounded-full ${node.online !== false ? 'bg-spore' : 'bg-gray-600'}`} />
+          <span className="font-mono text-sm text-white font-medium">{node.name}</span>
+        </div>
+        <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${node.type === 'self' ? 'bg-spore/10 text-spore' : 'bg-white/5 text-gray-500'}`}>
+          {node.type}
+        </span>
+      </div>
+
+      {/* GPU / Accelerator */}
+      <div className="flex items-center space-x-2 mb-2">
+        <Cpu size={13} className={backendColor} />
+        <span className="text-sm text-gray-300">{gpuName}</span>
+      </div>
+
+      {/* VRAM / RAM gauge */}
+      {(node.vram_gb > 0 || node.ram_gb > 0) && (
+        <div className="mb-2">
+          <div className="flex justify-between text-xs text-gray-500 mb-0.5">
+            <span>{isGpu ? 'VRAM' : 'RAM'}</span>
+            <span>{isGpu ? node.vram_gb : node.ram_gb} GB</span>
+          </div>
+          <div className="w-full bg-void rounded-full h-1.5 overflow-hidden border border-white/5">
+            <div className={`h-full transition-all ${vramPct > 85 ? 'bg-compute' : vramPct > 60 ? 'bg-ledger' : 'bg-spore'}`}
+              style={{ width: `${vramPct || 30}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Stats row */}
+      <div className="flex items-center space-x-3 text-xs text-gray-500 mt-2">
+        <span className={backendColor}>{(node.backend || 'cpu').toUpperCase()}</span>
+        {node.tps > 0 && <span className="text-compute font-mono">{node.tps} T/s</span>}
+        {node.models && <span>{node.models.length} model{node.models.length !== 1 ? 's' : ''}</span>}
+      </div>
+
+      {/* Model list */}
+      {node.models && node.models.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {node.models.map((m, i) => (
+            <span key={i} className="text-xs font-mono bg-white/5 text-gray-400 px-1.5 py-0.5 rounded truncate max-w-[150px]">{m}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Overview Tab ──
 
 function OverviewTab({ status, credits, fleetNodes }) {
@@ -955,11 +1034,18 @@ function OverviewTab({ status, credits, fleetNodes }) {
   const [liveEvents, setLiveEvents] = useState([])
   const [federation, setFederation] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
+  const [fleetHardware, setFleetHardware] = useState(null)
   const peers = status?.peers || []
   const models = status?.models || []
   const uptime = status?.uptime_seconds || 0
+  const mode = status?.mode || 'standalone'
 
   useEffect(() => { api('/v1/node/system').then(setSysInfo).catch(() => {}) }, [])
+  useEffect(() => {
+    api('/v1/node/fleet/hardware').then(setFleetHardware).catch(() => {})
+    const iv = setInterval(() => api('/v1/node/fleet/hardware').then(setFleetHardware).catch(() => {}), 10000)
+    return () => clearInterval(iv)
+  }, [])
   useEffect(() => {
     const f = () => api('/v1/node/connections').then(d => setConnections(d.connections || [])).catch(() => {})
     f(); const iv = setInterval(f, 5000); return () => clearInterval(iv)
@@ -1011,7 +1097,16 @@ function OverviewTab({ status, credits, fleetNodes }) {
             {roleIcons[status?.role] || '\u{1F5A5}\uFE0F'}
           </div>
           <div>
-            <h2 className="text-white font-mono font-bold text-sm">{status?.node_name || 'mycellm-node'}</h2>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-white font-mono font-bold text-sm">{status?.node_name || 'mycellm-node'}</h2>
+              <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
+                mode === 'root' ? 'bg-ledger/10 text-ledger' :
+                mode === 'seeder' ? 'bg-spore/10 text-spore' :
+                mode === 'federated' ? 'bg-relay/10 text-relay' :
+                mode === 'consumer' ? 'bg-poison/10 text-poison' :
+                'bg-white/5 text-gray-500'
+              }`}>{mode}</span>
+            </div>
             <div className="flex items-center space-x-3 text-xs text-gray-500 mt-0.5">
               <span>{federation?.network_name || 'Standalone'}</span>
               {federation?.network_id && <span className="font-mono">{federation.network_id.slice(0, 8)}...</span>}
@@ -1035,6 +1130,33 @@ function OverviewTab({ status, credits, fleetNodes }) {
           </div>
         </div>
       </div>
+
+      {/* Aggregate Fleet Banner (root mode) */}
+      {fleetHardware && fleetHardware.aggregate && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
+            <div className="text-xs text-gray-500 font-mono">NODES</div>
+            <div className="text-2xl font-mono text-white mt-1">{fleetHardware.aggregate.online_nodes}/{fleetHardware.aggregate.total_nodes}</div>
+          </div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
+            <div className="text-xs text-gray-500 font-mono">AGGREGATE T/s</div>
+            <div className="text-2xl font-mono text-compute mt-1">{fleetHardware.aggregate.total_tps}</div>
+          </div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
+            <div className="text-xs text-gray-500 font-mono">COMPUTE</div>
+            <div className="text-2xl font-mono text-relay mt-1">{fleetHardware.aggregate.total_vram_gb}GB</div>
+            <div className="text-xs text-gray-600">VRAM</div>
+          </div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
+            <div className="text-xs text-gray-500 font-mono">RAM</div>
+            <div className="text-2xl font-mono text-poison mt-1">{fleetHardware.aggregate.total_ram_gb}GB</div>
+          </div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
+            <div className="text-xs text-gray-500 font-mono">MODELS</div>
+            <div className="text-2xl font-mono text-spore mt-1">{fleetHardware.aggregate.total_models}</div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Row with Sparklines */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1064,19 +1186,42 @@ function OverviewTab({ status, credits, fleetNodes }) {
           <div className="text-xs text-gray-600">+{credits.earned?.toFixed(1) || '0'} / -{credits.spent?.toFixed(1) || '0'}</div>
         </div>
         <div className="border border-white/10 bg-[#111] rounded-xl p-4">
-          <div className="text-xs text-gray-500 font-mono">INFERENCE</div>
-          <div className={`text-2xl font-mono mt-1 ${(status?.inference?.active || 0) > 0 ? 'text-compute animate-pulse' : 'text-gray-400'}`}>
-            {status?.inference?.active || 0}/{status?.inference?.max_concurrent || 2}
+          <div className="text-xs text-gray-500 font-mono">THROUGHPUT</div>
+          <div className={`text-2xl font-mono mt-1 ${stats.tps > 0 ? 'text-compute' : 'text-gray-400'}`}>
+            {stats.tps || 0} <span className="text-sm text-gray-500">T/s</span>
           </div>
-          <div className="text-xs text-gray-600">{(status?.inference?.active || 0) > 0 ? 'processing' : 'idle'}</div>
+          <div className="text-xs text-gray-600">{stats.avg_latency_ms ? `${stats.avg_latency_ms}ms avg` : 'idle'}</div>
         </div>
       </div>
 
       {/* Network Health */}
       <NetworkHealthBar connections={connections} peers={peers} fleetNodes={fleetNodes || []} />
 
-      {/* Fleet Grid */}
-      {fleetGrid.length > 1 && (
+      {/* Fleet Hardware Grid (multi-node) */}
+      {fleetHardware && fleetHardware.nodes && fleetHardware.nodes.length > 1 && (
+        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3 flex items-center space-x-2">
+            <Cpu size={12} />
+            <span>Fleet Hardware ({fleetHardware.nodes.length} nodes)</span>
+            {fleetHardware.aggregate && fleetHardware.aggregate.total_tps > 0 && (
+              <span className="text-compute font-mono ml-2">{fleetHardware.aggregate.total_tps} T/s aggregate</span>
+            )}
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {fleetHardware.nodes.map((n, i) => (
+              <HardwareCard key={i} node={n} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Single node hardware card (standalone) */}
+      {fleetHardware && fleetHardware.nodes && fleetHardware.nodes.length === 1 && (
+        <HardwareCard node={fleetHardware.nodes[0]} />
+      )}
+
+      {/* Legacy Fleet Grid fallback (when no hardware endpoint) */}
+      {!fleetHardware && fleetGrid.length > 1 && (
         <div className="border border-white/10 bg-[#111] rounded-xl p-5">
           <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3">Fleet ({fleetGrid.length} nodes)</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">

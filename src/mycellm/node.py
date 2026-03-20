@@ -898,6 +898,25 @@ class MycellmNode:
 
         return None
 
+    def get_operational_mode(self) -> str:
+        """Auto-detect operational mode from node state."""
+        has_fleet = len(self.node_registry) > 0
+        has_bootstrap = bool(self._settings.bootstrap_peers)
+        has_models = len(self.inference.loaded_models) > 0
+        has_multi_network = self.federation and len(self.federation.network_ids) > 1
+
+        if has_multi_network:
+            return "federated"
+        if has_fleet:
+            return "root"
+        if has_bootstrap and has_models:
+            return "seeder"
+        if has_bootstrap:
+            return "consumer"
+        if has_models:
+            return "standalone"
+        return "standalone"
+
     def get_status(self) -> dict:
         """Return current node status for the API."""
         peers = []
@@ -916,6 +935,8 @@ class MycellmNode:
             "peer_id": self.peer_id,
             "uptime_seconds": self.uptime,
             "role": self.capabilities.role,
+            "mode": self.get_operational_mode(),
+            "tps": self.activity.tps if hasattr(self, 'activity') else 0,
             "hardware": self.capabilities.hardware.to_dict(),
             "credits": credits,
             "peers": peers,

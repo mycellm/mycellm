@@ -115,6 +115,25 @@ class ActivityTracker:
             events = [e for e in events if e.type.value == event_type]
         return [e.to_dict() for e in events[-limit:]]
 
+    @property
+    def tps(self) -> float:
+        """Current tokens per second (rolling 60s window)."""
+        now = time.time()
+        tokens = sum(
+            e.data.get("tokens", 0) for e in self._events
+            if e.type == EventType.INFERENCE_COMPLETE and now - e.timestamp < 60
+        )
+        return round(tokens / 60.0, 1) if tokens else 0.0
+
+    @property
+    def avg_latency_ms(self) -> float:
+        """Average inference latency in ms (last 20 requests)."""
+        recent = [
+            e.data.get("latency_ms", 0) for e in self._events
+            if e.type == EventType.INFERENCE_COMPLETE and e.data.get("latency_ms")
+        ][-20:]
+        return round(sum(recent) / len(recent), 0) if recent else 0.0
+
     def stats(self) -> dict:
         """Get rolling statistics."""
         now = time.time()
@@ -135,6 +154,8 @@ class ActivityTracker:
             "tokens_per_min": tok_1m,
             "tokens_5min": tok_5m,
             "errors_5min": err_5m,
+            "tps": self.tps,
+            "avg_latency_ms": self.avg_latency_ms,
         }
 
     def sparkline(self, metric: str = "requests", minutes: int = 30) -> list[int | float]:

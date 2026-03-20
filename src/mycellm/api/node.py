@@ -462,6 +462,76 @@ async def public_dashboard(request: Request):
     }
 
 
+@router.get("/fleet/hardware")
+async def fleet_hardware(request: Request):
+    """Aggregate hardware stats across fleet nodes."""
+    node = request.app.state.node
+
+    nodes = []
+
+    # Self
+    sys_info = node.get_system_info()
+    tps = node.activity.tps if hasattr(node, 'activity') else 0
+    nodes.append({
+        "name": node._settings.node_name,
+        "peer_id": node.peer_id,
+        "type": "self",
+        "gpu": node.capabilities.hardware.gpu,
+        "vram_gb": node.capabilities.hardware.vram_gb,
+        "backend": node.capabilities.hardware.backend,
+        "ram_gb": sys_info.get("memory", {}).get("total_gb", 0),
+        "ram_used_pct": sys_info.get("memory", {}).get("used_pct", 0),
+        "models": [m.name for m in node.inference.loaded_models],
+        "tps": tps,
+        "online": True,
+        "uptime_seconds": node.uptime,
+    })
+
+    # Fleet nodes
+    for entry in node.node_registry.values():
+        if entry.get("status") != "approved":
+            continue
+        sys = entry.get("system", {})
+        hw = sys.get("gpu", entry.get("capabilities", {}).get("hardware", {}))
+        mem = sys.get("memory", {})
+        caps = entry.get("capabilities", {})
+        models = caps.get("models", [])
+
+        nodes.append({
+            "name": entry.get("node_name", ""),
+            "peer_id": entry.get("peer_id", ""),
+            "type": "fleet",
+            "gpu": hw.get("gpu", "CPU"),
+            "vram_gb": hw.get("vram_gb", 0),
+            "backend": hw.get("backend", "cpu"),
+            "ram_gb": mem.get("total_gb", 0),
+            "ram_used_pct": mem.get("used_pct", 0),
+            "models": [m.get("name", m) if isinstance(m, dict) else m for m in models],
+            "tps": 0,  # would need per-node activity polling
+            "online": entry.get("online", False),
+            "uptime_seconds": 0,
+        })
+
+    # Aggregate
+    total_tps = sum(n["tps"] for n in nodes)
+    total_vram = sum(n["vram_gb"] for n in nodes)
+    total_ram = sum(n["ram_gb"] for n in nodes)
+    total_models = len(set(m for n in nodes for m in n["models"]))
+    online_count = sum(1 for n in nodes if n["online"])
+
+    return {
+        "nodes": nodes,
+        "aggregate": {
+            "total_nodes": len(nodes),
+            "online_nodes": online_count,
+            "total_tps": round(total_tps, 1),
+            "total_vram_gb": round(total_vram, 1),
+            "total_ram_gb": round(total_ram, 1),
+            "total_models": total_models,
+        },
+    }
+
+
 @router.get("/activity")
 async def node_activity(request: Request, limit: int = 50, type: str = None):
     """Get recent activity events and rolling stats."""

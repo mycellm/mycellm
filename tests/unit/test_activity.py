@@ -90,3 +90,25 @@ def test_all_event_types_serializable():
         t.record(et, test=True)
     events = t.recent(limit=100)
     assert len(events) == len(EventType)
+
+
+def test_tps_calculation():
+    t = ActivityTracker()
+    # Simulate 100 tokens in one inference
+    t.record(EventType.INFERENCE_COMPLETE, tokens=100, latency_ms=500)
+    assert t.tps > 0  # 100 tokens in last 60s = ~1.67 tps
+
+
+def test_avg_latency():
+    t = ActivityTracker()
+    t.record(EventType.INFERENCE_COMPLETE, tokens=10, latency_ms=100)
+    t.record(EventType.INFERENCE_COMPLETE, tokens=10, latency_ms=200)
+    assert t.avg_latency_ms == 150.0
+
+
+def test_stats_includes_tps():
+    t = ActivityTracker()
+    t.record(EventType.INFERENCE_COMPLETE, tokens=50, latency_ms=200)
+    stats = t.stats()
+    assert "tps" in stats
+    assert "avg_latency_ms" in stats
