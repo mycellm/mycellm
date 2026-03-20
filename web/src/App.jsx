@@ -1346,7 +1346,15 @@ function SortHeader({ label, field, sortBy, sortDir, onSort }) {
 
 function ModelsTab({ status, onRefresh }) {
   const [devices, setDevices] = useState([]) // merged local + fleet
-  const [selected, setSelected] = useState('local') // 'local' or api_addr
+  const [selected, _setSelected] = useState('local') // 'local' or api_addr
+  const setSelected = (v) => {
+    _setSelected(v)
+    // Reset search state when switching nodes
+    setSearchResults([])
+    setRepoFiles(null)
+    setHasSearched(false)
+    setSuggestions(null)
+  }
   const [sortBy, setSortBy] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
   const [loading, setLoading] = useState(false)
@@ -1463,12 +1471,15 @@ function ModelsTab({ status, onRefresh }) {
     doFetch('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
   }, [selected, isRemote, selectedDevice?.addr])
 
+  // Helper: fetch from selected node
+  const nodeApi = (path) => isRemote && selectedDevice?.addr ? remoteApi(selectedDevice.addr, path) : api(path)
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
     setSearching(true)
     setHasSearched(true)
     try {
-      const data = await api(`/v1/node/models/search?q=${encodeURIComponent(searchQuery)}&limit=12`)
+      const data = await nodeApi(`/v1/node/models/search?q=${encodeURIComponent(searchQuery)}&limit=12`)
       setSearchResults(data.models || [])
       if (data.node_ram_gb) setNodeResources({ ram_gb: data.node_ram_gb, disk_free_gb: data.node_disk_free_gb || 0 })
     } catch (e) {
@@ -1480,7 +1491,7 @@ function ModelsTab({ status, onRefresh }) {
   // Browse repo files
   const handleBrowseRepo = async (repoId) => {
     try {
-      const data = await api(`/v1/node/models/search/${repoId}/files`)
+      const data = await nodeApi(`/v1/node/models/search/${repoId}/files`)
       setRepoFiles(data)
     } catch {}
   }
