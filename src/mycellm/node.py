@@ -483,6 +483,10 @@ class MycellmNode:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.ensure_future(self.shutdown()))
 
+        # Load persisted node registry (survives restarts)
+        from mycellm.api.admin import _load_registry
+        _load_registry(self)
+
         # Init subsystems
         await self._init_accounting()
         await self._start_transport()
@@ -544,16 +548,21 @@ class MycellmNode:
             except Exception as e:
                 logger.debug(f"{styled_tag('NODE')} Failed to announce to {host}:{api_port}: {e}")
 
-        # Re-announce periodically (every 60s) to keep registry fresh
+        # Re-announce periodically to keep registry fresh
+        # Short interval initially (bootstrap may not be up yet), then back off
+        interval = 10
         while self._running:
-            await asyncio.sleep(60)
+            await asyncio.sleep(interval)
+            interval = min(interval + 10, 60)  # ramp up to 60s
             for host, port in peers:
                 api_port = port - 1
                 url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
                 try:
                     payload["capabilities"] = self.capabilities.to_dict()
                     async with httpx.AsyncClient(timeout=10) as client:
-                        await client.post(url, json=payload, headers=headers)
+                        resp = await client.post(url, json=payload, headers=headers)
+                        if resp.status_code == 200:
+                            interval = 60  # success, slow down
                 except Exception:
                     pass
 
