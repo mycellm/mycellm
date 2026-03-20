@@ -1357,6 +1357,7 @@ function ModelsTab({ status, onRefresh }) {
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
+  const [filterCompatible, setFilterCompatible] = useState(true)
   const [repoFiles, setRepoFiles] = useState(null) // { repo_id, files }
   const [downloadStatus, setDownloadStatus] = useState({})
 
@@ -1464,7 +1465,7 @@ function ModelsTab({ status, onRefresh }) {
   // Browse repo files
   const handleBrowseRepo = async (repoId) => {
     try {
-      const data = await api(`/v1/node/models/search/${encodeURIComponent(repoId)}/files`)
+      const data = await api(`/v1/node/models/search/${repoId}/files`)
       setRepoFiles(data)
     } catch {}
   }
@@ -1681,7 +1682,11 @@ function ModelsTab({ status, onRefresh }) {
                       </div>
                     </div>
                     <div className="flex items-center space-x-3">
-                      {repoFiles.disk_free_gb > 0 && <span className="text-xs text-gray-600">{repoFiles.disk_free_gb}GB disk free</span>}
+                      {repoFiles.disk_free_gb > 0 && <span className="text-xs text-gray-600">{repoFiles.disk_free_gb}GB free</span>}
+                      <button onClick={() => setFilterCompatible(f => !f)}
+                        className={`text-xs px-2 py-0.5 rounded border transition-colors ${filterCompatible ? 'border-spore/30 text-spore bg-spore/5' : 'border-white/10 text-gray-500'}`}>
+                        {filterCompatible ? 'Compatible only' : 'Show all'}
+                      </button>
                       <button onClick={() => setRepoFiles(null)} className="text-xs text-gray-500 hover:text-white">&times;</button>
                     </div>
                   </div>
@@ -1697,7 +1702,7 @@ function ModelsTab({ status, onRefresh }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {(repoFiles.files || []).map((f, i) => {
+                        {(repoFiles.files || []).filter(f => !filterCompatible || !f.warnings || f.warnings.length === 0).map((f, i) => {
                           const dlKey = `${repoFiles.repo_id}/${f.filename}`.replace(/\//g, '_').slice(0, 32)
                           const dl = downloadStatus[dlKey]
                           const hasWarnings = f.warnings && f.warnings.length > 0
@@ -1734,6 +1739,12 @@ function ModelsTab({ status, onRefresh }) {
                         })}
                       </tbody>
                     </table>
+                    {filterCompatible && (repoFiles.files || []).some(f => f.warnings?.length > 0) && (
+                      <div className="text-xs text-gray-600 mt-2 px-1">
+                        {(repoFiles.files || []).filter(f => f.warnings?.length > 0).length} variant(s) hidden (exceed node resources).
+                        <button onClick={() => setFilterCompatible(false)} className="text-gray-400 hover:text-white ml-1 underline">Show all</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
