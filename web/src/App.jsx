@@ -1669,31 +1669,69 @@ function ModelsTab({ status, onRefresh }) {
               {/* Repo file picker */}
               {repoFiles && (
                 <div className="bg-black border border-white/10 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-mono text-sm text-white">{repoFiles.repo_id}</span>
-                    <button onClick={() => setRepoFiles(null)} className="text-xs text-gray-500 hover:text-white">&times; close</button>
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="font-mono text-sm text-white">{repoFiles.repo_id}</span>
+                      <div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">
+                        {repoFiles.param_b > 0 && <span>{repoFiles.param_b}B params</span>}
+                        {repoFiles.architecture && <span>{repoFiles.architecture}</span>}
+                        {repoFiles.context_length > 0 && <span>{repoFiles.context_length.toLocaleString()} ctx</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      {repoFiles.disk_free_gb > 0 && <span className="text-xs text-gray-600">{repoFiles.disk_free_gb}GB disk free</span>}
+                      <button onClick={() => setRepoFiles(null)} className="text-xs text-gray-500 hover:text-white">&times;</button>
+                    </div>
                   </div>
-                  <div className="space-y-1 max-h-[200px] overflow-y-auto custom-scrollbar">
-                    {(repoFiles.files || []).map((f, i) => {
-                      const dlKey = `${repoFiles.repo_id}/${f.filename}`.replace(/\//g, '_').slice(0, 32)
-                      const dl = downloadStatus[dlKey]
-                      return (
-                        <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-white/[0.03] text-sm">
-                          <div>
-                            <span className="font-mono text-gray-300">{f.filename}</span>
-                            <span className="text-xs text-gray-600 ml-2">{f.size_gb}GB</span>
-                          </div>
-                          {dl ? (
-                            <span className={`text-xs font-mono ${dl.status === 'complete' ? 'text-spore' : dl.status === 'failed' ? 'text-compute' : 'text-ledger'}`}>
-                              {dl.status === 'downloading' ? `${dl.progress?.toFixed(0)}%` : dl.status}
-                            </span>
-                          ) : (
-                            <button onClick={() => handleDownload(repoFiles.repo_id, f.filename)}
-                              className="text-xs text-spore hover:text-spore/80">Download</button>
-                          )}
-                        </div>
-                      )
-                    })}
+                  <div className="overflow-x-auto max-h-[250px] overflow-y-auto custom-scrollbar">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-600 font-mono">
+                          <th className="text-left py-1 pr-3">File</th>
+                          <th className="text-left py-1 pr-3">Quant</th>
+                          <th className="text-right py-1 pr-3">Size</th>
+                          <th className="text-right py-1 pr-3">RAM est.</th>
+                          <th className="text-right py-1"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(repoFiles.files || []).map((f, i) => {
+                          const dlKey = `${repoFiles.repo_id}/${f.filename}`.replace(/\//g, '_').slice(0, 32)
+                          const dl = downloadStatus[dlKey]
+                          const hasWarnings = f.warnings && f.warnings.length > 0
+                          return (
+                            <tr key={i} className={`border-t border-white/5 hover:bg-white/[0.02] ${hasWarnings ? 'opacity-60' : ''}`}>
+                              <td className="py-1.5 pr-3 font-mono text-gray-300 text-xs truncate max-w-[200px]" title={f.filename}>{f.filename}</td>
+                              <td className="py-1.5 pr-3">
+                                <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
+                                  f.quant?.startsWith('Q4') ? 'bg-spore/10 text-spore' :
+                                  f.quant?.startsWith('Q5') || f.quant?.startsWith('Q6') ? 'bg-relay/10 text-relay' :
+                                  f.quant?.startsWith('Q8') || f.quant === 'F16' ? 'bg-poison/10 text-poison' :
+                                  'bg-white/5 text-gray-500'
+                                }`}>{f.quant || '?'}</span>
+                              </td>
+                              <td className="py-1.5 pr-3 text-right text-xs text-gray-400">{f.size_gb}GB</td>
+                              <td className="py-1.5 pr-3 text-right text-xs text-gray-500">{f.est_ram_gb ? `~${f.est_ram_gb}GB` : '?'}</td>
+                              <td className="py-1.5 text-right">
+                                {hasWarnings && (
+                                  <span className="text-compute text-xs mr-2" title={f.warnings.join('; ')}>&#9888;</span>
+                                )}
+                                {dl ? (
+                                  <span className={`text-xs font-mono ${dl.status === 'complete' ? 'text-spore' : dl.status === 'failed' ? 'text-compute' : 'text-ledger'}`}>
+                                    {dl.status === 'downloading' ? `${dl.progress?.toFixed(0)}%` : dl.status}
+                                  </span>
+                                ) : (
+                                  <button onClick={() => handleDownload(repoFiles.repo_id, f.filename)}
+                                    className={`text-xs ${hasWarnings ? 'text-ledger hover:text-ledger/80' : 'text-spore hover:text-spore/80'}`}>
+                                    {hasWarnings ? 'Download anyway' : 'Download'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -1705,12 +1743,13 @@ function ModelsTab({ status, onRefresh }) {
                     <button key={i} onClick={() => handleBrowseRepo(m.repo_id)}
                       className="text-left bg-black border border-white/10 rounded-lg p-3 hover:border-spore/30 transition-colors">
                       <div className="font-mono text-sm text-white truncate">{m.repo_id}</div>
-                      <div className="flex items-center space-x-3 mt-1.5 text-xs text-gray-500">
-                        <span>&darr; {m.downloads?.toLocaleString()}</span>
-                        <span>&hearts; {m.likes}</span>
-                        <span>{m.gguf_files?.length || 0} variants</span>
+                      <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs text-gray-500">
+                        {m.param_b > 0 && <span className="text-gray-300 font-medium">{m.param_b}B</span>}
+                        {m.architecture && <span>{m.architecture}</span>}
+                        {m.context_length > 0 && <span>{(m.context_length / 1000).toFixed(0)}k ctx</span>}
+                        <span>&darr;{m.downloads?.toLocaleString()}</span>
+                        {m.license && <span>{m.license}</span>}
                       </div>
-                      {m.pipeline_tag && <span className="text-xs text-gray-600 mt-1 inline-block">{m.pipeline_tag}</span>}
                     </button>
                   ))}
                 </div>
