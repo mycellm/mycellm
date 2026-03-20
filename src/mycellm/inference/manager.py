@@ -48,7 +48,7 @@ class InferenceManager:
         **kwargs,
     ) -> str:
         """Load a model and return its name."""
-        model_name = name or Path(model_path).stem
+        model_name = name or (Path(model_path).stem if model_path else "remote-model")
 
         if model_name in self._backends:
             logger.info(f"Model {model_name} already loaded")
@@ -61,7 +61,7 @@ class InferenceManager:
         self._model_info[model_name] = ModelCapability(
             name=model_name,
             quant=kwargs.get("quant", ""),
-            ctx_len=kwargs.get("n_ctx", 4096),
+            ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", 4096)),
             backend=backend_type,
         )
 
@@ -130,4 +130,7 @@ class InferenceManager:
         if backend_type == "llama.cpp":
             from mycellm.inference.llamacpp import LlamaCppBackend
             return LlamaCppBackend()
+        if backend_type in ("openai", "openai-compatible"):
+            from mycellm.inference.openai_compat import OpenAICompatibleBackend
+            return OpenAICompatibleBackend()
         raise ValueError(f"Unknown backend type: {backend_type}")

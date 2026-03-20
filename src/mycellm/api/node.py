@@ -41,20 +41,41 @@ async def credit_history(request: Request, limit: int = 50):
 
 @router.post("/models/load")
 async def load_model(request: Request):
-    """Load a model."""
+    """Load a model.
+
+    For local GGUF models (backend=llama.cpp, default):
+        {"model_path": "/path/to/model.gguf", "name": "my-model"}
+
+    For remote OpenAI-compatible APIs (backend=openai):
+        {"name": "claude-sonnet", "backend": "openai",
+         "api_base": "https://openrouter.ai/api/v1",
+         "api_key": "sk-or-...", "api_model": "anthropic/claude-sonnet-4"}
+    """
     node = request.app.state.node
     body = await request.json()
+    backend_type = body.get("backend", "llama.cpp")
     model_path = body.get("model_path", "")
     name = body.get("name")
-    if not model_path:
-        return {"error": "model_path required"}
+
+    # Local backends require model_path; remote backends don't
+    if backend_type == "llama.cpp" and not model_path:
+        return {"error": "model_path required for llama.cpp backend"}
 
     try:
-        loaded_name = await node.inference.load_model(model_path, name=name)
+        loaded_name = await node.inference.load_model(
+            model_path,
+            name=name,
+            backend_type=backend_type,
+            api_base=body.get("api_base", ""),
+            api_key=body.get("api_key", ""),
+            api_model=body.get("api_model", ""),
+            ctx_len=body.get("ctx_len", 4096),
+            timeout=body.get("timeout", 120),
+        )
         # Update capabilities and announce to peers
         node.capabilities.models = node.inference.loaded_models
         await node.announce_capabilities()
-        return {"status": "loaded", "model": loaded_name}
+        return {"status": "loaded", "model": loaded_name, "backend": backend_type}
     except Exception as e:
         return {"error": str(e)}
 
