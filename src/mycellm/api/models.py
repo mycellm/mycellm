@@ -240,7 +240,8 @@ async def download_model(request: Request):
     if dest_path.exists():
         return {"error": f"File already exists: {filename}", "path": str(dest_path)}
 
-    download_id = f"{repo_id}/{filename}".replace("/", "_")[:32]
+    import hashlib
+    download_id = hashlib.sha256(f"{repo_id}/{filename}".encode()).hexdigest()[:16]
 
     if download_id in _downloads and _downloads[download_id].get("status") == "downloading":
         return {"error": "Download already in progress", "download_id": download_id}
@@ -255,15 +256,25 @@ async def download_model(request: Request):
         "total_bytes": 0,
         "started_at": time.time(),
         "dest_path": str(dest_path),
+        "speed_mbps": 0.0,
+        "eta_seconds": 0,
+    }
+
+    # Pass metadata for auto-load
+    meta = {
+        "quant": body.get("quant", ""),
+        "param_count_b": body.get("param_b", 0),
+        "ctx_len": body.get("context_length", 4096),
+        "size_gb": body.get("size_gb", 0),
     }
 
     # Start download in background
-    asyncio.create_task(_do_download(download_id, repo_id, filename, dest_path, node))
+    asyncio.create_task(_do_download(download_id, repo_id, filename, dest_path, node, meta))
 
     return {"download_id": download_id, "status": "started", "dest_path": str(dest_path)}
 
 
-async def _do_download(download_id: str, repo_id: str, filename: str, dest_path: Path, node) -> None:
+async def _do_download(download_id: str, repo_id: str, filename: str, dest_path: Path, node, meta: dict | None = None) -> None:
     """Background download task."""
     url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
     info = _downloads[download_id]
@@ -275,6 +286,8 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
                 total = int(resp.headers.get("content-length", 0))
                 info["total_bytes"] = total
                 downloaded = 0
+                last_time = time.time()
+                last_bytes = 0
 
                 with open(dest_path, "wb") as f:
                     async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
@@ -283,19 +296,39 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
                         info["bytes_downloaded"] = downloaded
                         info["progress"] = (downloaded / total * 100) if total > 0 else 0
 
+                        # Update speed/ETA every ~2MB
+                        now = time.time()
+                        elapsed = now - last_time
+                        if elapsed >= 1.0:
+                            speed = (downloaded - last_bytes) / elapsed
+                            info["speed_mbps"] = round(speed / (1024 * 1024), 1)
+                            remaining = total - downloaded
+                            info["eta_seconds"] = int(remaining / speed) if speed > 0 else 0
+                            last_time = now
+                            last_bytes = downloaded
+
         info["status"] = "complete"
         info["progress"] = 100.0
         info["completed_at"] = time.time()
         logger.info(f"Downloaded {filename} ({downloaded / 1024**3:.1f}GB)")
 
-        # Auto-load the model
+        # Auto-load the model with metadata
         try:
             model_name = filename.replace(".gguf", "")
+            m = meta or {}
             await node.inference.load_model(
                 str(dest_path),
                 name=model_name,
                 backend_type="llama.cpp",
+                quant=m.get("quant", ""),
+                ctx_len=m.get("ctx_len", 4096),
             )
+            # Set extra metadata on the model info
+            model_info = node.inference._model_info.get(model_name)
+            if model_info:
+                model_info.param_count_b = m.get("param_count_b", 0)
+                if m.get("quant"):
+                    model_info.quant = m["quant"]
             node.capabilities.models = node.inference.loaded_models
             await node.announce_capabilities()
             info["loaded_as"] = model_name
@@ -339,6 +372,53 @@ async def list_local_models(request: Request):
             })
 
     return {"model_dir": str(model_dir), "files": files}
+
+
+@router.post("/delete-file")
+async def delete_model_file(request: Request):
+    """Delete a GGUF model file from disk.
+
+    Body: {"filename": "model.gguf"} or {"path": "/full/path/to/model.gguf"}
+    """
+    node = request.app.state.node
+    body = await request.json()
+    filename = body.get("filename", "")
+    filepath = body.get("path", "")
+
+    from mycellm.config import get_settings
+    settings = get_settings()
+    model_dir = settings.model_dir or settings.data_dir / "models"
+
+    if filepath:
+        target = Path(filepath)
+    elif filename:
+        target = model_dir / filename
+    else:
+        return {"error": "filename or path required"}
+
+    if not target.exists():
+        return {"error": f"File not found: {target.name}"}
+
+    # Safety: only delete .gguf files within model_dir
+    if not target.name.endswith(".gguf"):
+        return {"error": "Can only delete .gguf files"}
+    try:
+        target.resolve().relative_to(model_dir.resolve())
+    except ValueError:
+        return {"error": "File is not in model directory"}
+
+    # Unload if loaded
+    model_name = target.stem
+    if model_name in [m.name for m in node.inference.loaded_models]:
+        await node.inference.unload_model(model_name)
+        node.capabilities.models = node.inference.loaded_models
+        await node.announce_capabilities()
+
+    size_gb = round(target.stat().st_size / (1024 ** 3), 2)
+    target.unlink()
+    logger.info(f"Deleted model file: {target.name} ({size_gb}GB)")
+
+    return {"status": "deleted", "filename": target.name, "size_gb": size_gb}
 
 
 @router.get("/suggested")

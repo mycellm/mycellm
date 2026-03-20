@@ -1360,6 +1360,7 @@ function ModelsTab({ status, onRefresh }) {
   const [filterCompatible, setFilterCompatible] = useState(true)
   const [suggestions, setSuggestions] = useState(null)
   const [nodeResources, setNodeResources] = useState({ ram_gb: 0, disk_free_gb: 0 })
+  const [localFiles, setLocalFiles] = useState([])  // GGUF files on disk
   const [repoFiles, setRepoFiles] = useState(null) // { repo_id, files }
   const [downloadStatus, setDownloadStatus] = useState({})
 
@@ -1451,13 +1452,16 @@ function ModelsTab({ status, onRefresh }) {
   }
 
   // Search HuggingFace
-  // Load suggestions + node resources on mount
+  // Load suggestions + node resources + local files on mount
   useEffect(() => {
-    api('/v1/node/models/suggested').then(d => {
+    const target = isRemote && selectedDevice?.addr ? selectedDevice.addr : ''
+    const doFetch = (path) => target ? remoteApi(target, path) : api(path)
+    doFetch('/v1/node/models/suggested').then(d => {
       setSuggestions(d.suggestions || [])
       setNodeResources({ ram_gb: d.node_ram_gb || 0, disk_free_gb: d.node_disk_free_gb || 0 })
     }).catch(() => {})
-  }, [])
+    doFetch('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
+  }, [selected, isRemote, selectedDevice?.addr])
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
@@ -1482,24 +1486,32 @@ function ModelsTab({ status, onRefresh }) {
   }
 
   // Download a GGUF file
-  const handleDownload = async (repoId, filename) => {
+  const handleDownload = async (repoId, filename, fileMeta) => {
     try {
-      const data = await api('/v1/node/models/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_id: repoId, filename }),
+      const data = await doApi('/v1/node/models/download', {
+        repo_id: repoId, filename,
+        quant: fileMeta?.quant || '',
+        param_b: repoFiles?.param_b || 0,
+        context_length: repoFiles?.context_length || 4096,
+        size_gb: fileMeta?.size_gb || 0,
       })
       if (data.download_id) {
         setDownloadStatus(prev => ({ ...prev, [data.download_id]: data }))
+        const fetchDl = () => isRemote && selectedDevice?.addr
+          ? remoteApi(selectedDevice.addr, '/v1/node/models/downloads')
+          : api('/v1/node/models/downloads')
         const pollId = setInterval(async () => {
           try {
-            const st = await api('/v1/node/models/downloads')
+            const st = await fetchDl()
             const dl = (st.downloads || []).find(d => d.download_id === data.download_id)
             if (dl) {
               setDownloadStatus(prev => ({ ...prev, [data.download_id]: dl }))
               if (dl.status === 'complete' || dl.status === 'failed') {
                 clearInterval(pollId)
                 onRefresh()
+                // Refresh local files list
+                const doFetch = isRemote && selectedDevice?.addr ? (p) => remoteApi(selectedDevice.addr, p) : api
+                doFetch('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
               }
             }
           } catch {}
@@ -1615,7 +1627,9 @@ function ModelsTab({ status, onRefresh }) {
               <tr className="text-xs text-gray-500 font-mono uppercase">
                 <th className="text-left py-2 px-4">Name</th>
                 <th className="text-left py-2 px-4">Backend</th>
-                <th className="text-left py-2 px-4 hidden md:table-cell">Context</th>
+                <th className="text-left py-2 px-4 hidden md:table-cell">Quant</th>
+                <th className="text-left py-2 px-4 hidden md:table-cell">Params</th>
+                <th className="text-left py-2 px-4 hidden lg:table-cell">Context</th>
                 <th className="text-left py-2 px-4 hidden lg:table-cell">Scope</th>
                 <th className="text-right py-2 px-4">Actions</th>
               </tr>
@@ -1625,7 +1639,9 @@ function ModelsTab({ status, onRefresh }) {
                 <tr key={i} className="border-t border-white/5 hover:bg-white/[0.02]">
                   <td className="py-2.5 px-4 font-mono text-white">{m.name}</td>
                   <td className="py-2.5 px-4 text-gray-400">{m.backend || 'llama.cpp'}</td>
-                  <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{(m.ctx_len || 4096).toLocaleString()}</td>
+                  <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell font-mono">{m.quant || '-'}</td>
+                  <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.param_count_b ? `${m.param_count_b}B` : '-'}</td>
+                  <td className="py-2.5 px-4 text-gray-500 hidden lg:table-cell">{(m.ctx_len || 4096).toLocaleString()}</td>
                   <td className="py-2.5 px-4 hidden lg:table-cell">
                     <span className={`text-xs px-1.5 py-0.5 rounded ${
                       m.scope === 'public' ? 'bg-spore/10 text-spore' :
@@ -1718,11 +1734,16 @@ function ModelsTab({ status, onRefresh }) {
                       </thead>
                       <tbody>
                         {(repoFiles.files || []).filter(f => !filterCompatible || !f.warnings || f.warnings.length === 0).map((f, i) => {
-                          const dlKey = `${repoFiles.repo_id}/${f.filename}`.replace(/\//g, '_').slice(0, 32)
-                          const dl = downloadStatus[dlKey]
+                          // Match download_id: sha256(repo/filename)[:16] — same as server
+                          const dlIdSrc = `${repoFiles.repo_id}/${f.filename}`
+                          // Find matching download by filename (more reliable than hash matching)
+                          const dl = Object.values(downloadStatus).find(d => d.filename === f.filename && d.repo_id === repoFiles.repo_id)
                           const hasWarnings = f.warnings && f.warnings.length > 0
+                          const isOnDisk = localFiles.some(lf => lf.filename === f.filename)
+                          const isLoaded = models.some(m => f.filename.replace('.gguf', '') === m.name)
+
                           return (
-                            <tr key={i} className={`border-t border-white/5 hover:bg-white/[0.02] ${hasWarnings ? 'opacity-60' : ''}`}>
+                            <tr key={i} className={`border-t border-white/5 hover:bg-white/[0.02] ${hasWarnings && !isOnDisk ? 'opacity-60' : ''}`}>
                               <td className="py-1.5 pr-3 font-mono text-gray-300 text-xs truncate max-w-[200px]" title={f.filename}>{f.filename}</td>
                               <td className="py-1.5 pr-3">
                                 <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
@@ -1734,16 +1755,38 @@ function ModelsTab({ status, onRefresh }) {
                               </td>
                               <td className="py-1.5 pr-3 text-right text-xs text-gray-400">{f.size_gb}GB</td>
                               <td className="py-1.5 pr-3 text-right text-xs text-gray-500">{f.est_ram_gb ? `~${f.est_ram_gb}GB` : '?'}</td>
-                              <td className="py-1.5 text-right">
-                                {hasWarnings && (
+                              <td className="py-1.5 text-right min-w-[140px]">
+                                {hasWarnings && !isOnDisk && (
                                   <span className="text-compute text-xs mr-2" title={f.warnings.join('; ')}>&#9888;</span>
                                 )}
-                                {dl ? (
-                                  <span className={`text-xs font-mono ${dl.status === 'complete' ? 'text-spore' : dl.status === 'failed' ? 'text-compute' : 'text-ledger'}`}>
-                                    {dl.status === 'downloading' ? `${dl.progress?.toFixed(0)}%` : dl.status}
-                                  </span>
+                                {dl && dl.status === 'downloading' ? (
+                                  <div className="inline-flex flex-col items-end gap-0.5">
+                                    <div className="w-24 bg-void rounded-full h-1.5 overflow-hidden border border-white/5">
+                                      <div className="h-full bg-ledger transition-all" style={{ width: `${dl.progress || 0}%` }} />
+                                    </div>
+                                    <span className="text-xs font-mono text-ledger">
+                                      {dl.progress?.toFixed(0)}%
+                                      {dl.speed_mbps > 0 && <span className="text-gray-500 ml-1">{dl.speed_mbps}MB/s</span>}
+                                      {dl.eta_seconds > 0 && <span className="text-gray-600 ml-1">{dl.eta_seconds > 60 ? `${Math.floor(dl.eta_seconds/60)}m` : `${dl.eta_seconds}s`}</span>}
+                                    </span>
+                                  </div>
+                                ) : dl && dl.status === 'complete' || isOnDisk ? (
+                                  <div className="inline-flex items-center space-x-2">
+                                    {isLoaded && <span className="text-xs text-spore">loaded</span>}
+                                    {!isLoaded && <span className="text-xs text-gray-500">on disk</span>}
+                                    <button onClick={async () => {
+                                      if (confirm(`Delete ${f.filename}?`)) {
+                                        await doApi('/v1/node/models/delete-file', { filename: f.filename })
+                                        const doFetch = isRemote && selectedDevice?.addr ? (p) => remoteApi(selectedDevice.addr, p) : api
+                                        doFetch('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
+                                        onRefresh()
+                                      }
+                                    }} className="text-xs text-gray-600 hover:text-compute" title="Delete file">&#128465;</button>
+                                  </div>
+                                ) : dl && dl.status === 'failed' ? (
+                                  <span className="text-xs text-compute font-mono">failed</span>
                                 ) : (
-                                  <button onClick={() => handleDownload(repoFiles.repo_id, f.filename)}
+                                  <button onClick={() => handleDownload(repoFiles.repo_id, f.filename, f)}
                                     className={`text-xs ${hasWarnings ? 'text-ledger hover:text-ledger/80' : 'text-spore hover:text-spore/80'}`}>
                                     {hasWarnings ? 'Download anyway' : 'Download'}
                                   </button>
