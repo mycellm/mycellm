@@ -1335,19 +1335,39 @@ function CreditsTab({ credits }) {
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
         <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Transaction History</h2>
         {history.length > 0 ? (
-          <div className="space-y-1 max-h-[500px] overflow-y-auto custom-scrollbar">
-            {history.map((tx, i) => (
-              <div key={i} className="flex items-center justify-between text-sm py-2 border-b border-white/5">
-                <div className="flex items-center space-x-3">
-                  <div className={`w-1.5 h-1.5 rounded-full ${tx.amount >= 0 ? 'bg-spore' : 'bg-compute'}`} />
-                  <span className="text-gray-400 font-mono text-xs w-16">{tx.timestamp || ''}</span>
-                  <span className="text-gray-300">{tx.reason}</span>
-                </div>
-                <span className={`font-mono text-sm ${tx.amount >= 0 ? 'text-spore' : 'text-compute'}`}>
-                  {tx.amount >= 0 ? '+' : ''}{tx.amount?.toFixed(4)}
-                </span>
-              </div>
-            ))}
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-[#111]">
+                <tr className="text-xs text-gray-500 font-mono uppercase">
+                  <th className="text-left py-2 pr-4 w-8"></th>
+                  <th className="text-left py-2 pr-4">Time</th>
+                  <th className="text-left py-2 pr-4">Type</th>
+                  <th className="text-left py-2 pr-4">Counterparty</th>
+                  <th className="text-right py-2">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((tx, i) => {
+                  const isCredit = tx.direction === 'credit'
+                  const ts = tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+                  const reason = (tx.reason || '').replace(/_/g, ' ')
+                  const counterparty = tx.counterparty_id ? tx.counterparty_id.slice(0, 12) + '...' : ''
+                  return (
+                    <tr key={i} className="border-t border-white/5 hover:bg-white/[0.02]">
+                      <td className="py-2 pr-2">
+                        <div className={`w-1.5 h-1.5 rounded-full ${isCredit ? 'bg-spore' : 'bg-compute'}`} />
+                      </td>
+                      <td className="py-2 pr-4 text-gray-500 font-mono text-xs whitespace-nowrap">{ts}</td>
+                      <td className="py-2 pr-4 text-gray-300 whitespace-nowrap">{reason}</td>
+                      <td className="py-2 pr-4 text-gray-500 font-mono text-xs">{counterparty}</td>
+                      <td className={`py-2 text-right font-mono whitespace-nowrap ${isCredit ? 'text-spore' : 'text-compute'}`}>
+                        {isCredit ? '+' : '-'}{tx.amount?.toFixed(4)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           <p className="text-sm text-gray-500 text-center py-8">No transactions yet.</p>
