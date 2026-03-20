@@ -32,6 +32,7 @@ class NodeHello:
     timestamp: float = field(default_factory=time.time)
     signature: bytes = b""  # Sig by device key over (nonce + timestamp + peer_id)
     observed_addr: str = ""
+    network_ids: list[str] = field(default_factory=list)  # networks this node belongs to
 
     def signable_data(self) -> bytes:
         """Data that gets signed by device key."""
@@ -55,6 +56,7 @@ class NodeHello:
             "timestamp": self.timestamp,
             "signature": self.signature,
             "observed_addr": self.observed_addr,
+            "network_ids": self.network_ids,
         })
 
     @classmethod
@@ -69,6 +71,7 @@ class NodeHello:
             timestamp=obj["timestamp"],
             signature=obj["signature"],
             observed_addr=obj.get("observed_addr", ""),
+            network_ids=obj.get("network_ids", []),
         )
 
 

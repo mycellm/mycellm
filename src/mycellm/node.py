@@ -293,6 +293,12 @@ class MycellmNode:
                     capabilities=hello.capabilities,
                 )
                 conn.state = PeerState.ROUTABLE
+
+                # Set network membership info
+                reg_entry = self.registry.get(hello.peer_id)
+                if reg_entry:
+                    reg_entry.network_ids = hello.network_ids
+
                 self.activity.record(
                     EventType.PEER_CONNECTED,
                     peer_id=hello.peer_id,
@@ -647,6 +653,7 @@ class MycellmNode:
             hardware=hw,
             role=self.device_cert.role if self.device_cert else "seeder",
             version="0.1.0",
+            network_ids=self.federation.network_ids if self.federation else [],
         )
 
         self._running = True

@@ -23,6 +23,7 @@ class PeerEntry:
     addresses: list[str] = field(default_factory=list)
     last_seen: float = field(default_factory=time.time)
     failure_count: int = 0
+    network_ids: list[str] = field(default_factory=list)
 
 
 class PeerRegistry:
@@ -119,6 +120,31 @@ class PeerRegistry:
                 continue
             for m in entry.capabilities.models:
                 result.append((m.name, entry.peer_id))
+        return result
+
+    def peers_for_network(self, network_id: str) -> list[PeerEntry]:
+        """Get all peers that belong to a specific network."""
+        return [
+            p for p in self._peers.values()
+            if network_id in p.network_ids
+            and p.state in (PeerState.ROUTABLE, PeerState.SERVING)
+        ]
+
+    def models_visible_to_network(self, network_id: str) -> list[tuple[str, str]]:
+        """Get (model_name, peer_id) tuples visible to a network."""
+        result = []
+        for entry in self._peers.values():
+            if entry.state not in (PeerState.ROUTABLE, PeerState.SERVING):
+                continue
+            for m in entry.capabilities.models:
+                scope = getattr(m, 'scope', 'home')
+                visible = getattr(m, 'visible_networks', [])
+                if scope == "public":
+                    result.append((m.name, entry.peer_id))
+                elif scope == "networks" and network_id in visible:
+                    result.append((m.name, entry.peer_id))
+                elif scope == "home" and network_id in entry.network_ids:
+                    result.append((m.name, entry.peer_id))
         return result
 
     def _remove_from_model_index(self, peer_id: str) -> None:

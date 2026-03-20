@@ -18,6 +18,8 @@ class ModelCapability:
     tags: list[str] = field(default_factory=list)
     tier: str = ""
     param_count_b: float = 0.0
+    scope: str = "home"  # "home" | "public" | "networks"
+    visible_networks: list[str] = field(default_factory=list)  # network_ids when scope="networks"
 
     def to_dict(self) -> dict:
         d = {
@@ -32,6 +34,10 @@ class ModelCapability:
             d["tier"] = self.tier
         if self.param_count_b > 0:
             d["param_count_b"] = self.param_count_b
+        if self.scope != "home":
+            d["scope"] = self.scope
+        if self.visible_networks:
+            d["visible_networks"] = self.visible_networks
         return d
 
     @classmethod
@@ -44,6 +50,8 @@ class ModelCapability:
             tags=d.get("tags", []),
             tier=d.get("tier", ""),
             param_count_b=d.get("param_count_b", 0.0),
+            scope=d.get("scope", "home"),
+            visible_networks=d.get("visible_networks", []),
         )
 
 
@@ -77,9 +85,10 @@ class Capabilities:
     est_tok_s: float = 0.0
     role: str = "seeder"
     version: str = "0.1.0"
+    network_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "models": [m.to_dict() for m in self.models],
             "hardware": self.hardware.to_dict(),
             "max_concurrent": self.max_concurrent,
@@ -87,6 +96,9 @@ class Capabilities:
             "role": self.role,
             "version": self.version,
         }
+        if self.network_ids:
+            d["network_ids"] = self.network_ids
+        return d
 
     def to_cbor(self) -> bytes:
         return cbor2.dumps(self.to_dict())
@@ -100,6 +112,7 @@ class Capabilities:
             est_tok_s=d.get("est_tok_s", 0.0),
             role=d.get("role", "seeder"),
             version=d.get("version", "0.1.0"),
+            network_ids=d.get("network_ids", []),
         )
 
     @classmethod

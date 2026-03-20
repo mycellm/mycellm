@@ -98,6 +98,14 @@ async def load_model(request: Request):
             ctx_len=body.get("ctx_len", 4096),
             timeout=body.get("timeout", 120),
         )
+        # Apply model scoping
+        scope = body.get("scope", "home")
+        visible_networks = body.get("visible_networks", [])
+        info = node.inference._model_info.get(loaded_name)
+        if info:
+            info.scope = scope
+            info.visible_networks = visible_networks
+
         # Update capabilities and announce to peers
         node.capabilities.models = node.inference.loaded_models
         await node.announce_capabilities()
@@ -224,6 +232,68 @@ async def create_invite(request: Request):
         "portable": token.to_portable(),
         "expires_at": token.expires_at,
         "max_uses": token.max_uses,
+    }
+
+
+@router.post("/federation/join")
+async def join_network(request: Request):
+    """Join a network using an invite token or network details."""
+    node = request.app.state.node
+    if not node.federation:
+        return {"error": "Federation not initialized"}
+    body = await request.json()
+
+    # Join via direct network details
+    network_id = body.get("network_id", "")
+    if not network_id:
+        # Try to extract from invite token
+        portable = body.get("invite_token", "")
+        if portable:
+            from mycellm.federation import InviteToken
+            try:
+                token = InviteToken.from_portable(portable)
+                network_id = token.network_id
+            except Exception as e:
+                return {"error": f"Invalid invite token: {e}"}
+
+    if not network_id:
+        return {"error": "network_id or invite_token required"}
+
+    membership = node.federation.join_network(
+        network_id=network_id,
+        network_name=body.get("network_name", ""),
+        role=body.get("role", "seeder"),
+        bootstrap_addrs=body.get("bootstrap_addrs", []),
+        models=body.get("models", []),
+        quota=body.get("quota", {}),
+    )
+    return {"status": "joined", "membership": membership.to_dict()}
+
+
+@router.post("/federation/leave")
+async def leave_network(request: Request):
+    """Leave a joined network."""
+    node = request.app.state.node
+    if not node.federation:
+        return {"error": "Federation not initialized"}
+    body = await request.json()
+    network_id = body.get("network_id", "")
+    if not network_id:
+        return {"error": "network_id required"}
+    ok = node.federation.leave_network(network_id)
+    return {"status": "left" if ok else "failed"}
+
+
+@router.get("/federation/memberships")
+async def list_memberships(request: Request):
+    """List all network memberships."""
+    node = request.app.state.node
+    if not node.federation:
+        return {"memberships": [], "home_network": ""}
+    return {
+        "home_network": node.federation.network_id,
+        "memberships": [m.to_dict() for m in node.federation.memberships],
+        "network_ids": node.federation.network_ids,
     }
 
 

@@ -51,6 +51,44 @@ class NetworkIdentity:
 
 
 @dataclass
+class NetworkMembership:
+    """A node's membership in a network."""
+    network_id: str
+    network_name: str = ""
+    role: str = "seeder"
+    bootstrap_addrs: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)  # model names to share (empty = all home-scoped)
+    quota: dict = field(default_factory=dict)  # {"max_req_per_min": 20}
+    joined_at: float = field(default_factory=time.time)
+    invite_token_id: str = ""  # token used to join (for audit)
+
+    def to_dict(self) -> dict:
+        return {
+            "network_id": self.network_id,
+            "network_name": self.network_name,
+            "role": self.role,
+            "bootstrap_addrs": self.bootstrap_addrs,
+            "models": self.models,
+            "quota": self.quota,
+            "joined_at": self.joined_at,
+            "invite_token_id": self.invite_token_id,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> NetworkMembership:
+        return cls(
+            network_id=d["network_id"],
+            network_name=d.get("network_name", ""),
+            role=d.get("role", "seeder"),
+            bootstrap_addrs=d.get("bootstrap_addrs", []),
+            models=d.get("models", []),
+            quota=d.get("quota", {}),
+            joined_at=d.get("joined_at", 0),
+            invite_token_id=d.get("invite_token_id", ""),
+        )
+
+
+@dataclass
 class InviteToken:
     """Signed invite token for joining a network."""
     network_id: str
@@ -148,6 +186,8 @@ class FederationManager:
         self._tokens_dir = data_dir / "federation" / "tokens"
         self._identity: NetworkIdentity | None = None
         self._tokens: dict[str, InviteToken] = {}
+        self._memberships_dir = data_dir / "federation" / "memberships"
+        self._memberships: dict[str, NetworkMembership] = {}  # network_id -> membership
 
     @property
     def network_id(self) -> str:
@@ -156,6 +196,74 @@ class FederationManager:
     @property
     def identity(self) -> NetworkIdentity | None:
         return self._identity
+
+    @property
+    def network_ids(self) -> list[str]:
+        """All network IDs this node belongs to (home + joined)."""
+        ids = []
+        if self._identity:
+            ids.append(self._identity.network_id)
+        ids.extend(self._memberships.keys())
+        return ids
+
+    @property
+    def memberships(self) -> list[NetworkMembership]:
+        return list(self._memberships.values())
+
+    def join_network(
+        self,
+        network_id: str,
+        network_name: str = "",
+        role: str = "seeder",
+        bootstrap_addrs: list[str] | None = None,
+        models: list[str] | None = None,
+        quota: dict | None = None,
+        invite_token_id: str = "",
+    ) -> NetworkMembership:
+        """Join an additional network."""
+        self._memberships_dir.mkdir(parents=True, exist_ok=True)
+
+        membership = NetworkMembership(
+            network_id=network_id,
+            network_name=network_name or f"network-{network_id[:8]}",
+            role=role,
+            bootstrap_addrs=bootstrap_addrs or [],
+            models=models or [],
+            quota=quota or {},
+            invite_token_id=invite_token_id,
+        )
+        self._memberships[network_id] = membership
+
+        path = self._memberships_dir / f"{network_id[:16]}.json"
+        path.write_text(json.dumps(membership.to_dict(), indent=2))
+        logger.info(f"Joined network: {membership.network_name} ({network_id[:12]}...)")
+        return membership
+
+    def leave_network(self, network_id: str) -> bool:
+        """Leave a joined network."""
+        if network_id == self.network_id:
+            logger.warning("Cannot leave home network")
+            return False
+        membership = self._memberships.pop(network_id, None)
+        if not membership:
+            return False
+        path = self._memberships_dir / f"{network_id[:16]}.json"
+        if path.exists():
+            path.unlink()
+        logger.info(f"Left network: {membership.network_name}")
+        return True
+
+    def get_membership(self, network_id: str) -> NetworkMembership | None:
+        return self._memberships.get(network_id)
+
+    def is_model_visible(self, model_name: str, model_scope: str, model_networks: list[str], requesting_network: str) -> bool:
+        """Check if a model is visible to a requesting network."""
+        if model_scope == "public":
+            return True
+        if model_scope == "networks":
+            return requesting_network in model_networks
+        # scope == "home" — visible only within home network
+        return requesting_network == self.network_id
 
     def init_network(
         self,
@@ -190,6 +298,17 @@ class FederationManager:
                 self._tokens[token.token_id] = token
             except Exception:
                 pass
+
+        # Load memberships
+        self._memberships_dir.mkdir(parents=True, exist_ok=True)
+        for f in self._memberships_dir.glob("*.json"):
+            try:
+                m = NetworkMembership.from_dict(json.loads(f.read_text()))
+                self._memberships[m.network_id] = m
+            except Exception:
+                pass
+        if self._memberships:
+            logger.info(f"Loaded {len(self._memberships)} network membership(s)")
 
         return self._identity
 
