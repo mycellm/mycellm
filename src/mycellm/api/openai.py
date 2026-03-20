@@ -130,7 +130,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         try:
             result = await node.inference.generate(req)
         except Exception as e:
-            node.activity.record(_ET.INFERENCE_FAILED, model=model_name, error=str(e)[:200])
+            node.activity.record(EventType.INFERENCE_FAILED, model=model_name, error=str(e)[:200])
             error_msg = str(e)
             if "401" in error_msg or "Unauthorized" in error_msg:
                 error_msg = f"API key rejected by upstream provider for model '{model_name}'. Check your API key."
