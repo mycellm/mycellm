@@ -29,6 +29,8 @@ class InferenceManager:
         self._active_count = 0
         # Persistent configs — survives unload so models can be re-loaded
         self._saved_configs: dict[str, dict] = {}  # name -> config dict
+        # Load status tracking
+        self._load_status: dict[str, dict] = {}  # model_name -> {status, phase, error, ...}
 
     @property
     def loaded_models(self) -> list[ModelCapability]:
@@ -50,33 +52,63 @@ class InferenceManager:
         **kwargs,
     ) -> str:
         """Load a model and return its name."""
+        import time as _time
         model_name = name or (Path(model_path).stem if model_path else "remote-model")
 
         if model_name in self._backends:
             logger.info(f"Model {model_name} already loaded")
             return model_name
 
-        backend = self._create_backend(backend_type)
-        await backend.load_model(model_path, name=model_name, **kwargs)
+        self._load_status[model_name] = {
+            "model": model_name,
+            "status": "loading",
+            "phase": "initializing",
+            "backend": backend_type,
+            "started_at": _time.time(),
+            "error": None,
+        }
 
-        self._backends[model_name] = backend
-        self._model_info[model_name] = ModelCapability(
-            name=model_name,
-            quant=kwargs.get("quant", ""),
-            ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", 4096)),
-            backend=backend_type,
-        )
-
-        logger.info(f"Model {model_name} loaded via {backend_type}")
-
-        # Auto-save config
         try:
-            from mycellm.config import get_settings
-            await self.save_model_configs(get_settings().data_dir)
-        except Exception:
-            pass  # don't block load on save failure
+            self._load_status[model_name]["phase"] = "creating backend"
+            backend = self._create_backend(backend_type)
 
-        return model_name
+            if backend_type == "llama.cpp":
+                self._load_status[model_name]["phase"] = "loading model into memory"
+                if model_path:
+                    size_gb = Path(model_path).stat().st_size / (1024**3) if Path(model_path).exists() else 0
+                    if size_gb > 0:
+                        self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
+            else:
+                self._load_status[model_name]["phase"] = "connecting to API"
+
+            await backend.load_model(model_path, name=model_name, **kwargs)
+
+            self._load_status[model_name]["phase"] = "registering"
+            self._backends[model_name] = backend
+            self._model_info[model_name] = ModelCapability(
+                name=model_name,
+                quant=kwargs.get("quant", ""),
+                ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", 4096)),
+                backend=backend_type,
+            )
+
+            elapsed = _time.time() - self._load_status[model_name]["started_at"]
+            self._load_status[model_name].update({"status": "ready", "phase": "loaded", "elapsed": round(elapsed, 1)})
+            logger.info(f"Model {model_name} loaded via {backend_type} ({elapsed:.1f}s)")
+
+            # Auto-save config
+            try:
+                from mycellm.config import get_settings
+                await self.save_model_configs(get_settings().data_dir)
+            except Exception:
+                pass
+
+            return model_name
+
+        except Exception as e:
+            self._load_status[model_name].update({"status": "failed", "phase": "error", "error": str(e)})
+            logger.error(f"Failed to load {model_name}: {e}")
+            raise
 
     async def unload_model(self, model_name: str) -> None:
         backend = self._backends.pop(model_name, None)

@@ -1370,6 +1370,7 @@ function ModelsTab({ status, onRefresh }) {
   const [nodeResources, setNodeResources] = useState({ ram_gb: 0, disk_free_gb: 0 })
   const [localFiles, setLocalFiles] = useState([])  // GGUF files on disk
   const [savedConfigs, setSavedConfigs] = useState([])  // persisted API model configs
+  const [loadStatuses, setLoadStatuses] = useState([])  // in-progress loads
   const [repoFiles, setRepoFiles] = useState(null) // { repo_id, files }
   const [downloadStatus, setDownloadStatus] = useState({})
 
@@ -1471,6 +1472,23 @@ function ModelsTab({ status, onRefresh }) {
     }).catch(() => {})
     doFetch('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
     doFetch('/v1/node/models/saved').then(d => setSavedConfigs(d.configs || [])).catch(() => {})
+  }, [selected, isRemote, selectedDevice?.addr])
+
+  // Poll load status for in-progress loads
+  useEffect(() => {
+    const poll = () => nodeApi('/v1/node/models/load-status').then(d => {
+      setLoadStatuses(d.statuses || [])
+      // If any loads just completed, refresh models
+      const justFinished = (d.statuses || []).some(s => s.status === 'ready' || s.status === 'failed')
+      if (justFinished) {
+        onRefresh()
+        nodeApi('/v1/node/models/local').then(d2 => setLocalFiles(d2.files || [])).catch(() => {})
+        nodeApi('/v1/node/models/saved').then(d2 => setSavedConfigs(d2.configs || [])).catch(() => {})
+      }
+    }).catch(() => {})
+    poll()
+    const iv = setInterval(poll, 2000)
+    return () => clearInterval(iv)
   }, [selected, isRemote, selectedDevice?.addr])
 
   // Helper: fetch from selected node
@@ -1683,6 +1701,36 @@ function ModelsTab({ status, onRefresh }) {
                   </tr>
                 )
               })}
+              {/* Loading in progress */}
+              {loadStatuses.filter(s => s.status === 'loading').map((s, i) => (
+                <tr key={`loading-${i}`} className="border-t border-white/5 bg-ledger/[0.03]">
+                  <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-ledger animate-pulse" title="Loading..." /></td>
+                  <td className="py-2.5 px-4 font-mono text-ledger">{s.model}</td>
+                  <td className="py-2.5 px-4 text-gray-400">{s.backend || 'llama.cpp'}</td>
+                  <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell" colSpan={2}>
+                    <span className="text-xs text-ledger">{s.phase}</span>
+                  </td>
+                  <td className="py-2.5 px-4 text-gray-500 hidden lg:table-cell">-</td>
+                  <td className="py-2.5 px-4 hidden lg:table-cell">
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-ledger/10 text-ledger animate-pulse">loading</span>
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-xs text-gray-500 font-mono">{s.elapsed ? `${s.elapsed}s` : '...'}</td>
+                </tr>
+              ))}
+              {/* Failed loads */}
+              {loadStatuses.filter(s => s.status === 'failed').map((s, i) => (
+                <tr key={`failed-${i}`} className="border-t border-white/5 bg-compute/[0.03]">
+                  <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-compute" title="Failed" /></td>
+                  <td className="py-2.5 px-4 font-mono text-compute">{s.model}</td>
+                  <td className="py-2.5 px-4 text-gray-400">{s.backend || 'llama.cpp'}</td>
+                  <td className="py-2.5 px-4 text-compute hidden md:table-cell text-xs" colSpan={2} title={s.error}>{(s.error || 'unknown error').slice(0, 60)}</td>
+                  <td className="py-2.5 px-4 text-gray-500 hidden lg:table-cell">-</td>
+                  <td className="py-2.5 px-4 hidden lg:table-cell">
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-compute/10 text-compute">failed</span>
+                  </td>
+                  <td className="py-2.5 px-4 text-right"></td>
+                </tr>
+              ))}
               {/* On-disk but not loaded GGUF files */}
               {localFiles.filter(f => !f.loaded).map((f, i) => (
                 <tr key={`disk-${i}`} className="border-t border-white/5 hover:bg-white/[0.02] opacity-70">

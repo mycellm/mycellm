@@ -87,26 +87,49 @@ async def load_model(request: Request):
     if backend_type == "llama.cpp" and not model_path:
         return {"error": "model_path required for llama.cpp backend"}
 
+    model_name = name or (model_path.split("/")[-1].replace(".gguf", "") if model_path else "remote-model")
+
+    # For llama.cpp, load async (can take minutes for large models)
+    if backend_type == "llama.cpp":
+        import asyncio
+
+        async def _bg_load():
+            try:
+                loaded_name = await node.inference.load_model(
+                    model_path, name=name, backend_type=backend_type,
+                    ctx_len=body.get("ctx_len", 4096), timeout=body.get("timeout", 120),
+                    quant=body.get("quant", ""),
+                )
+                scope = body.get("scope", "home")
+                info = node.inference._model_info.get(loaded_name)
+                if info:
+                    info.scope = scope
+                    info.visible_networks = body.get("visible_networks", [])
+                    if body.get("param_count_b"):
+                        info.param_count_b = body["param_count_b"]
+                node.capabilities.models = node.inference.loaded_models
+                await node.announce_capabilities()
+                node.activity.record(EventType.MODEL_LOADED, model=loaded_name, backend=backend_type)
+            except Exception:
+                pass  # error captured in _load_status
+
+        asyncio.ensure_future(_bg_load())
+        return {"status": "loading", "model": model_name, "backend": backend_type}
+
+    # For API backends, load synchronously (fast — just a connectivity check)
     try:
         loaded_name = await node.inference.load_model(
-            model_path,
-            name=name,
-            backend_type=backend_type,
-            api_base=body.get("api_base", ""),
-            api_key=body.get("api_key", ""),
-            api_model=body.get("api_model", ""),
-            ctx_len=body.get("ctx_len", 4096),
+            model_path, name=name, backend_type=backend_type,
+            api_base=body.get("api_base", ""), api_key=body.get("api_key", ""),
+            api_model=body.get("api_model", ""), ctx_len=body.get("ctx_len", 4096),
             timeout=body.get("timeout", 120),
         )
-        # Apply model scoping
         scope = body.get("scope", "home")
-        visible_networks = body.get("visible_networks", [])
         info = node.inference._model_info.get(loaded_name)
         if info:
             info.scope = scope
-            info.visible_networks = visible_networks
+            info.visible_networks = body.get("visible_networks", [])
 
-        # Update capabilities and announce to peers
         node.capabilities.models = node.inference.loaded_models
         await node.announce_capabilities()
         node.activity.record(EventType.MODEL_LOADED, model=loaded_name, backend=backend_type)
@@ -129,6 +152,20 @@ async def unload_model(request: Request):
     await node.announce_capabilities()
     node.activity.record(EventType.MODEL_UNLOADED, model=model_name)
     return {"status": "unloaded", "model": model_name}
+
+
+@router.get("/models/load-status")
+async def model_load_status(request: Request):
+    """Get status of model loading operations (in-progress + recent)."""
+    import time
+    node = request.app.state.node
+    statuses = []
+    for name, s in node.inference._load_status.items():
+        entry = {**s}
+        if s.get("status") == "loading":
+            entry["elapsed"] = round(time.time() - s.get("started_at", 0), 1)
+        statuses.append(entry)
+    return {"statuses": statuses}
 
 
 @router.get("/models/saved")
