@@ -624,11 +624,22 @@ class MycellmNode:
         # Load cached peers
         self._load_peer_cache()
 
-        # Restore persisted models
-        restored = await self.inference.restore_models(self._settings.data_dir)
-        if restored:
-            self.capabilities.models = self.inference.loaded_models
-            logger.info(f"{styled_tag('BOOT')} Restored {restored} model(s)")
+        # Restore persisted models (non-blocking — don't delay API startup)
+        async def _restore_models_bg():
+            try:
+                restored = await asyncio.wait_for(
+                    self.inference.restore_models(self._settings.data_dir),
+                    timeout=30.0,
+                )
+                if restored:
+                    self.capabilities.models = self.inference.loaded_models
+                    logger.info(f"{styled_tag('BOOT')} Restored {restored} model(s)")
+                    await self.announce_capabilities()
+            except asyncio.TimeoutError:
+                logger.warning(f"{styled_tag('BOOT')} Model restore timed out — will retry via dashboard")
+            except Exception as e:
+                logger.warning(f"{styled_tag('BOOT')} Model restore failed: {e}")
+        asyncio.ensure_future(_restore_models_bg())
 
         hw = self._detect_hardware()
         self.capabilities = Capabilities(
