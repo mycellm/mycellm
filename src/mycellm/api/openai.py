@@ -18,6 +18,16 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class MycellmRouting(BaseModel):
+    min_tier: str = ""          # "frontier", "capable", "fast", "tiny"
+    min_params: float = 0       # minimum param count in billions
+    min_context: int = 0        # minimum context window
+    required_tags: list[str] = []  # must have these tags
+    max_cost: float = 0         # max credits per request (0 = unlimited)
+    routing: str = "best"       # "best", "fastest", "ensemble"
+    fallback: str = "downgrade" # "reject" or "downgrade"
+
+
 class ChatCompletionRequest(BaseModel):
     model: str = ""
     messages: list[ChatMessage]
@@ -25,6 +35,7 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     stream: bool = False
     top_p: float = 1.0
+    mycellm: MycellmRouting | None = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -67,12 +78,46 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     model_name = node.inference.resolve_model_name(body.model) if body.model else ""
     routed_to = ""
 
+    # Build quality constraints from mycellm routing params
+    constraints = None
+    if body.mycellm:
+        from mycellm.router.model_resolver import QualityConstraints
+        constraints = QualityConstraints(
+            min_tier=body.mycellm.min_tier,
+            min_params=body.mycellm.min_params,
+            min_context=body.mycellm.min_context,
+            required_tags=body.mycellm.required_tags,
+            max_cost=body.mycellm.max_cost,
+        )
+
     if not model_name and node.model_resolver:
         resolved = node.model_resolver.resolve(
             body.model,
             node.inference.loaded_models,
             fleet_registry=node.node_registry,
+            constraints=constraints,
         )
+        if not resolved and constraints and body.mycellm:
+            if body.mycellm.fallback == "reject":
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": {
+                            "message": "No models match the requested quality constraints.",
+                            "type": "quality_constraint_error",
+                            "code": "no_matching_model",
+                        }
+                    },
+                )
+            elif body.mycellm.fallback == "downgrade":
+                # Retry without constraints
+                resolved = node.model_resolver.resolve(
+                    body.model,
+                    node.inference.loaded_models,
+                    fleet_registry=node.node_registry,
+                )
+                # We'll add a warning header below
+
         if resolved:
             best = resolved[0]
             if best.source == "local":

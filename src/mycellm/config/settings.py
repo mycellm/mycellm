@@ -105,6 +105,9 @@ class MycellmSettings(BaseSettings):
     # Credit
     initial_credits: float = 100.0
 
+    # Quality floor
+    min_model_tier: str = ""  # Minimum model tier for this network
+
     @property
     def keys_dir(self) -> Path:
         return self.data_dir / "keys"

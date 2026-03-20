@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mycellm.protocol.capabilities import ModelCapability
 from mycellm.router.registry import PeerEntry, PeerRegistry
@@ -63,6 +63,16 @@ def derive_tags(model_name: str) -> list[str]:
 
 
 @dataclass
+class QualityConstraints:
+    """Quality constraints for model resolution."""
+    min_tier: str = ""
+    min_params: float = 0
+    min_context: int = 0
+    required_tags: list[str] = field(default_factory=list)
+    max_cost: float = 0
+
+
+@dataclass
 class ResolvedModel:
     """A resolved model with its source information."""
     model_name: str
@@ -88,6 +98,7 @@ class ModelResolver:
         requested: str,
         local_models: list[ModelCapability],
         fleet_registry: dict[str, dict] | None = None,
+        constraints: QualityConstraints | None = None,
     ) -> list[ResolvedModel]:
         """Resolve a model request to a scored list of candidates.
 
@@ -164,6 +175,10 @@ class ModelResolver:
             if filtered:
                 candidates = filtered
 
+        # Apply quality constraints
+        if constraints:
+            candidates = self._apply_constraints(candidates, constraints)
+
         # Sort by score (best first)
         candidates.sort(key=lambda c: c.score, reverse=True)
         return candidates
@@ -193,6 +208,39 @@ class ModelResolver:
             return substr
 
         return []
+
+    def _apply_constraints(
+        self, candidates: list[ResolvedModel], constraints: QualityConstraints
+    ) -> list[ResolvedModel]:
+        """Filter candidates by quality constraints."""
+        if not constraints:
+            return candidates
+
+        tier_order = {"frontier": 4, "capable": 3, "fast": 2, "tiny": 1}
+        min_tier_val = tier_order.get(constraints.min_tier, 0)
+
+        filtered = []
+        for c in candidates:
+            # Tier check
+            if min_tier_val > 0 and tier_order.get(c.tier, 0) < min_tier_val:
+                continue
+            # Param count check
+            if constraints.min_params > 0:
+                param_b = estimate_param_count(c.model_name)
+                if param_b < constraints.min_params:
+                    continue
+            # Context check
+            if constraints.min_context > 0:
+                # Context length not available on ResolvedModel — skip for now
+                pass
+            # Tag check
+            if constraints.required_tags:
+                candidate_tags = [t.lower() for t in c.tags]
+                if not all(t.lower() in candidate_tags for t in constraints.required_tags):
+                    continue
+            filtered.append(c)
+
+        return filtered
 
     def _score_model(
         self,

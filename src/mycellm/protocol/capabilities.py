@@ -20,6 +20,8 @@ class ModelCapability:
     param_count_b: float = 0.0
     scope: str = "home"  # "home" | "public" | "networks"
     visible_networks: list[str] = field(default_factory=list)  # network_ids when scope="networks"
+    features: list[str] = field(default_factory=list)  # "streaming", "function_calling", "vision", "json_mode"
+    throughput_tok_s: float = 0.0  # measured tokens/sec
 
     def to_dict(self) -> dict:
         d = {
@@ -38,6 +40,10 @@ class ModelCapability:
             d["scope"] = self.scope
         if self.visible_networks:
             d["visible_networks"] = self.visible_networks
+        if self.features:
+            d["features"] = self.features
+        if self.throughput_tok_s > 0:
+            d["throughput_tok_s"] = self.throughput_tok_s
         return d
 
     @classmethod
@@ -52,6 +58,8 @@ class ModelCapability:
             param_count_b=d.get("param_count_b", 0.0),
             scope=d.get("scope", "home"),
             visible_networks=d.get("visible_networks", []),
+            features=d.get("features", []),
+            throughput_tok_s=d.get("throughput_tok_s", 0.0),
         )
 
 
