@@ -131,6 +131,73 @@ async def unload_model(request: Request):
     return {"status": "unloaded", "model": model_name}
 
 
+@router.get("/models/saved")
+async def list_saved_configs(request: Request):
+    """List all saved model configs (loaded + unloaded API models)."""
+    node = request.app.state.node
+    loaded_names = {m.name for m in node.inference.loaded_models}
+    configs = []
+    for c in node.inference.get_saved_configs():
+        configs.append({
+            **c,
+            "loaded": c.get("name", "") in loaded_names,
+            "api_key": "***" if c.get("api_key") else "",  # mask key
+        })
+    return {"configs": configs}
+
+
+@router.post("/models/reload")
+async def reload_model(request: Request):
+    """Re-load a previously saved (unloaded) model config."""
+    node = request.app.state.node
+    body = await request.json()
+    model_name = body.get("model", "")
+    if not model_name:
+        return {"error": "model name required"}
+
+    # Find in saved configs
+    config = node.inference._saved_configs.get(model_name)
+    if not config:
+        return {"error": f"No saved config for '{model_name}'"}
+
+    backend_type = config.get("backend", "llama.cpp")
+    try:
+        await node.inference.load_model(
+            config.get("model_path", ""),
+            name=model_name,
+            backend_type=backend_type,
+            api_base=config.get("api_base", ""),
+            api_key=config.get("api_key", ""),
+            api_model=config.get("api_model", ""),
+            ctx_len=config.get("ctx_len", 4096),
+        )
+        node.capabilities.models = node.inference.loaded_models
+        await node.announce_capabilities()
+        node.activity.record(EventType.MODEL_LOADED, model=model_name, backend=backend_type)
+        return {"status": "loaded", "model": model_name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/models/remove-config")
+async def remove_saved_config(request: Request):
+    """Permanently remove a saved model config."""
+    node = request.app.state.node
+    body = await request.json()
+    model_name = body.get("model", "")
+    if not model_name:
+        return {"error": "model name required"}
+
+    # Unload if loaded
+    if model_name in {m.name for m in node.inference.loaded_models}:
+        await node.inference.unload_model(model_name)
+        node.capabilities.models = node.inference.loaded_models
+
+    from mycellm.config import get_settings
+    await node.inference.remove_saved_config(model_name, get_settings().data_dir)
+    return {"status": "removed", "model": model_name}
+
+
 @router.get("/models/{model_name}/config")
 async def model_config(model_name: str, request: Request):
     """Get a loaded model's config (for edit). API key is masked."""

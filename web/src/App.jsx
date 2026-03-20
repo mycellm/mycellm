@@ -1369,6 +1369,7 @@ function ModelsTab({ status, onRefresh }) {
   const [suggestions, setSuggestions] = useState(null)
   const [nodeResources, setNodeResources] = useState({ ram_gb: 0, disk_free_gb: 0 })
   const [localFiles, setLocalFiles] = useState([])  // GGUF files on disk
+  const [savedConfigs, setSavedConfigs] = useState([])  // persisted API model configs
   const [repoFiles, setRepoFiles] = useState(null) // { repo_id, files }
   const [downloadStatus, setDownloadStatus] = useState({})
 
@@ -1469,6 +1470,7 @@ function ModelsTab({ status, onRefresh }) {
       setNodeResources({ ram_gb: d.node_ram_gb || 0, disk_free_gb: d.node_disk_free_gb || 0 })
     }).catch(() => {})
     doFetch('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
+    doFetch('/v1/node/models/saved').then(d => setSavedConfigs(d.configs || [])).catch(() => {})
   }, [selected, isRemote, selectedDevice?.addr])
 
   // Helper: fetch from selected node
@@ -1634,7 +1636,7 @@ function ModelsTab({ status, onRefresh }) {
             Models ({models.length} loaded{localFiles.length > 0 ? `, ${localFiles.filter(f => !f.loaded).length} on disk` : ''})
           </h2>
         </div>
-        {models.length > 0 || localFiles.length > 0 ? (
+        {models.length > 0 || localFiles.length > 0 || savedConfigs.some(c => !c.loaded) ? (
           <table className="w-full text-sm">
             <thead className="bg-black/30">
               <tr className="text-xs text-gray-500 font-mono uppercase">
@@ -1710,6 +1712,35 @@ function ModelsTab({ status, onRefresh }) {
                         nodeApi('/v1/node/models/local').then(d => setLocalFiles(d.files || [])).catch(() => {})
                       }
                     }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
+                  </td>
+                </tr>
+              ))}
+              {/* Unloaded API model configs (no file on disk) */}
+              {savedConfigs.filter(c => !c.loaded && c.backend !== 'llama.cpp').map((c, i) => (
+                <tr key={`saved-${i}`} className="border-t border-white/5 hover:bg-white/[0.02] opacity-70">
+                  <td className="py-2.5 px-4"><div className="w-2 h-2 rounded-full bg-gray-600 border border-gray-500" title="Saved config (not loaded)" /></td>
+                  <td className="py-2.5 px-4 font-mono text-gray-400">{c.name}</td>
+                  <td className="py-2.5 px-4 text-gray-500">{c.backend}</td>
+                  <td className="py-2.5 px-4 text-gray-600 hidden md:table-cell font-mono">-</td>
+                  <td className="py-2.5 px-4 text-gray-600 hidden md:table-cell">-</td>
+                  <td className="py-2.5 px-4 text-gray-600 hidden lg:table-cell">{(c.ctx_len || 4096).toLocaleString()}</td>
+                  <td className="py-2.5 px-4 hidden lg:table-cell">
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-white/5 text-gray-500">disabled</span>
+                  </td>
+                  <td className="py-2.5 px-4 text-right space-x-2">
+                    <button onClick={async () => {
+                      try {
+                        await doApi('/v1/node/models/reload', { model: c.name })
+                        onRefresh()
+                        nodeApi('/v1/node/models/saved').then(d => setSavedConfigs(d.configs || [])).catch(() => {})
+                      } catch (e) { setResult({ error: e.message }) }
+                    }} className="text-xs text-spore hover:text-spore/80 transition-colors">enable</button>
+                    <button onClick={async () => {
+                      if (confirm(`Remove config for ${c.name}?`)) {
+                        await doApi('/v1/node/models/remove-config', { model: c.name })
+                        nodeApi('/v1/node/models/saved').then(d => setSavedConfigs(d.configs || [])).catch(() => {})
+                      }
+                    }} className="text-xs text-gray-600 hover:text-compute transition-colors">remove</button>
                   </td>
                 </tr>
               ))}
