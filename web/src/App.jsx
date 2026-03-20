@@ -1358,6 +1358,8 @@ function ModelsTab({ status, onRefresh }) {
   const [searching, setSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
   const [filterCompatible, setFilterCompatible] = useState(true)
+  const [suggestions, setSuggestions] = useState(null)
+  const [nodeResources, setNodeResources] = useState({ ram_gb: 0, disk_free_gb: 0 })
   const [repoFiles, setRepoFiles] = useState(null) // { repo_id, files }
   const [downloadStatus, setDownloadStatus] = useState({})
 
@@ -1449,6 +1451,14 @@ function ModelsTab({ status, onRefresh }) {
   }
 
   // Search HuggingFace
+  // Load suggestions + node resources on mount
+  useEffect(() => {
+    api('/v1/node/models/suggested').then(d => {
+      setSuggestions(d.suggestions || [])
+      setNodeResources({ ram_gb: d.node_ram_gb || 0, disk_free_gb: d.node_disk_free_gb || 0 })
+    }).catch(() => {})
+  }, [])
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
     setSearching(true)
@@ -1456,6 +1466,7 @@ function ModelsTab({ status, onRefresh }) {
     try {
       const data = await api(`/v1/node/models/search?q=${encodeURIComponent(searchQuery)}&limit=12`)
       setSearchResults(data.models || [])
+      if (data.node_ram_gb) setNodeResources({ ram_gb: data.node_ram_gb, disk_free_gb: data.node_disk_free_gb || 0 })
     } catch (e) {
       setSearchResults([])
     }
@@ -1658,14 +1669,18 @@ function ModelsTab({ status, onRefresh }) {
         <div className="p-5">
           {addMode === 'browse' && (
             <div className="space-y-4">
-              <div className="flex space-x-2">
+              <div className="flex space-x-2 items-center">
                 <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSearch()}
                   placeholder="Search models... (e.g. llama 7b, mistral, phi)"
                   className="flex-1 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
                 <button onClick={handleSearch} disabled={searching}
-                  className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40">
+                  className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 whitespace-nowrap">
                   {searching ? 'Searching...' : 'Search'}
+                </button>
+                <button onClick={() => setFilterCompatible(f => !f)}
+                  className={`text-xs px-2 py-1.5 rounded border transition-colors whitespace-nowrap ${filterCompatible ? 'border-spore/30 text-spore bg-spore/5' : 'border-white/10 text-gray-500'}`}>
+                  {filterCompatible ? 'Compatible' : 'All sizes'}
                 </button>
               </div>
 
@@ -1750,26 +1765,82 @@ function ModelsTab({ status, onRefresh }) {
               )}
 
               {/* Search results */}
-              {searchResults.length > 0 && !repoFiles && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {searchResults.map((m, i) => (
-                    <button key={i} onClick={() => handleBrowseRepo(m.repo_id)}
-                      className="text-left bg-black border border-white/10 rounded-lg p-3 hover:border-spore/30 transition-colors">
-                      <div className="font-mono text-sm text-white truncate">{m.repo_id}</div>
-                      <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs text-gray-500">
-                        {m.param_b > 0 && <span className="text-gray-300 font-medium">{m.param_b}B</span>}
-                        {m.architecture && <span>{m.architecture}</span>}
-                        {m.context_length > 0 && <span>{(m.context_length / 1000).toFixed(0)}k ctx</span>}
-                        <span>&darr;{m.downloads?.toLocaleString()}</span>
-                        {m.license && <span>{m.license}</span>}
+              {searchResults.length > 0 && !repoFiles && (() => {
+                const isCompat = (m) => !m.est_min_ram_gb || !nodeResources.ram_gb || m.est_min_ram_gb <= nodeResources.ram_gb
+                const filtered = filterCompatible ? searchResults.filter(isCompat) : searchResults
+                const hiddenCount = searchResults.length - filtered.length
+                return (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {filtered.map((m, i) => {
+                        const compat = isCompat(m)
+                        return (
+                          <button key={i} onClick={() => handleBrowseRepo(m.repo_id)}
+                            className={`text-left bg-black border rounded-lg p-3 hover:border-spore/30 transition-colors ${compat ? 'border-white/10' : 'border-white/5 opacity-50'}`}>
+                            <div className="flex items-center justify-between">
+                              <div className="font-mono text-sm text-white truncate">{m.repo_id}</div>
+                              {!compat && <span className="text-compute text-xs ml-1" title="May exceed node resources">&#9888;</span>}
+                            </div>
+                            <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs text-gray-500">
+                              {m.param_b > 0 && <span className="text-gray-300 font-medium">{m.param_b}B</span>}
+                              {m.architecture && <span>{m.architecture}</span>}
+                              {m.context_length > 0 && <span>{(m.context_length / 1000).toFixed(0)}k ctx</span>}
+                              {m.est_min_size_gb > 0 && <span>~{m.est_min_size_gb}GB</span>}
+                              <span>&darr;{m.downloads?.toLocaleString()}</span>
+                              {m.license && <span>{m.license}</span>}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {hiddenCount > 0 && (
+                      <div className="text-xs text-gray-600 mt-2">
+                        {hiddenCount} model(s) hidden (too large for {nodeResources.ram_gb}GB RAM).
+                        <button onClick={() => setFilterCompatible(false)} className="text-gray-400 hover:text-white ml-1 underline">Show all</button>
                       </div>
-                    </button>
-                  ))}
-                </div>
-              )}
+                    )}
+                  </>
+                )
+              })()}
 
               {searchResults.length === 0 && !searching && hasSearched && (
                 <div className="text-center text-sm text-gray-600 py-4">No GGUF models found for &ldquo;{searchQuery}&rdquo;</div>
+              )}
+
+              {/* Suggested models — show when no search active */}
+              {!hasSearched && !repoFiles && suggestions && suggestions.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs text-gray-500 font-mono uppercase tracking-wider">Suggested for this node</h3>
+                    {nodeResources.ram_gb > 0 && <span className="text-xs text-gray-600">{nodeResources.ram_gb}GB RAM · {nodeResources.disk_free_gb}GB disk free</span>}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {suggestions.filter(s => !filterCompatible || s.compatible).map((s, i) => (
+                      <button key={i} onClick={() => handleBrowseRepo(s.repo_id)}
+                        className={`text-left bg-black border rounded-lg p-3 hover:border-spore/30 transition-colors ${s.compatible ? 'border-spore/20' : 'border-white/5 opacity-50'}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-sm text-white truncate">{s.repo_id.split('/').pop()}</span>
+                          {s.compatible
+                            ? <span className="text-spore text-xs">&#10003;</span>
+                            : <span className="text-compute text-xs">&#9888;</span>
+                          }
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">{s.description}</div>
+                        <div className="flex items-center space-x-3 mt-1 text-xs text-gray-600">
+                          <span>{s.param_b}B</span>
+                          <span>~{s.est_size_gb}GB (Q4)</span>
+                          <span>needs {s.min_ram_gb}GB+ RAM</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {filterCompatible && suggestions.some(s => !s.compatible) && (
+                    <div className="text-xs text-gray-600 mt-2">
+                      {suggestions.filter(s => !s.compatible).length} model(s) hidden.
+                      <button onClick={() => setFilterCompatible(false)} className="text-gray-400 hover:text-white ml-1 underline">Show all</button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}

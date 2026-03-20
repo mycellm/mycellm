@@ -18,6 +18,57 @@ router = APIRouter()
 _downloads: dict[str, dict] = {}  # download_id -> {status, progress, ...}
 
 
+def _get_node_resources() -> dict:
+    """Get available RAM and disk space for compatibility checks."""
+    import platform
+    import shutil
+
+    ram_gb = 0.0
+    disk_free_gb = 0.0
+
+    try:
+        if platform.system() == "Linux":
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        ram_gb = int(line.split()[1]) / 1048576
+                        break
+        elif platform.system() == "Darwin":
+            import subprocess
+            result = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=3)
+            if result.returncode == 0:
+                ram_gb = int(result.stdout.strip()) / (1024 ** 3)
+    except Exception:
+        pass
+
+    try:
+        from mycellm.config import get_settings
+        settings = get_settings()
+        model_dir = settings.model_dir or settings.data_dir / "models"
+        target = model_dir if model_dir.exists() else settings.data_dir
+        usage = shutil.disk_usage(str(target))
+        disk_free_gb = usage.free / (1024 ** 3)
+    except Exception:
+        pass
+
+    return {"ram_gb": round(ram_gb, 1), "disk_free_gb": round(disk_free_gb, 1)}
+
+
+# Curated suggestions by RAM tier
+_SUGGESTED_MODELS = [
+    # (min_ram_gb, repo_id, description, param_b)
+    (2, "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF", "Fast tiny chat model", 1.1),
+    (4, "TheBloke/Phi-2-GGUF", "Microsoft Phi-2, strong for size", 2.7),
+    (6, "bartowski/Qwen2.5-3B-Instruct-GGUF", "Qwen 2.5 3B instruction-tuned", 3.0),
+    (8, "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "Llama 3.1 8B chat", 8.0),
+    (8, "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF", "Qwen 2.5 Coder 7B", 7.0),
+    (12, "bartowski/gemma-2-9b-it-GGUF", "Google Gemma 2 9B", 9.0),
+    (16, "bartowski/Qwen2.5-14B-Instruct-GGUF", "Qwen 2.5 14B instruction-tuned", 14.0),
+    (24, "bartowski/Mistral-Small-24B-Instruct-2501-GGUF", "Mistral Small 24B", 24.0),
+    (48, "bartowski/Qwen2.5-72B-Instruct-GGUF", "Qwen 2.5 72B frontier", 72.0),
+]
+
+
 @router.get("/search")
 async def search_models(request: Request, q: str = "", limit: int = 20):
     """Search HuggingFace for GGUF models."""
@@ -52,6 +103,10 @@ async def search_models(request: Request, q: str = "", limit: int = 20):
             # Extract from card data
             card = r.get("cardData", {})
 
+            # Estimate smallest quant size: ~0.5 bytes/param for Q4_K_M
+            est_min_gb = round(param_count * 0.5 / 1e9, 1) if param_count else 0
+            est_ram_gb = round(est_min_gb * 1.2, 1) if est_min_gb else 0
+
             models.append({
                 "repo_id": model_id,
                 "downloads": r.get("downloads", 0),
@@ -65,9 +120,18 @@ async def search_models(request: Request, q: str = "", limit: int = 20):
                 "context_length": context_length,
                 "model_type": card.get("model_type", ""),
                 "license": card.get("license", ""),
+                "est_min_size_gb": est_min_gb,
+                "est_min_ram_gb": est_ram_gb,
             })
 
-        return {"models": models, "query": q, "total": len(models)}
+        # Get node resources for compatibility info
+        node_resources = _get_node_resources()
+
+        return {
+            "models": models, "query": q, "total": len(models),
+            "node_ram_gb": node_resources["ram_gb"],
+            "node_disk_free_gb": node_resources["disk_free_gb"],
+        }
 
     except Exception as e:
         logger.warning(f"HuggingFace search failed: {e}")
@@ -96,36 +160,9 @@ async def list_repo_files(repo_id: str, request: Request):
         context_length = gguf_meta.get("context_length", 0)
         architecture = gguf_meta.get("architecture", "")
 
-        # Node disk info for space warning
-        node = request.app.state.node
-        disk_free = 0
-        try:
-            import shutil
-            from mycellm.config import get_settings
-            settings = get_settings()
-            model_dir = settings.model_dir or settings.data_dir / "models"
-            usage = shutil.disk_usage(str(model_dir.parent if model_dir.exists() else settings.data_dir))
-            disk_free = usage.free
-        except Exception:
-            pass
-
-        # RAM info for resource warning
-        ram_gb = 0
-        try:
-            import platform
-            if platform.system() == "Linux":
-                with open("/proc/meminfo") as f:
-                    for line in f:
-                        if line.startswith("MemAvailable:"):
-                            ram_gb = int(line.split()[1]) / 1048576
-                            break
-            elif platform.system() == "Darwin":
-                import subprocess
-                result = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=3)
-                if result.returncode == 0:
-                    ram_gb = int(result.stdout.strip()) / (1024**3)
-        except Exception:
-            pass
+        resources = _get_node_resources()
+        disk_free = resources["disk_free_gb"] * (1024 ** 3)
+        ram_gb = resources["ram_gb"]
 
         files = []
         for f in tree:
@@ -302,3 +339,33 @@ async def list_local_models(request: Request):
             })
 
     return {"model_dir": str(model_dir), "files": files}
+
+
+@router.get("/suggested")
+async def suggested_models(request: Request):
+    """Suggest models that will run well on this node."""
+    resources = _get_node_resources()
+    ram = resources["ram_gb"]
+    disk = resources["disk_free_gb"]
+
+    suggestions = []
+    for min_ram, repo_id, desc, param_b in _SUGGESTED_MODELS:
+        est_size_gb = round(param_b * 0.5, 1)  # Q4 estimate
+        fits_ram = ram >= min_ram if ram else True
+        fits_disk = disk >= est_size_gb if disk else True
+        compatible = fits_ram and fits_disk
+
+        suggestions.append({
+            "repo_id": repo_id,
+            "description": desc,
+            "param_b": param_b,
+            "min_ram_gb": min_ram,
+            "est_size_gb": est_size_gb,
+            "compatible": compatible,
+        })
+
+    return {
+        "suggestions": suggestions,
+        "node_ram_gb": ram,
+        "node_disk_free_gb": disk,
+    }
