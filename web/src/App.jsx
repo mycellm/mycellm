@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } from 'react'
 import {
   Terminal, Activity, Server, Globe, Cpu, Database, Zap, Shield, Key,
   Send, Plus, Trash2, RefreshCw, MessageSquare, BarChart3, Network,
   Boxes, ChevronRight, Loader2, AlertCircle, Check, X, Eye, EyeOff,
   Radio, MonitorSmartphone, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
+  Wifi, WifiOff, Clock, TrendingUp, Heart, Gauge,
 } from 'lucide-react'
 
 // ── Constants ──
@@ -40,6 +41,135 @@ function tagColor(name) {
     if (name.startsWith(prefix)) return color
   }
   return 'text-gray-400'
+}
+
+// ── Spore Background Animation ──
+
+function SporeBackground({ peerCount = 0, inferenceActive = false }) {
+  const canvasRef = useRef(null)
+  const sporesRef = useRef([])
+  const frameRef = useRef(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+
+    const resize = () => {
+      canvas.width = window.innerWidth
+      canvas.height = window.innerHeight
+    }
+    resize()
+    window.addEventListener('resize', resize)
+
+    // Initialize spores
+    const baseCount = 40
+    const peerBonus = Math.min(peerCount * 5, 30)
+    const count = baseCount + peerBonus
+
+    if (sporesRef.current.length === 0) {
+      for (let i = 0; i < count; i++) {
+        sporesRef.current.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.3,
+          vy: (Math.random() - 0.5) * 0.3,
+          r: Math.random() * 1.5 + 0.5,
+          phase: Math.random() * Math.PI * 2,
+        })
+      }
+    }
+
+    // Add/remove spores to match count
+    while (sporesRef.current.length < count) {
+      sporesRef.current.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 0.5,
+        phase: Math.random() * Math.PI * 2,
+      })
+    }
+    while (sporesRef.current.length > count) {
+      sporesRef.current.pop()
+    }
+
+    const connectionDist = 120
+    const baseAlpha = inferenceActive ? 0.07 : 0.04
+
+    function draw() {
+      const w = canvas.width
+      const h = canvas.height
+      ctx.clearRect(0, 0, w, h)
+      const now = Date.now() * 0.001
+
+      const spores = sporesRef.current
+
+      // Update positions
+      for (const s of spores) {
+        s.x += s.vx
+        s.y += s.vy
+
+        // Gentle drift variation
+        s.vx += (Math.random() - 0.5) * 0.01
+        s.vy += (Math.random() - 0.5) * 0.01
+        s.vx *= 0.99
+        s.vy *= 0.99
+
+        // Wrap around edges
+        if (s.x < -10) s.x = w + 10
+        if (s.x > w + 10) s.x = -10
+        if (s.y < -10) s.y = h + 10
+        if (s.y > h + 10) s.y = -10
+      }
+
+      // Draw connections (mycelium threads)
+      for (let i = 0; i < spores.length; i++) {
+        for (let j = i + 1; j < spores.length; j++) {
+          const dx = spores[i].x - spores[j].x
+          const dy = spores[i].y - spores[j].y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist < connectionDist) {
+            const alpha = (1 - dist / connectionDist) * baseAlpha
+            ctx.beginPath()
+            ctx.moveTo(spores[i].x, spores[i].y)
+            ctx.lineTo(spores[j].x, spores[j].y)
+            ctx.strokeStyle = `rgba(34, 197, 94, ${alpha})`
+            ctx.lineWidth = 0.5
+            ctx.stroke()
+          }
+        }
+      }
+
+      // Draw spores (nodes)
+      for (const s of spores) {
+        const pulse = Math.sin(now * 1.5 + s.phase) * 0.3 + 0.7
+        const alpha = baseAlpha * 2.5 * pulse
+        ctx.beginPath()
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(34, 197, 94, ${alpha})`
+        ctx.fill()
+      }
+
+      frameRef.current = requestAnimationFrame(draw)
+    }
+
+    frameRef.current = requestAnimationFrame(draw)
+
+    return () => {
+      window.removeEventListener('resize', resize)
+      if (frameRef.current) cancelAnimationFrame(frameRef.current)
+    }
+  }, [peerCount, inferenceActive])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-0"
+      style={{ opacity: 1 }}
+    />
+  )
 }
 
 // ── API key management ──
@@ -313,27 +443,176 @@ function SystemInfoPanel({ sysInfo, compact = false }) {
   )
 }
 
+// ── Helpers ──
+
+function formatUptime(seconds) {
+  if (!seconds || seconds <= 0) return '0s'
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+function connectionStateColor(state) {
+  switch (state) {
+    case 'routable': return 'text-spore'
+    case 'connecting': case 'handshaking': return 'text-ledger'
+    case 'disconnected': return 'text-compute'
+    default: return 'text-gray-500'
+  }
+}
+
+function connectionStateDot(state) {
+  switch (state) {
+    case 'routable': return 'bg-spore'
+    case 'connecting': case 'handshaking': return 'bg-ledger animate-pulse'
+    case 'disconnected': return 'bg-compute'
+    default: return 'bg-gray-600'
+  }
+}
+
+// ── Network Health Bar ──
+
+function NetworkHealthBar({ connections, peers, fleetNodes }) {
+  const totalPeers = peers.length
+  const routableConns = connections.filter(c => c.state === 'routable').length
+  const totalConns = connections.length
+  const approvedFleet = fleetNodes.filter(n => n.status === 'approved').length
+
+  // Health score: weighted combination
+  const connHealth = totalConns > 0 ? routableConns / totalConns : 0
+  const peerHealth = totalPeers > 0 ? 1 : 0
+  const fleetHealth = approvedFleet > 0 ? 1 : 0.5 // no fleet isn't unhealthy per se
+  const score = Math.round((connHealth * 0.5 + peerHealth * 0.3 + fleetHealth * 0.2) * 100)
+
+  const barColor = score >= 80 ? 'bg-spore' : score >= 50 ? 'bg-ledger' : 'bg-compute'
+  const label = score >= 80 ? 'Healthy' : score >= 50 ? 'Degraded' : 'Unhealthy'
+  const labelColor = score >= 80 ? 'text-spore' : score >= 50 ? 'text-ledger' : 'text-compute'
+
+  return (
+    <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest flex items-center space-x-2">
+          <Heart size={12} />
+          <span>Network Health</span>
+        </h2>
+        <div className="flex items-center space-x-2">
+          <span className={`font-mono text-2xl font-bold ${labelColor}`}>{score}</span>
+          <span className={`text-xs ${labelColor}`}>{label}</span>
+        </div>
+      </div>
+      <div className="w-full bg-void rounded-full h-2 overflow-hidden border border-white/5">
+        <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${score}%` }} />
+      </div>
+      <div className="flex justify-between mt-3 text-xs text-gray-500">
+        <span>{routableConns}/{totalConns} connections up</span>
+        <span>{totalPeers} peers authenticated</span>
+        <span>{approvedFleet} fleet nodes</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Overview Tab ──
 
-function OverviewTab({ status, credits }) {
+function OverviewTab({ status, credits, fleetNodes }) {
   const [sysInfo, setSysInfo] = useState(null)
+  const [connections, setConnections] = useState([])
   const peers = status?.peers || []
   const models = status?.models || []
+  const uptime = status?.uptime_seconds || 0
 
   useEffect(() => {
     api('/v1/node/system').then(setSysInfo).catch(() => {})
   }, [])
 
+  // Poll connections endpoint
+  useEffect(() => {
+    const fetch_ = () => api('/v1/node/connections').then(d => setConnections(d.connections || [])).catch(() => {})
+    fetch_()
+    const iv = setInterval(fetch_, 5000)
+    return () => clearInterval(iv)
+  }, [])
+
+  // Aggregate stats
+  const routableConns = connections.filter(c => c.state === 'routable')
+  const totalModels = models.length
+  const networkModels = new Set()
+  for (const p of peers) {
+    for (const m of (p.models || [])) networkModels.add(m)
+  }
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label="Connected Peers" value={peers.length} icon={Activity} color="text-relay" />
-        <StatCard label="Loaded Models" value={models.length} icon={Boxes} color="text-spore" />
-        <StatCard label="Credit Balance" value={credits.balance?.toFixed(2)} icon={Key} color="text-ledger"
-          sub={`+${credits.earned?.toFixed(2) || '0.00'} / -${credits.spent?.toFixed(2) || '0.00'}`} />
-        <StatCard label="Active Inference" value={`${status?.inference?.active || 0}/${status?.inference?.max_concurrent || 2}`}
-          icon={Zap} color="text-compute" />
+      {/* Top stat cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <StatCard label="Uptime" value={formatUptime(uptime)} icon={Clock} color="text-gray-300" />
+        <StatCard label="Connections" value={`${routableConns.length}/${connections.length}`} icon={Wifi} color="text-relay"
+          sub={connections.length === 0 ? 'No outbound' : `${connections.filter(c=>c.state==='disconnected').length} down`} />
+        <StatCard label="Models" value={totalModels} icon={Boxes} color="text-spore"
+          sub={networkModels.size > 0 ? `+${networkModels.size} on network` : 'local only'} />
+        <StatCard label="Credits" value={credits.balance?.toFixed(1)} icon={Key} color="text-ledger"
+          sub={`+${credits.earned?.toFixed(1) || '0'} / -${credits.spent?.toFixed(1) || '0'}`} />
+        <StatCard label="Inference" value={`${status?.inference?.active || 0}/${status?.inference?.max_concurrent || 2}`}
+          icon={Zap} color="text-compute"
+          highlight={status?.inference?.active > 0} />
       </div>
+
+      {/* Network Health */}
+      <NetworkHealthBar connections={connections} peers={peers} fleetNodes={fleetNodes || []} />
+
+      {/* Connection Diagnostics */}
+      {connections.length > 0 && (
+        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4 flex items-center space-x-2">
+            <Gauge size={12} />
+            <span>Connections ({connections.length})</span>
+          </h2>
+          <div className="space-y-2">
+            {connections.map((c, i) => (
+              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg text-sm">
+                <div className="flex items-center space-x-3">
+                  <div className={`w-2 h-2 rounded-full ${connectionStateDot(c.state)}`} />
+                  <span className="font-mono text-gray-300">{c.address}</span>
+                  {c.peer_id && <span className="font-mono text-xs text-gray-600">{c.peer_id.slice(0, 12)}...</span>}
+                </div>
+                <div className="flex items-center space-x-4 text-xs">
+                  <span className={connectionStateColor(c.state)}>{c.state}</span>
+                  {c.rtt_ms != null && <span className="text-gray-500">{c.rtt_ms}ms</span>}
+                  {c.uptime_seconds > 0 && <span className="text-gray-600">{formatUptime(c.uptime_seconds)}</span>}
+                  {c.reconnect_attempts > 0 && (
+                    <span className="text-compute text-xs">{c.reconnect_attempts} retries</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Peers */}
+      {peers.length > 0 && (
+        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Authenticated Peers ({peers.length})</h2>
+          <div className="space-y-2">
+            {peers.map((p, i) => (
+              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg text-sm">
+                <div className="flex items-center space-x-3">
+                  <div className={`w-2 h-2 rounded-full ${p.status === 'routable' ? 'bg-spore' : 'bg-gray-600'}`} />
+                  <span className="font-mono text-gray-300">{p.peer_id?.slice(0, 16)}...</span>
+                </div>
+                <div className="flex items-center space-x-4 text-xs text-gray-500">
+                  <span>{p.role}</span>
+                  <span>{p.models?.length || 0} models</span>
+                  <span className={p.status === 'routable' ? 'text-spore' : 'text-gray-600'}>{p.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* System Info */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
@@ -344,28 +623,6 @@ function OverviewTab({ status, credits }) {
           </div>
         )}
       </div>
-
-      {/* Peers quick list */}
-      {peers.length > 0 && (
-        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Connected Peers</h2>
-          <div className="space-y-2">
-            {peers.map((p, i) => (
-              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg text-sm">
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 rounded-full bg-spore animate-pulse" />
-                  <span className="font-mono text-gray-300">{p.peer_id?.slice(0, 16)}...</span>
-                </div>
-                <div className="flex items-center space-x-4 text-xs text-gray-500">
-                  <span>{p.role}</span>
-                  <span>{p.models?.join(', ') || 'no models'}</span>
-                  <span className={p.status === 'routable' ? 'text-spore' : 'text-gray-600'}>{p.status}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -1241,10 +1498,15 @@ export default function App() {
     return () => clearInterval(iv)
   }, [appState, refreshTick])
 
-  // Poll fleet count from registry
+  // Poll fleet nodes from registry
+  const [fleetNodes, setFleetNodes] = useState([])
   useEffect(() => {
     if (appState !== 'dashboard') return
-    const fetch_ = () => api('/v1/admin/nodes').then(d => setFleetCount((d.nodes || []).length)).catch(() => {})
+    const fetch_ = () => api('/v1/admin/nodes').then(d => {
+      const nodes = d.nodes || []
+      setFleetNodes(nodes)
+      setFleetCount(nodes.length)
+    }).catch(() => {})
     fetch_()
     const iv = setInterval(fetch_, 5000)
     return () => clearInterval(iv)
@@ -1288,9 +1550,13 @@ export default function App() {
 
   return (
     <NodeRegistryContext.Provider value={nodeRegistry}>
-      <div className="min-h-screen bg-void text-console font-sans">
+      <div className="min-h-screen bg-void text-console font-sans relative">
+        <SporeBackground
+          peerCount={(status?.peers?.length || 0) + fleetCount}
+          inferenceActive={(status?.inference?.active || 0) > 0}
+        />
         {/* Header */}
-        <header className="border-b border-white/10 bg-void/80 backdrop-blur-md sticky top-0 z-50">
+        <header className="border-b border-white/10 bg-void/80 backdrop-blur-md sticky top-0 z-50 relative">
           <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <pre className="text-[4px] leading-none text-compute drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
@@ -1323,7 +1589,7 @@ export default function App() {
         </header>
 
         {/* Tab nav */}
-        <nav className="border-b border-white/5 bg-void/60">
+        <nav className="border-b border-white/5 bg-void/60 relative z-10">
           <div className="max-w-7xl mx-auto px-4 flex space-x-1 overflow-x-auto">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
@@ -1340,8 +1606,8 @@ export default function App() {
         </nav>
 
         {/* Content */}
-        <main className="max-w-7xl mx-auto px-4 py-6">
-          {tab === 'overview' && <OverviewTab status={status} credits={credits} />}
+        <main className="max-w-7xl mx-auto px-4 py-6 relative z-10">
+          {tab === 'overview' && <OverviewTab status={status} credits={credits} fleetNodes={fleetNodes} />}
           {tab === 'network' && <NetworkTab status={status} />}
           {tab === 'models' && <ModelsTab status={status} onRefresh={triggerRefresh} />}
           {tab === 'chat' && <ChatTab />}
