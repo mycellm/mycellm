@@ -354,21 +354,32 @@ async def list_downloads(request: Request):
 
 @router.get("/local")
 async def list_local_models(request: Request):
-    """List GGUF files available in the model directory."""
+    """List GGUF files available in the model directory with loaded status."""
     from mycellm.config import get_settings
     settings = get_settings()
+    node = request.app.state.node
     model_dir = settings.model_dir or settings.data_dir / "models"
+
+    loaded_names = {m.name for m in node.inference.loaded_models}
 
     files = []
     if model_dir.exists():
         for f in sorted(model_dir.glob("*.gguf")):
             stat = f.stat()
+            model_name = f.stem
+            is_loaded = model_name in loaded_names
+            info = node.inference._model_info.get(model_name)
             files.append({
                 "filename": f.name,
                 "path": str(f),
+                "model_name": model_name,
                 "size_bytes": stat.st_size,
                 "size_gb": round(stat.st_size / (1024**3), 2),
                 "modified": stat.st_mtime,
+                "loaded": is_loaded,
+                "quant": info.quant if info else "",
+                "param_count_b": info.param_count_b if info else 0,
+                "ctx_len": info.ctx_len if info else 0,
             })
 
     return {"model_dir": str(model_dir), "files": files}
