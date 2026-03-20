@@ -42,18 +42,37 @@ function tagColor(name) {
   return 'text-gray-400'
 }
 
+// ── API key management ──
+
+function getApiKey() {
+  return localStorage.getItem('mycellm_api_key') || ''
+}
+
+function setApiKey(key) {
+  localStorage.setItem('mycellm_api_key', key)
+}
+
+function authHeaders() {
+  const key = getApiKey()
+  return key ? { 'Authorization': `Bearer ${key}` } : {}
+}
+
 // ── API helpers ──
 
-async function api(path, opts) {
-  const resp = await fetch(path, opts)
+async function api(path, opts = {}) {
+  const headers = { ...authHeaders(), ...(opts.headers || {}) }
+  const resp = await fetch(path, { ...opts, headers })
+  if (resp.status === 401) throw new Error('unauthorized')
   if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`)
   return resp.json()
 }
 
 /** Call a remote node's API directly (browser → peer IP). */
-async function remoteApi(nodeAddr, path, opts) {
+async function remoteApi(nodeAddr, path, opts = {}) {
   const base = nodeAddr.startsWith('http') ? nodeAddr : `http://${nodeAddr}`
-  const resp = await fetch(`${base}${path}`, opts)
+  const headers = { ...authHeaders(), ...(opts.headers || {}) }
+  const resp = await fetch(`${base}${path}`, { ...opts, headers })
+  if (resp.status === 401) throw new Error('unauthorized')
   if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`)
   return resp.json()
 }
@@ -1009,10 +1028,58 @@ function LogsTab({ logs }) {
   )
 }
 
+// ── Auth Gate ──
+
+function AuthGate({ onAuth }) {
+  const [key, setKey] = useState('')
+  const [error, setError] = useState('')
+  const [checking, setChecking] = useState(false)
+
+  const submit = async () => {
+    setChecking(true)
+    setError('')
+    setApiKey(key)
+    try {
+      await api('/v1/node/status')
+      onAuth()
+    } catch (e) {
+      if (e.message === 'unauthorized') {
+        setError('Invalid API key')
+        setApiKey('')
+      } else {
+        setError(`Connection error: ${e.message}`)
+      }
+    }
+    setChecking(false)
+  }
+
+  return (
+    <div className="min-h-screen bg-void text-console font-mono flex items-center justify-center p-6">
+      <div className="max-w-sm w-full border border-white/10 bg-[#111] p-6 rounded-xl">
+        <div className="flex items-center space-x-3 mb-6">
+          <Shield size={20} className="text-spore" />
+          <h1 className="text-lg font-bold text-white">mycellm<span className="text-spore">.</span></h1>
+        </div>
+        <p className="text-sm text-gray-400 mb-4">This node requires an API key.</p>
+        <input type="password" value={key} onChange={e => setKey(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && submit()}
+          placeholder="MYCELLM_API_KEY"
+          autoFocus
+          className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none mb-3" />
+        <button onClick={submit} disabled={checking || !key}
+          className="w-full bg-spore text-black py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 transition-all">
+          {checking ? 'Checking...' : 'Authenticate'}
+        </button>
+        {error && <p className="text-xs text-compute mt-3">{error}</p>}
+      </div>
+    </div>
+  )
+}
+
 // ── Main App ──
 
 export default function App() {
-  const [appState, setAppState] = useState('booting')
+  const [appState, setAppState] = useState('checking') // checking → auth | booting → dashboard
   const [tab, setTab] = useState('overview')
   const [status, setStatus] = useState(null)
   const [credits, setCredits] = useState({ balance: 0, earned: 0, spent: 0 })
@@ -1022,6 +1089,24 @@ export default function App() {
   const nodeRegistry = useManagedNodes()
 
   const triggerRefresh = useCallback(() => setRefreshTick(t => t + 1), [])
+
+  // Check if auth is required on initial load
+  useEffect(() => {
+    if (appState !== 'checking') return
+    fetch('/health').then(r => r.json()).then(d => {
+      if (d.auth_required) {
+        // Try stored key
+        const stored = getApiKey()
+        if (stored) {
+          api('/v1/node/status').then(() => setAppState('booting')).catch(() => setAppState('auth'))
+        } else {
+          setAppState('auth')
+        }
+      } else {
+        setAppState('booting')
+      }
+    }).catch(() => setAppState('booting'))  // node offline, skip auth
+  }, [appState])
 
   // Poll status + credits
   useEffect(() => {
@@ -1066,6 +1151,18 @@ export default function App() {
     }
     return () => es.close()
   }, [appState])
+
+  if (appState === 'checking') {
+    return (
+      <div className="min-h-screen bg-void flex items-center justify-center">
+        <Loader2 size={24} className="animate-spin text-spore" />
+      </div>
+    )
+  }
+
+  if (appState === 'auth') {
+    return <AuthGate onAuth={() => setAppState('booting')} />
+  }
 
   if (appState === 'booting') {
     return <BootScreen onDone={() => setAppState('dashboard')} />

@@ -512,6 +512,11 @@ class MycellmNode:
         if not peers:
             return
 
+        # Auth headers (if API key configured, bootstrap node will require it)
+        headers = {}
+        if self._settings.api_key:
+            headers["Authorization"] = f"Bearer {self._settings.api_key}"
+
         # Build announcement payload
         sys_info = self.get_system_info()
         payload = {
@@ -529,9 +534,11 @@ class MycellmNode:
             url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(url, json=payload)
+                    resp = await client.post(url, json=payload, headers=headers)
                     if resp.status_code == 200:
                         logger.info(f"{styled_tag('NODE')} Announced to bootstrap {host}:{api_port}")
+                    elif resp.status_code == 401:
+                        logger.warning(f"{styled_tag('SECURITY')} Bootstrap rejected announce (bad API key)")
                     else:
                         logger.debug(f"{styled_tag('NODE')} Announce to {host}:{api_port}: {resp.status_code}")
             except Exception as e:
@@ -544,10 +551,9 @@ class MycellmNode:
                 api_port = port - 1
                 url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
                 try:
-                    # Update models/capabilities
                     payload["capabilities"] = self.capabilities.to_dict()
                     async with httpx.AsyncClient(timeout=10) as client:
-                        await client.post(url, json=payload)
+                        await client.post(url, json=payload, headers=headers)
                 except Exception:
                     pass
 

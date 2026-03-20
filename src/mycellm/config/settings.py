@@ -91,6 +91,10 @@ class MycellmSettings(BaseSettings):
     # Bootstrap peers (comma-separated host:port)
     bootstrap_peers: str = ""
 
+    # Security — optional API key (MYCELLM_API_KEY env var)
+    # When set, all API endpoints (except /health) require Authorization: Bearer <key>
+    api_key: str = ""
+
     # Credit
     initial_credits: float = 100.0
 
