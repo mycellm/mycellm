@@ -31,6 +31,8 @@ class InferenceManager:
         self._saved_configs: dict[str, dict] = {}  # name -> config dict
         # Load status tracking
         self._load_status: dict[str, dict] = {}  # model_name -> {status, phase, error, ...}
+        # Model paths (for llama.cpp models)
+        self._model_paths: dict[str, str] = {}  # model_name -> file path
 
     @property
     def loaded_models(self) -> list[ModelCapability]:
@@ -84,6 +86,8 @@ class InferenceManager:
             await backend.load_model(model_path, name=model_name, **kwargs)
 
             self._load_status[model_name]["phase"] = "registering"
+            if model_path:
+                self._model_paths[model_name] = model_path
             self._backends[model_name] = backend
             self._model_info[model_name] = ModelCapability(
                 name=model_name,
@@ -200,6 +204,9 @@ class InferenceManager:
                 "param_count_b": getattr(info, 'param_count_b', 0.0),
                 "enabled": True,
             }
+            # Store model path for llama.cpp restore
+            if name in self._model_paths:
+                config["model_path"] = self._model_paths[name]
             from mycellm.inference.openai_compat import OpenAICompatibleBackend
             if isinstance(backend, OpenAICompatibleBackend):
                 remote = backend._models.get(name)
@@ -254,6 +261,19 @@ class InferenceManager:
                         api_model=config.get("api_model", ""),
                         ctx_len=config.get("ctx_len", 4096),
                     )
+                elif config.get("model_path"):
+                    model_path = config["model_path"]
+                    if Path(model_path).exists():
+                        await self.load_model(
+                            model_path,
+                            name=name,
+                            backend_type=backend_type,
+                            ctx_len=config.get("ctx_len", 4096),
+                            quant=config.get("quant", ""),
+                        )
+                    else:
+                        logger.warning(f"Model file missing for '{name}': {model_path}")
+                        continue
                 else:
                     logger.debug(f"Skipping local model restore for '{name}' (path not stored)")
                     continue
