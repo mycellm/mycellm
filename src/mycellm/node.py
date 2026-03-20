@@ -498,7 +498,7 @@ class MycellmNode:
         asyncio.create_task(self._connect_to_bootstrap_peers())
 
         # Announce to bootstrap nodes via HTTP
-        asyncio.create_task(self._announce_to_bootstrap())
+        self._announce_task = asyncio.create_task(self._announce_to_bootstrap())
 
         # Start health checker
         await self.health_checker.start()
@@ -509,19 +509,20 @@ class MycellmNode:
         await self._start_api()
 
     async def _announce_to_bootstrap(self) -> None:
-        """Announce this node to bootstrap peers via HTTP API."""
+        """Announce this node to bootstrap peers via HTTP API.
+
+        Runs as a long-lived background task. Must never crash.
+        """
         import httpx
 
         peers = self._settings.get_bootstrap_list()
         if not peers:
             return
 
-        # Auth headers (if API key configured, bootstrap node will require it)
         headers = {}
         if self._settings.api_key:
             headers["Authorization"] = f"Bearer {self._settings.api_key}"
 
-        # Build announcement payload
         sys_info = self.get_system_info()
         payload = {
             "peer_id": self.peer_id,
@@ -532,39 +533,38 @@ class MycellmNode:
             "system": sys_info,
         }
 
-        for host, port in peers:
-            # Bootstrap peer list has QUIC port — API is on port - 1 by convention
-            api_port = port - 1
-            url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(url, json=payload, headers=headers)
-                    if resp.status_code == 200:
-                        logger.info(f"{styled_tag('NODE')} Announced to bootstrap {host}:{api_port}")
-                    elif resp.status_code == 401:
-                        logger.warning(f"{styled_tag('SECURITY')} Bootstrap rejected announce (bad API key)")
-                    else:
-                        logger.debug(f"{styled_tag('NODE')} Announce to {host}:{api_port}: {resp.status_code}")
-            except Exception as e:
-                logger.debug(f"{styled_tag('NODE')} Failed to announce to {host}:{api_port}: {e}")
-
-        # Re-announce periodically to keep registry fresh
-        # Short interval initially (bootstrap may not be up yet), then back off
-        interval = 10
-        while self._running:
-            await asyncio.sleep(interval)
-            interval = min(interval + 10, 60)  # ramp up to 60s
+        async def _do_announce():
+            payload["capabilities"] = self.capabilities.to_dict()
             for host, port in peers:
                 api_port = port - 1
                 url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
                 try:
-                    payload["capabilities"] = self.capabilities.to_dict()
                     async with httpx.AsyncClient(timeout=10) as client:
                         resp = await client.post(url, json=payload, headers=headers)
                         if resp.status_code == 200:
-                            interval = 60  # success, slow down
-                except Exception:
-                    pass
+                            logger.info(f"{styled_tag('NODE')} Announced to bootstrap {host}:{api_port}")
+                            return True
+                        elif resp.status_code == 401:
+                            logger.warning(f"{styled_tag('SECURITY')} Bootstrap rejected announce (bad API key)")
+                except Exception as e:
+                    logger.debug(f"{styled_tag('NODE')} Announce to {host}:{api_port} failed: {e}")
+            return False
+
+        # Initial announce
+        await _do_announce()
+
+        # Re-announce loop — never exits, never crashes
+        interval = 15
+        while self._running:
+            try:
+                await asyncio.sleep(interval)
+                ok = await _do_announce()
+                interval = 60 if ok else min(interval + 10, 60)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.debug(f"{styled_tag('NODE')} Announce loop error: {e}")
+                interval = 30
 
     async def announce_capabilities(self) -> None:
         """Re-announce capabilities to all connected peers (e.g. after model load)."""
