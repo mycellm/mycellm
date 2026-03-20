@@ -1356,6 +1356,7 @@ function ModelsTab({ status, onRefresh }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [hasSearched, setHasSearched] = useState(false)
   const [repoFiles, setRepoFiles] = useState(null) // { repo_id, files }
   const [downloadStatus, setDownloadStatus] = useState({})
 
@@ -1450,6 +1451,7 @@ function ModelsTab({ status, onRefresh }) {
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
     setSearching(true)
+    setHasSearched(true)
     try {
       const data = await api(`/v1/node/models/search?q=${encodeURIComponent(searchQuery)}&limit=12`)
       setSearchResults(data.models || [])
@@ -1755,7 +1757,7 @@ function ModelsTab({ status, onRefresh }) {
                 </div>
               )}
 
-              {searchResults.length === 0 && !searching && searchQuery && (
+              {searchResults.length === 0 && !searching && hasSearched && (
                 <div className="text-center text-sm text-gray-600 py-4">No GGUF models found for &ldquo;{searchQuery}&rdquo;</div>
               )}
             </div>
