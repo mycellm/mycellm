@@ -184,12 +184,126 @@ function NodeSelector({ selected, onSelect, includeLocal = true }) {
   )
 }
 
+// ── System Info Panel (reusable) ──
+
+function SystemInfoPanel({ sysInfo, compact = false }) {
+  if (!sysInfo) return null
+  const cpu = sysInfo.cpu || {}
+  const mem = sysInfo.memory || {}
+  const disk = sysInfo.disk || {}
+  const gpu = sysInfo.gpu || {}
+  const os_ = sysInfo.os || {}
+
+  const osLabel = os_.distro || (os_.macos_version ? `macOS ${os_.macos_version}` : os_.system || '?')
+  const cpuName = cpu.name || cpu.processor || '?'
+
+  if (compact) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <div>
+          <span className="text-gray-500">CPU</span>
+          <div className="text-gray-300 mt-0.5 truncate" title={cpuName}>{cpuName}</div>
+        </div>
+        <div>
+          <span className="text-gray-500">RAM</span>
+          <div className="text-gray-300 mt-0.5">{mem.total_gb || '?'} GB{mem.used_pct ? ` (${mem.used_pct}% used)` : ''}</div>
+        </div>
+        <div>
+          <span className="text-gray-500">GPU</span>
+          <div className="text-gray-300 mt-0.5">{gpu.gpu || 'CPU'} / {gpu.backend || 'cpu'}</div>
+        </div>
+        <div>
+          <span className="text-gray-500">OS</span>
+          <div className="text-gray-300 mt-0.5 truncate" title={osLabel}>{osLabel}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* CPU + OS row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-black border border-white/5 p-4 rounded-lg">
+          <div className="text-xs text-gray-500 mb-2">CPU</div>
+          <div className="text-sm font-medium text-white truncate" title={cpuName}>{cpuName}</div>
+          <div className="flex space-x-4 mt-2 text-xs text-gray-500">
+            <span>{cpu.arch}</span>
+            <span>{cpu.cores_physical} cores</span>
+            {cpu.cores_performance && <span>{cpu.cores_performance}P + {cpu.cores_efficiency}E</span>}
+          </div>
+        </div>
+        <div className="bg-black border border-white/5 p-4 rounded-lg">
+          <div className="text-xs text-gray-500 mb-2">Operating System</div>
+          <div className="text-sm font-medium text-white">{osLabel}</div>
+          <div className="flex space-x-4 mt-2 text-xs text-gray-500">
+            <span>{os_.hostname}</span>
+            <span>Python {sysInfo.python}</span>
+            <span>mycellm {sysInfo.mycellm_version}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Memory + Disk + GPU row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-black border border-white/5 p-4 rounded-lg">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs text-gray-500">Memory (RAM)</span>
+            <span className="text-xs font-mono text-gray-400">{mem.total_gb} GB</span>
+          </div>
+          {mem.total_gb > 0 && (
+            <div className="w-full bg-void rounded-full h-2 overflow-hidden border border-white/5">
+              <div className="h-full bg-relay transition-all" style={{ width: `${mem.used_pct || 0}%` }} />
+            </div>
+          )}
+          <div className="flex justify-between mt-1.5 text-xs text-gray-600">
+            <span>{mem.available_gb} GB free</span>
+            <span>{mem.used_pct}% used</span>
+          </div>
+        </div>
+
+        <div className="bg-black border border-white/5 p-4 rounded-lg">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs text-gray-500">Disk</span>
+            <span className="text-xs font-mono text-gray-400">{disk.total_gb} GB</span>
+          </div>
+          {disk.total_gb > 0 && (
+            <div className="w-full bg-void rounded-full h-2 overflow-hidden border border-white/5">
+              <div className="h-full bg-ledger transition-all" style={{ width: `${disk.used_pct || 0}%` }} />
+            </div>
+          )}
+          <div className="flex justify-between mt-1.5 text-xs text-gray-600">
+            <span>{disk.free_gb} GB free</span>
+            <span>{disk.used_pct}% used</span>
+          </div>
+        </div>
+
+        <div className="bg-black border border-white/5 p-4 rounded-lg">
+          <div className="text-xs text-gray-500 mb-2">GPU / Accelerator</div>
+          <div className="text-sm font-medium flex items-center space-x-2">
+            <Cpu size={14} className="text-compute" />
+            <span className="text-white">{gpu.gpu || 'CPU'}</span>
+          </div>
+          <div className="flex space-x-4 mt-2 text-xs text-gray-500">
+            <span className="uppercase">{gpu.backend || 'cpu'}</span>
+            {gpu.vram_gb > 0 && <span>{gpu.vram_gb} GB</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Overview Tab ──
 
 function OverviewTab({ status, credits }) {
-  const hw = status?.hardware || { gpu: 'Detecting...', vram_gb: 0, backend: 'cpu' }
+  const [sysInfo, setSysInfo] = useState(null)
   const peers = status?.peers || []
   const models = status?.models || []
+
+  useEffect(() => {
+    api('/v1/node/system').then(setSysInfo).catch(() => {})
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -202,26 +316,14 @@ function OverviewTab({ status, credits }) {
           icon={Zap} color="text-compute" />
       </div>
 
-      {/* Hardware */}
+      {/* System Info */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Hardware</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-black border border-white/5 p-4 rounded-lg">
-            <div className="text-xs text-gray-500 mb-1">GPU / Accelerator</div>
-            <div className="text-lg font-bold flex items-center space-x-2">
-              <Cpu size={16} className="text-compute" />
-              <span>{hw.gpu}</span>
-            </div>
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">System</h2>
+        {sysInfo ? <SystemInfoPanel sysInfo={sysInfo} /> : (
+          <div className="text-sm text-gray-500 flex items-center space-x-2">
+            <Loader2 size={14} className="animate-spin" /><span>Loading system info...</span>
           </div>
-          <div className="bg-black border border-white/5 p-4 rounded-lg">
-            <div className="text-xs text-gray-500 mb-1">Backend</div>
-            <div className="text-lg font-bold uppercase">{hw.backend}</div>
-          </div>
-          <div className="bg-black border border-white/5 p-4 rounded-lg">
-            <div className="text-xs text-gray-500 mb-1">VRAM / Memory</div>
-            <div className="text-lg font-bold">{hw.vram_gb > 0 ? `${hw.vram_gb.toFixed(1)} GB` : 'CPU Only'}</div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Peers quick list */}
@@ -267,18 +369,19 @@ function NetworkTab({ status }) {
     return () => clearInterval(iv)
   }, [])
 
-  // Poll remote node statuses
+  // Poll remote node statuses + system info
   useEffect(() => {
     if (nodes.length === 0) return
     const fetchRemote = async () => {
       const results = {}
       await Promise.all(nodes.map(async (n) => {
         try {
-          const [s, c] = await Promise.all([
+          const [s, c, sys] = await Promise.all([
             remoteApi(n.addr, '/v1/node/status'),
             remoteApi(n.addr, '/v1/node/credits'),
+            remoteApi(n.addr, '/v1/node/system').catch(() => null),
           ])
-          results[n.addr] = { ...s, credits: c, online: true }
+          results[n.addr] = { ...s, credits: c, system: sys, online: true }
         } catch (e) {
           results[n.addr] = { online: false, error: e.message }
         }
@@ -286,7 +389,7 @@ function NetworkTab({ status }) {
       setRemoteStatuses(results)
     }
     fetchRemote()
-    const iv = setInterval(fetchRemote, 5000)
+    const iv = setInterval(fetchRemote, 10000)
     return () => clearInterval(iv)
   }, [nodes])
 
@@ -328,9 +431,9 @@ function NetworkTab({ status }) {
           {nodes.map((n) => {
             const rs = remoteStatuses[n.addr]
             const online = rs?.online
-            const hw = rs?.hardware || {}
             const models = rs?.models || []
             const peerCount = rs?.peers?.length || 0
+            const sys = rs?.system
             return (
               <div key={n.addr} className={`border rounded-xl p-4 ${online ? 'border-white/10 bg-black' : 'border-compute/20 bg-compute/5'}`}>
                 <div className="flex items-center justify-between mb-2">
@@ -338,40 +441,37 @@ function NetworkTab({ status }) {
                     <div className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-spore animate-pulse' : 'bg-compute'}`} />
                     <span className="font-mono text-sm font-medium">{n.label}</span>
                     <span className="font-mono text-xs text-gray-500">{n.addr}</span>
+                    {online && rs?.node_name && rs.node_name !== n.label && (
+                      <span className="text-xs text-gray-600">({rs.node_name})</span>
+                    )}
                   </div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-3">
                     {online && (
-                      <span className="text-xs text-spore font-mono">online</span>
+                      <div className="flex items-center space-x-3 text-xs font-mono">
+                        <span className="text-relay">{peerCount} peers</span>
+                        <span className="text-spore">{models.length} models</span>
+                        {rs?.credits && <span className="text-ledger">{rs.credits.balance?.toFixed(1)} cr</span>}
+                      </div>
                     )}
-                    {!online && (
-                      <span className="text-xs text-compute font-mono">offline</span>
-                    )}
+                    <span className={`text-xs font-mono ${online ? 'text-spore' : 'text-compute'}`}>
+                      {online ? 'online' : 'offline'}
+                    </span>
                     <button onClick={() => removeNode(n.addr)}
                       className="text-gray-600 hover:text-compute transition-colors p-1">
                       <X size={14} />
                     </button>
                   </div>
                 </div>
-                {online && (
-                  <div className="grid grid-cols-4 gap-3 mt-3">
-                    <div className="text-xs">
-                      <span className="text-gray-500">Hardware</span>
-                      <div className="text-gray-300 mt-0.5">{hw.gpu || 'CPU'} / {hw.backend || 'cpu'}</div>
-                    </div>
-                    <div className="text-xs">
-                      <span className="text-gray-500">Memory</span>
-                      <div className="text-gray-300 mt-0.5">{hw.vram_gb > 0 ? `${hw.vram_gb.toFixed(1)} GB` : 'N/A'}</div>
-                    </div>
-                    <div className="text-xs">
-                      <span className="text-gray-500">Models</span>
-                      <div className="text-gray-300 mt-0.5">
-                        {models.length > 0 ? models.map(m => m.name).join(', ') : 'none'}
-                      </div>
-                    </div>
-                    <div className="text-xs">
-                      <span className="text-gray-500">Peers</span>
-                      <div className="text-gray-300 mt-0.5">{peerCount}</div>
-                    </div>
+                {online && sys && (
+                  <div className="mt-3 pt-3 border-t border-white/5">
+                    <SystemInfoPanel sysInfo={sys} compact />
+                  </div>
+                )}
+                {online && models.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-white/5 flex flex-wrap gap-1.5">
+                    {models.map((m, i) => (
+                      <span key={i} className="text-xs font-mono bg-spore/10 text-spore px-2 py-0.5 rounded">{m.name}</span>
+                    ))}
                   </div>
                 )}
                 {!online && rs?.error && (

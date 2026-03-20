@@ -20,6 +20,13 @@ async def node_status(request: Request):
     return status
 
 
+@router.get("/system")
+async def system_info(request: Request):
+    """Get detailed system hardware and software info."""
+    node = request.app.state.node
+    return node.get_system_info()
+
+
 @router.get("/peers")
 async def node_peers(request: Request):
     """List connected peers."""

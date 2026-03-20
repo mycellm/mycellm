@@ -612,6 +612,140 @@ class MycellmNode:
             },
         }
 
+    def get_system_info(self) -> dict:
+        """Return detailed system hardware and software info."""
+        import os
+        import platform
+        import shutil
+        import sys
+
+        # CPU info
+        cpu_info = {
+            "arch": platform.machine(),
+            "cores_physical": os.cpu_count(),
+            "processor": platform.processor() or "unknown",
+        }
+        # Try to get a better CPU name
+        if platform.system() == "Darwin":
+            try:
+                import subprocess
+                brand = subprocess.run(
+                    ["sysctl", "-n", "machdep.cpu.brand_string"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if brand.returncode == 0:
+                    cpu_info["name"] = brand.stdout.strip()
+                cores = subprocess.run(
+                    ["sysctl", "-n", "hw.perflevel0.logicalcpu", "hw.perflevel1.logicalcpu"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if cores.returncode == 0:
+                    parts = cores.stdout.strip().split("\n")
+                    if len(parts) == 2:
+                        cpu_info["cores_performance"] = int(parts[0])
+                        cpu_info["cores_efficiency"] = int(parts[1])
+            except Exception:
+                pass
+        elif platform.system() == "Linux":
+            try:
+                with open("/proc/cpuinfo") as f:
+                    for line in f:
+                        if line.startswith("model name"):
+                            cpu_info["name"] = line.split(":", 1)[1].strip()
+                            break
+            except Exception:
+                pass
+
+        # Memory
+        mem_info = {"total_gb": 0, "available_gb": 0, "used_pct": 0}
+        if platform.system() == "Linux":
+            try:
+                with open("/proc/meminfo") as f:
+                    meminfo = {}
+                    for line in f:
+                        parts = line.split(":")
+                        if len(parts) == 2:
+                            key = parts[0].strip()
+                            val = parts[1].strip().split()[0]
+                            meminfo[key] = int(val)
+                    total = meminfo.get("MemTotal", 0)
+                    avail = meminfo.get("MemAvailable", 0)
+                    mem_info["total_gb"] = round(total / 1048576, 1)
+                    mem_info["available_gb"] = round(avail / 1048576, 1)
+                    if total > 0:
+                        mem_info["used_pct"] = round((1 - avail / total) * 100, 1)
+            except Exception:
+                pass
+        elif platform.system() == "Darwin":
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["sysctl", "-n", "hw.memsize"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    mem_info["total_gb"] = round(int(result.stdout.strip()) / (1024 ** 3), 1)
+            except Exception:
+                pass
+
+        # Disk
+        disk_info = {"total_gb": 0, "free_gb": 0, "used_pct": 0}
+        try:
+            usage = shutil.disk_usage("/")
+            disk_info["total_gb"] = round(usage.total / (1024 ** 3), 1)
+            disk_info["free_gb"] = round(usage.free / (1024 ** 3), 1)
+            disk_info["used_pct"] = round(usage.used / usage.total * 100, 1)
+        except Exception:
+            pass
+
+        # OS
+        os_info = {
+            "system": platform.system(),
+            "release": platform.release(),
+            "version": platform.version(),
+            "hostname": platform.node(),
+        }
+        # Friendlier OS description
+        if platform.system() == "Darwin":
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["sw_vers", "-productVersion"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    os_info["macos_version"] = result.stdout.strip()
+            except Exception:
+                pass
+        elif platform.system() == "Linux":
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["lsb_release", "-ds"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    os_info["distro"] = result.stdout.strip().strip('"')
+            except Exception:
+                try:
+                    with open("/etc/os-release") as f:
+                        for line in f:
+                            if line.startswith("PRETTY_NAME="):
+                                os_info["distro"] = line.split("=", 1)[1].strip().strip('"')
+                                break
+                except Exception:
+                    pass
+
+        return {
+            "cpu": cpu_info,
+            "memory": mem_info,
+            "disk": disk_info,
+            "gpu": self.capabilities.hardware.to_dict(),
+            "os": os_info,
+            "python": sys.version.split()[0],
+            "mycellm_version": "0.1.0",
+        }
+
     async def get_credits(self) -> dict:
         """Get credit info from ledger."""
         if not self.ledger:
