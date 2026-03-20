@@ -41,25 +41,20 @@ async def search_models(request: Request, q: str = "", limit: int = 20):
 
         models = []
         for r in results:
-            # Extract GGUF files from siblings
+            # HF list API doesn't always include siblings — include all GGUF-tagged repos
+            model_id = r.get("modelId", "")
             gguf_files = []
             for s in r.get("siblings", []):
                 fname = s.get("rfilename", "")
                 if fname.endswith(".gguf"):
                     gguf_files.append(fname)
 
-            if not gguf_files:
-                continue
-
-            # Estimate size from model ID
-            model_id = r.get("modelId", "")
-
             models.append({
                 "repo_id": model_id,
                 "downloads": r.get("downloads", 0),
                 "likes": r.get("likes", 0),
                 "tags": r.get("tags", [])[:10],
-                "gguf_files": gguf_files[:20],  # cap at 20 variants
+                "gguf_files": gguf_files[:20],
                 "last_modified": r.get("lastModified", ""),
                 "pipeline_tag": r.get("pipeline_tag", ""),
             })
