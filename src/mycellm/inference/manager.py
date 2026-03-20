@@ -84,10 +84,14 @@ class InferenceManager:
         return None
 
     def resolve_model_name(self, requested: str) -> str:
-        """Resolve a model name to a loaded model."""
+        """Resolve a model name to a loaded model.
+
+        Returns exact match if found. Falls back to first available only
+        when no specific model is requested (empty string).
+        """
         if requested and requested in self._backends:
             return requested
-        if self._backends:
+        if not requested and self._backends:
             return next(iter(self._backends))
         return ""
 

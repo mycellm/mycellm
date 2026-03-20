@@ -23,7 +23,8 @@ class FakeNode:
 
         self.inference = InferenceManager()
         self.registry = PeerRegistry()
-        self._settings = type("S", (), {"node_name": "test-node"})()
+        self.node_registry = {}
+        self._settings = type("S", (), {"node_name": "test-node", "api_key": ""})()
         self._start_time = 1000000.0
         self._running = True
 

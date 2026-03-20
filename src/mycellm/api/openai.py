@@ -85,7 +85,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             ),
         )
 
-    # Try routing to a remote peer
+    # Try routing to a remote peer (QUIC)
     result = await node.route_inference(
         body.model, messages,
         temperature=body.temperature,
@@ -101,6 +101,11 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 )
             ],
         )
+
+    # Try routing via HTTP to fleet nodes (registry-based)
+    fleet_result = await _route_via_fleet(node, body, messages)
+    if fleet_result:
+        return fleet_result
 
     # No model available
     return ChatCompletionResponse(
@@ -187,9 +192,83 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
     return EventSourceResponse(generate())
 
 
+async def _route_via_fleet(node, body: ChatCompletionRequest, messages: list[dict]):
+    """Route inference to a fleet node via HTTP (registry-based)."""
+    import httpx
+    import logging
+
+    logger = logging.getLogger("mycellm.router")
+
+    for entry in node.node_registry.values():
+        if entry.get("status") != "approved" or not entry.get("api_addr"):
+            continue
+        # Check if this node has the requested model
+        caps = entry.get("capabilities", {})
+        fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
+        if body.model and body.model not in fleet_models:
+            continue
+
+        addr = entry["api_addr"]
+        base = f"http://{addr}" if not addr.startswith("http") else addr
+        url = f"{base}/v1/chat/completions"
+
+        try:
+            headers = {"Content-Type": "application/json"}
+            from mycellm.config import get_settings
+            settings = get_settings()
+            if settings.api_key:
+                headers["Authorization"] = f"Bearer {settings.api_key}"
+
+            payload = {
+                "model": body.model,
+                "messages": messages,
+                "temperature": body.temperature,
+                "max_tokens": body.max_tokens or 2048,
+                "top_p": body.top_p,
+            }
+
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    usage = data.get("usage", {})
+                    logger.info(f"Routed '{body.model}' to fleet node {entry.get('node_name', addr)}")
+
+                    # Debit consumer credits
+                    if node.ledger:
+                        tokens = usage.get("completion_tokens", 0)
+                        from mycellm.accounting.pricing import compute_cost
+                        cost = compute_cost(max(tokens, 1))
+                        await node.ledger.debit(
+                            node.peer_id, cost, "inference_consumed",
+                            counterparty_id=entry.get("peer_id", ""),
+                        )
+
+                    return ChatCompletionResponse(
+                        model=data.get("model", body.model),
+                        choices=[
+                            ChatCompletionChoice(
+                                message=ChatMessage(role="assistant", content=text),
+                                finish_reason=data.get("choices", [{}])[0].get("finish_reason", "stop"),
+                            )
+                        ],
+                        usage=Usage(
+                            prompt_tokens=usage.get("prompt_tokens", 0),
+                            completion_tokens=usage.get("completion_tokens", 0),
+                            total_tokens=usage.get("total_tokens", 0),
+                        ),
+                    )
+        except Exception as e:
+            logger.debug(f"Fleet route to {addr} failed: {e}")
+            continue
+
+    return None
+
+
 @router.get("/models")
 async def list_models(request: Request):
-    """List available models (local + remote)."""
+    """List available models (local + remote via QUIC + fleet via registry)."""
     node = request.app.state.node
     models = []
 
@@ -202,8 +281,9 @@ async def list_models(request: Request):
             "owned_by": "local",
         })
 
-    # Remote models from connected peers
     seen = {m.name for m in node.inference.loaded_models}
+
+    # Remote models from QUIC-connected peers
     for entry in node.registry.connected_peers():
         for m in entry.capabilities.models:
             if m.name not in seen:
@@ -214,5 +294,21 @@ async def list_models(request: Request):
                     "owned_by": f"peer:{entry.peer_id[:8]}",
                 })
                 seen.add(m.name)
+
+    # Fleet models from registry (HTTP-routable)
+    for entry in node.node_registry.values():
+        if entry.get("status") != "approved":
+            continue
+        caps = entry.get("capabilities", {})
+        for m in caps.get("models", []):
+            name = m.get("name", m) if isinstance(m, dict) else m
+            if name not in seen:
+                models.append({
+                    "id": name,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": f"fleet:{entry.get('node_name', entry.get('peer_id', '')[:8])}",
+                })
+                seen.add(name)
 
     return {"object": "list", "data": models}
