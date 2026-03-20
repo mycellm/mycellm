@@ -38,6 +38,47 @@ logger = logging.getLogger("mycellm")
 console = Console()
 
 
+class LogBroadcaster(logging.Handler):
+    """Captures log records and broadcasts to SSE subscribers."""
+
+    def __init__(self, maxlen: int = 200):
+        super().__init__()
+        self._buffer: list[dict] = []
+        self._maxlen = maxlen
+        self._subscribers: list[asyncio.Queue] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        entry = {
+            "time": time.strftime("%H:%M:%S", time.localtime(record.created)),
+            "level": record.levelname,
+            "name": record.name,
+            "message": record.getMessage(),
+        }
+        self._buffer.append(entry)
+        if len(self._buffer) > self._maxlen:
+            self._buffer = self._buffer[-self._maxlen:]
+        for q in self._subscribers:
+            try:
+                q.put_nowait(entry)
+            except asyncio.QueueFull:
+                pass  # drop if subscriber is slow
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        try:
+            self._subscribers.remove(q)
+        except ValueError:
+            pass
+
+    @property
+    def recent(self) -> list[dict]:
+        return list(self._buffer)
+
+
 class MycellmNode:
     """Main daemon that composes all subsystems."""
 
@@ -83,6 +124,9 @@ class MycellmNode:
         self._peer_connections: dict[str, PeerConnection] = {}
         self._dht_node = None
 
+        # Log broadcaster for dashboard SSE
+        self.log_broadcaster = LogBroadcaster()
+
         # API server ref for shutdown
         self._api_server = None
 
@@ -96,7 +140,10 @@ class MycellmNode:
         logging.basicConfig(
             level=logging.INFO,
             format="%(message)s",
-            handlers=[RichHandler(console=console, show_time=True, show_path=False)],
+            handlers=[
+                RichHandler(console=console, show_time=True, show_path=False),
+                self.log_broadcaster,
+            ],
         )
 
     def _load_identity(self) -> None:

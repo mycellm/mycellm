@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+
 from fastapi import APIRouter, Request
+from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
 
@@ -93,3 +97,30 @@ async def unload_model(request: Request):
     node.capabilities.models = node.inference.loaded_models
     await node.announce_capabilities()
     return {"status": "unloaded", "model": model_name}
+
+
+@router.get("/logs")
+async def get_logs(request: Request, limit: int = 100):
+    """Get recent log entries."""
+    node = request.app.state.node
+    entries = node.log_broadcaster.recent[-limit:]
+    return {"logs": entries}
+
+
+@router.get("/logs/stream")
+async def stream_logs(request: Request):
+    """Stream log entries via SSE."""
+    node = request.app.state.node
+    q = node.log_broadcaster.subscribe()
+
+    async def generate():
+        try:
+            while True:
+                entry = await q.get()
+                yield json.dumps(entry)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            node.log_broadcaster.unsubscribe(q)
+
+    return EventSourceResponse(generate())

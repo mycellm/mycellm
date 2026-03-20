@@ -1,5 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Terminal, Activity, Server, Globe, Cpu, Database, Zap, Shield, Key } from 'lucide-react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import {
+  Terminal, Activity, Server, Globe, Cpu, Database, Zap, Shield, Key,
+  Send, Plus, Trash2, RefreshCw, MessageSquare, BarChart3, Network,
+  Boxes, ChevronRight, Loader2, AlertCircle, Check, X, Eye, EyeOff,
+} from 'lucide-react'
+
+// ── Constants ──
 
 const ASCII_SHROOM = `████████████████████
  ████████████████████
@@ -10,37 +16,46 @@ const ASCII_SHROOM = `███████████████████�
    ████████████████████
     ██████████████████`
 
-const TAG_COLORS = {
-  VRAM: 'text-compute',
-  INFER: 'text-compute',
-  P2P: 'text-relay',
-  DHT: 'text-relay',
-  ROUTING: 'text-relay',
-  CREDIT: 'text-ledger',
-  SPORES: 'text-poison',
-  NODE: 'text-spore',
-  API: 'text-spore',
-  BOOT: 'text-spore',
+const TABS = [
+  { id: 'overview', label: 'Overview', icon: BarChart3 },
+  { id: 'network', label: 'Network', icon: Network },
+  { id: 'models', label: 'Models', icon: Boxes },
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'credits', label: 'Credits', icon: Key },
+  { id: 'logs', label: 'Logs', icon: Terminal },
+]
+
+const LOG_TAG_COLORS = {
+  'mycellm.inference': 'text-compute',
+  'mycellm.transport': 'text-relay',
+  'mycellm.router': 'text-relay',
+  'mycellm.dht': 'text-relay',
+  'mycellm.accounting': 'text-ledger',
+  'mycellm': 'text-spore',
 }
 
-export default function App() {
-  const [appState, setAppState] = useState('booting')
+function tagColor(name) {
+  for (const [prefix, color] of Object.entries(LOG_TAG_COLORS)) {
+    if (name.startsWith(prefix)) return color
+  }
+  return 'text-gray-400'
+}
+
+// ── API helpers ──
+
+async function api(path, opts) {
+  const resp = await fetch(path, opts)
+  if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`)
+  return resp.json()
+}
+
+// ── Boot Screen ──
+
+function BootScreen({ onDone }) {
   const [bootLogs, setBootLogs] = useState([])
-  const [networkMode, setNetworkMode] = useState('federated')
-  const [status, setStatus] = useState(null)
-  const [credits, setCredits] = useState({ balance: 0, earned: 0, spent: 0 })
-  const [logs, setLogs] = useState([
-    { text: '[NODE] Substrate operational. Awaiting tasks.', color: 'text-spore', time: new Date().toLocaleTimeString() },
-  ])
-  const logsEndRef = useRef(null)
+  const endRef = useRef(null)
 
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs, bootLogs])
-
-  // Boot sequence
-  useEffect(() => {
-    if (appState !== 'booting') return
     const seq = [
       'Initializing mycellm-node daemon (v0.1.0)...',
       'Mounting local storage volumes...',
@@ -59,92 +74,637 @@ export default function App() {
         i++
       } else {
         clearInterval(iv)
-        setTimeout(() => setAppState('dashboard'), 600)
+        setTimeout(onDone, 600)
       }
-    }, 300)
+    }, 250)
     return () => clearInterval(iv)
-  }, [appState])
+  }, [onDone])
 
-  // Fetch status periodically
-  useEffect(() => {
-    if (appState !== 'dashboard') return
-    const fetchStatus = async () => {
-      try {
-        const [statusResp, creditsResp] = await Promise.all([
-          fetch('/v1/node/status'),
-          fetch('/v1/node/credits'),
-        ])
-        if (statusResp.ok) setStatus(await statusResp.json())
-        if (creditsResp.ok) setCredits(await creditsResp.json())
-      } catch { /* node offline */ }
-    }
-    fetchStatus()
-    const iv = setInterval(fetchStatus, 3000)
-    return () => clearInterval(iv)
-  }, [appState])
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [bootLogs])
 
-  // Simulated log entries
-  useEffect(() => {
-    if (appState !== 'dashboard') return
-    const templates = networkMode === 'federated' ? [
-      { text: '[DHT] Checking bootstrap peers...', color: 'text-relay' },
-      { text: '[P2P] Listening for peer connections.', color: 'text-relay' },
-      { text: '[CREDIT] Ledger balance updated.', color: 'text-ledger' },
-      { text: '[VRAM] Hardware health check OK.', color: 'text-compute' },
-    ] : [
-      { text: '[INFER] Local inference engine ready.', color: 'text-compute' },
-      { text: '[API] Serving local endpoints.', color: 'text-spore' },
-    ]
-    const iv = setInterval(() => {
-      const entry = templates[Math.floor(Math.random() * templates.length)]
-      setLogs(prev => {
-        const next = [...prev, { ...entry, time: new Date().toLocaleTimeString() }]
-        return next.length > 80 ? next.slice(-80) : next
-      })
-    }, 4000)
-    return () => clearInterval(iv)
-  }, [appState, networkMode])
-
-  if (appState === 'booting') {
-    return (
-      <div className="min-h-screen bg-void text-console font-mono flex items-center justify-center p-6">
-        <div className="max-w-2xl w-full border border-spore/20 bg-black/50 p-6 rounded-lg shadow-[0_0_30px_rgba(34,197,94,0.05)]">
-          <div className="flex items-center space-x-4 mb-8">
-            <pre className="text-[6px] leading-none text-compute drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tighter text-white">mycellm<span className="text-spore">_</span></h1>
-              <p className="text-xs text-gray-500 uppercase tracking-widest">Boot Sequence</p>
-            </div>
-          </div>
-          <div className="space-y-2 text-sm text-gray-400 h-64 overflow-y-auto pr-2 custom-scrollbar">
-            {bootLogs.map((log, i) => (
-              <div key={i} className="flex">
-                <span className="text-spore mr-2">❯</span>
-                <span className={i === bootLogs.length - 1 ? 'text-white' : ''}>{log}</span>
-              </div>
-            ))}
-            <div ref={logsEndRef} />
-          </div>
-          <div className="mt-6 pt-6 border-t border-white/5 flex justify-between text-xs text-gray-600">
-            <span>Identity: Loading...</span>
-            <span className="animate-pulse">Loading protocol...</span>
+  return (
+    <div className="min-h-screen bg-void text-console font-mono flex items-center justify-center p-6">
+      <div className="max-w-2xl w-full border border-spore/20 bg-black/50 p-6 rounded-lg shadow-[0_0_30px_rgba(34,197,94,0.05)]">
+        <div className="flex items-center space-x-4 mb-8">
+          <pre className="text-[6px] leading-none text-compute drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tighter text-white">mycellm<span className="text-spore">_</span></h1>
+            <p className="text-xs text-gray-500 uppercase tracking-widest">Boot Sequence</p>
           </div>
         </div>
+        <div className="space-y-2 text-sm text-gray-400 h-64 overflow-y-auto pr-2 custom-scrollbar">
+          {bootLogs.map((log, i) => (
+            <div key={i} className="flex">
+              <span className="text-spore mr-2">❯</span>
+              <span className={i === bootLogs.length - 1 ? 'text-white' : ''}>{log}</span>
+            </div>
+          ))}
+          <div ref={endRef} />
+        </div>
       </div>
-    )
-  }
+    </div>
+  )
+}
 
+// ── Stat Card ──
+
+function StatCard({ label, value, sub, icon: Icon, color = 'text-white', highlight = false }) {
+  return (
+    <div className={`border p-5 rounded-xl transition-colors ${highlight ? 'border-relay/30 bg-relay/5' : 'border-white/10 bg-[#111]'}`}>
+      <h3 className="font-mono text-xs text-gray-500 mb-2">{label}</h3>
+      <div className="flex items-center space-x-2">
+        {Icon && <Icon size={22} className={color} />}
+        <span className={`text-3xl font-mono ${color}`}>{value}</span>
+      </div>
+      {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+    </div>
+  )
+}
+
+// ── Overview Tab ──
+
+function OverviewTab({ status, credits }) {
   const hw = status?.hardware || { gpu: 'Detecting...', vram_gb: 0, backend: 'cpu' }
   const peers = status?.peers || []
   const models = status?.models || []
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <StatCard label="Connected Peers" value={peers.length} icon={Activity} color="text-relay" />
+        <StatCard label="Loaded Models" value={models.length} icon={Boxes} color="text-spore" />
+        <StatCard label="Credit Balance" value={credits.balance?.toFixed(2)} icon={Key} color="text-ledger"
+          sub={`+${credits.earned?.toFixed(2) || '0.00'} / -${credits.spent?.toFixed(2) || '0.00'}`} />
+        <StatCard label="Active Inference" value={`${status?.inference?.active || 0}/${status?.inference?.max_concurrent || 2}`}
+          icon={Zap} color="text-compute" />
+      </div>
+
+      {/* Hardware */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Hardware</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-black border border-white/5 p-4 rounded-lg">
+            <div className="text-xs text-gray-500 mb-1">GPU / Accelerator</div>
+            <div className="text-lg font-bold flex items-center space-x-2">
+              <Cpu size={16} className="text-compute" />
+              <span>{hw.gpu}</span>
+            </div>
+          </div>
+          <div className="bg-black border border-white/5 p-4 rounded-lg">
+            <div className="text-xs text-gray-500 mb-1">Backend</div>
+            <div className="text-lg font-bold uppercase">{hw.backend}</div>
+          </div>
+          <div className="bg-black border border-white/5 p-4 rounded-lg">
+            <div className="text-xs text-gray-500 mb-1">VRAM / Memory</div>
+            <div className="text-lg font-bold">{hw.vram_gb > 0 ? `${hw.vram_gb.toFixed(1)} GB` : 'CPU Only'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Peers quick list */}
+      {peers.length > 0 && (
+        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Connected Peers</h2>
+          <div className="space-y-2">
+            {peers.map((p, i) => (
+              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg text-sm">
+                <div className="flex items-center space-x-3">
+                  <div className="w-2 h-2 rounded-full bg-spore animate-pulse" />
+                  <span className="font-mono text-gray-300">{p.peer_id?.slice(0, 16)}...</span>
+                </div>
+                <div className="flex items-center space-x-4 text-xs text-gray-500">
+                  <span>{p.role}</span>
+                  <span>{p.models?.join(', ') || 'no models'}</span>
+                  <span className={p.status === 'routable' ? 'text-spore' : 'text-gray-600'}>{p.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Network Tab ──
+
+function NetworkTab({ status }) {
+  const [networkModels, setNetworkModels] = useState([])
+  const peers = status?.peers || []
+
+  useEffect(() => {
+    api('/v1/models').then(d => setNetworkModels(d.data || [])).catch(() => {})
+    const iv = setInterval(() => {
+      api('/v1/models').then(d => setNetworkModels(d.data || [])).catch(() => {})
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [])
+
+  return (
+    <div className="space-y-6">
+      {/* Network Models */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Models Across Network</h2>
+        {networkModels.length > 0 ? (
+          <div className="space-y-2">
+            {networkModels.map((m, i) => (
+              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg text-sm">
+                <div className="flex items-center space-x-3">
+                  <Boxes size={14} className={m.owned_by === 'local' ? 'text-spore' : 'text-relay'} />
+                  <span className="font-mono">{m.id}</span>
+                </div>
+                <span className={`text-xs font-mono px-2 py-1 rounded ${
+                  m.owned_by === 'local' ? 'bg-spore/10 text-spore' : 'bg-relay/10 text-relay'
+                }`}>{m.owned_by}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No models available on the network.</p>
+        )}
+      </div>
+
+      {/* Peer Details */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">
+          Peers ({peers.length})
+        </h2>
+        {peers.length > 0 ? (
+          <div className="space-y-3">
+            {peers.map((p, i) => (
+              <div key={i} className="bg-black border border-white/5 p-4 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${p.status === 'routable' ? 'bg-spore' : 'bg-gray-600'}`} />
+                    <span className="font-mono text-sm">{p.peer_id?.slice(0, 24)}...</span>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded font-mono ${
+                    p.status === 'routable' ? 'bg-spore/10 text-spore' : 'bg-gray-800 text-gray-500'
+                  }`}>{p.status}</span>
+                </div>
+                <div className="flex space-x-6 text-xs text-gray-500">
+                  <span>Role: <span className="text-gray-300">{p.role}</span></span>
+                  <span>Models: <span className="text-gray-300">{p.models?.length > 0 ? p.models.join(', ') : 'none'}</span></span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            <Network size={32} className="mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No peers connected yet.</p>
+            <p className="text-xs mt-1">Set MYCELLM_BOOTSTRAP_PEERS on remote nodes to connect.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Models Tab ──
+
+function ModelsTab({ status, onRefresh }) {
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [backendType, setBackendType] = useState('openai')
+
+  // Form state
+  const [form, setForm] = useState({
+    name: '', model_path: '',
+    api_base: 'https://openrouter.ai/api/v1', api_key: '', api_model: '', ctx_len: 4096,
+  })
+  const [showKey, setShowKey] = useState(false)
+
+  const models = status?.models || []
+
+  const handleLoad = async () => {
+    setLoading(true)
+    setResult(null)
+    try {
+      const body = { backend: backendType, name: form.name }
+      if (backendType === 'llama.cpp') {
+        body.model_path = form.model_path
+      } else {
+        body.api_base = form.api_base
+        body.api_key = form.api_key
+        body.api_model = form.api_model
+        body.ctx_len = parseInt(form.ctx_len) || 4096
+      }
+      const resp = await api('/v1/node/models/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      setResult(resp.error ? { error: resp.error } : { success: `Model "${resp.model}" loaded via ${resp.backend}` })
+      if (!resp.error) onRefresh()
+    } catch (e) {
+      setResult({ error: e.message })
+    }
+    setLoading(false)
+  }
+
+  const handleUnload = async (modelName) => {
+    try {
+      await api('/v1/node/models/unload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelName }),
+      })
+      onRefresh()
+    } catch (e) {
+      setResult({ error: e.message })
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Loaded Models */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Loaded Models (This Node)</h2>
+        {models.length > 0 ? (
+          <div className="space-y-2">
+            {models.map((m, i) => (
+              <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-3 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <Boxes size={14} className="text-spore" />
+                  <span className="font-mono text-sm">{m.name}</span>
+                  <span className="text-xs text-gray-500 bg-white/5 px-2 py-0.5 rounded">{m.backend}</span>
+                  <span className="text-xs text-gray-600">{m.ctx_len} ctx</span>
+                </div>
+                <button onClick={() => handleUnload(m.name)}
+                  className="text-gray-500 hover:text-compute transition-colors p-1">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No models loaded on this node.</p>
+        )}
+      </div>
+
+      {/* Load Model Form */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Load Model</h2>
+
+        {/* Backend toggle */}
+        <div className="flex bg-black rounded-lg p-1 border border-white/10 mb-5">
+          <button onClick={() => setBackendType('openai')}
+            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
+              backendType === 'openai' ? 'bg-relay text-white' : 'text-gray-500 hover:text-gray-300'
+            }`}>
+            <Globe size={14} className="inline mr-2" />OpenAI-Compatible API
+          </button>
+          <button onClick={() => setBackendType('llama.cpp')}
+            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
+              backendType === 'llama.cpp' ? 'bg-compute text-white' : 'text-gray-500 hover:text-gray-300'
+            }`}>
+            <Cpu size={14} className="inline mr-2" />Local GGUF
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Model Name (on network)</label>
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. claude-sonnet or tinyllama-1.1b"
+              className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+          </div>
+
+          {backendType === 'llama.cpp' ? (
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Model Path (GGUF file)</label>
+              <input value={form.model_path} onChange={e => setForm(f => ({ ...f, model_path: e.target.value }))}
+                placeholder="/path/to/model.gguf"
+                className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">API Base URL</label>
+                <input value={form.api_base} onChange={e => setForm(f => ({ ...f, api_base: e.target.value }))}
+                  placeholder="https://openrouter.ai/api/v1"
+                  className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">API Key</label>
+                <div className="relative">
+                  <input type={showKey ? 'text' : 'password'} value={form.api_key}
+                    onChange={e => setForm(f => ({ ...f, api_key: e.target.value }))}
+                    placeholder="sk-or-..."
+                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                  <button onClick={() => setShowKey(!showKey)}
+                    className="absolute right-2 top-2 text-gray-500 hover:text-gray-300">
+                    {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Upstream Model ID</label>
+                <input value={form.api_model} onChange={e => setForm(f => ({ ...f, api_model: e.target.value }))}
+                  placeholder="anthropic/claude-sonnet-4"
+                  className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Context Length</label>
+                <input type="number" value={form.ctx_len}
+                  onChange={e => setForm(f => ({ ...f, ctx_len: e.target.value }))}
+                  className="w-32 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+              </div>
+            </>
+          )}
+
+          <button onClick={handleLoad} disabled={loading || !form.name}
+            className="flex items-center space-x-2 bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+            <span>{loading ? 'Loading...' : 'Load Model'}</span>
+          </button>
+
+          {result && (
+            <div className={`flex items-center space-x-2 text-sm p-3 rounded-lg ${
+              result.error ? 'bg-compute/10 text-compute' : 'bg-spore/10 text-spore'
+            }`}>
+              {result.error ? <AlertCircle size={14} /> : <Check size={14} />}
+              <span>{result.error || result.success}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Chat Tab ──
+
+function ChatTab() {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [model, setModel] = useState('')
+  const [models, setModels] = useState([])
+  const [sending, setSending] = useState(false)
+  const endRef = useRef(null)
+
+  useEffect(() => {
+    api('/v1/models').then(d => {
+      const list = d.data || []
+      setModels(list)
+      if (list.length > 0 && !model) setModel(list[0].id)
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  const send = async () => {
+    if (!input.trim() || sending) return
+    const userMsg = { role: 'user', content: input.trim() }
+    const history = [...messages, userMsg]
+    setMessages(history)
+    setInput('')
+    setSending(true)
+
+    try {
+      const resp = await api('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: model || undefined,
+          messages: history.map(m => ({ role: m.role, content: m.content })),
+          max_tokens: 2048,
+        }),
+      })
+      const text = resp.choices?.[0]?.message?.content || '[no response]'
+      const usage = resp.usage || {}
+      setMessages([...history, {
+        role: 'assistant', content: text, model: resp.model,
+        tokens: `${usage.prompt_tokens || 0}+${usage.completion_tokens || 0}`,
+      }])
+    } catch (e) {
+      setMessages([...history, { role: 'assistant', content: `[Error: ${e.message}]` }])
+    }
+    setSending(false)
+  }
+
+  return (
+    <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden flex flex-col h-[calc(100vh-220px)]">
+      {/* Model selector */}
+      <div className="h-12 border-b border-white/10 bg-black/50 flex items-center px-4 space-x-3">
+        <MessageSquare size={14} className="text-spore" />
+        <select value={model} onChange={e => setModel(e.target.value)}
+          className="bg-black border border-white/10 rounded px-2 py-1 text-sm font-mono text-white focus:outline-none">
+          {models.map(m => <option key={m.id} value={m.id}>{m.id} ({m.owned_by})</option>)}
+          {models.length === 0 && <option value="">No models available</option>}
+        </select>
+        <button onClick={() => { setMessages([]); }}
+          className="ml-auto text-xs text-gray-500 hover:text-gray-300 flex items-center space-x-1">
+          <Trash2 size={12} /><span>Clear</span>
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        {messages.length === 0 && (
+          <div className="text-center py-12 text-gray-500">
+            <MessageSquare size={32} className="mx-auto mb-3 opacity-30" />
+            <p className="text-sm">Send a message to test inference routing.</p>
+            <p className="text-xs mt-1 text-gray-600">Requests route through the network to the best available peer.</p>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[80%] rounded-xl px-4 py-3 text-sm ${
+              m.role === 'user'
+                ? 'bg-relay/20 text-white border border-relay/20'
+                : 'bg-black border border-white/10 text-gray-200'
+            }`}>
+              <div className="whitespace-pre-wrap">{m.content}</div>
+              {m.model && (
+                <div className="mt-2 pt-2 border-t border-white/5 text-xs text-gray-500 flex space-x-3">
+                  <span>via {m.model}</span>
+                  {m.tokens && <span>{m.tokens} tokens</span>}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {sending && (
+          <div className="flex justify-start">
+            <div className="bg-black border border-white/10 rounded-xl px-4 py-3">
+              <Loader2 size={16} className="animate-spin text-spore" />
+            </div>
+          </div>
+        )}
+        <div ref={endRef} />
+      </div>
+
+      {/* Input */}
+      <div className="border-t border-white/10 p-3 bg-black/50">
+        <div className="flex space-x-2">
+          <input value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            placeholder="Type a message..."
+            className="flex-grow bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-spore/50 focus:outline-none" />
+          <button onClick={send} disabled={sending || !input.trim()}
+            className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 transition-all">
+            <Send size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Credits Tab ──
+
+function CreditsTab({ credits }) {
+  const [history, setHistory] = useState([])
+
+  useEffect(() => {
+    api('/v1/node/credits/history?limit=100')
+      .then(d => setHistory(d.transactions || []))
+      .catch(() => {})
+    const iv = setInterval(() => {
+      api('/v1/node/credits/history?limit=100')
+        .then(d => setHistory(d.transactions || []))
+        .catch(() => {})
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [])
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard label="Balance" value={credits.balance?.toFixed(2)} icon={Key} color="text-ledger" />
+        <StatCard label="Total Earned" value={`+${credits.earned?.toFixed(2) || '0.00'}`} icon={Zap} color="text-spore" />
+        <StatCard label="Total Spent" value={`-${credits.spent?.toFixed(2) || '0.00'}`} icon={BarChart3} color="text-compute" />
+      </div>
+
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Transaction History</h2>
+        {history.length > 0 ? (
+          <div className="space-y-1 max-h-[500px] overflow-y-auto custom-scrollbar">
+            {history.map((tx, i) => (
+              <div key={i} className="flex items-center justify-between text-sm py-2 border-b border-white/5">
+                <div className="flex items-center space-x-3">
+                  <div className={`w-1.5 h-1.5 rounded-full ${tx.amount >= 0 ? 'bg-spore' : 'bg-compute'}`} />
+                  <span className="text-gray-400 font-mono text-xs w-16">{tx.timestamp || ''}</span>
+                  <span className="text-gray-300">{tx.reason}</span>
+                </div>
+                <span className={`font-mono text-sm ${tx.amount >= 0 ? 'text-spore' : 'text-compute'}`}>
+                  {tx.amount >= 0 ? '+' : ''}{tx.amount?.toFixed(4)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 text-center py-8">No transactions yet.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Logs Tab ──
+
+function LogsTab({ logs }) {
+  const endRef = useRef(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+
+  useEffect(() => {
+    if (autoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs, autoScroll])
+
+  return (
+    <div className="border border-white/10 bg-black rounded-xl overflow-hidden flex flex-col h-[calc(100vh-220px)]">
+      <div className="h-10 border-b border-white/10 bg-[#111] flex items-center px-4 justify-between">
+        <div className="flex items-center space-x-2 text-xs font-mono text-gray-400">
+          <Terminal size={14} />
+          <span>mycellm-node.log</span>
+          <span className="text-gray-600">({logs.length} entries)</span>
+        </div>
+        <button onClick={() => setAutoScroll(!autoScroll)}
+          className={`text-xs font-mono px-2 py-0.5 rounded ${autoScroll ? 'text-spore bg-spore/10' : 'text-gray-500'}`}>
+          {autoScroll ? 'auto-scroll on' : 'auto-scroll off'}
+        </button>
+      </div>
+      <div className="p-4 font-mono text-xs leading-relaxed overflow-y-auto custom-scrollbar flex-grow bg-[#050505]">
+        {logs.map((log, i) => (
+          <div key={i} className="mb-0.5 flex hover:bg-white/[0.02]">
+            <span className="text-gray-600 mr-3 w-16 shrink-0">{log.time}</span>
+            <span className={`mr-2 w-6 shrink-0 ${log.level === 'ERROR' ? 'text-compute' : log.level === 'WARNING' ? 'text-ledger' : 'text-gray-600'}`}>
+              {log.level === 'ERROR' ? 'ERR' : log.level === 'WARNING' ? 'WRN' : 'INF'}
+            </span>
+            <span className={`${tagColor(log.name)}`}>{log.message}</span>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+    </div>
+  )
+}
+
+// ── Main App ──
+
+export default function App() {
+  const [appState, setAppState] = useState('booting')
+  const [tab, setTab] = useState('overview')
+  const [status, setStatus] = useState(null)
+  const [credits, setCredits] = useState({ balance: 0, earned: 0, spent: 0 })
+  const [logs, setLogs] = useState([])
+  const [refreshTick, setRefreshTick] = useState(0)
+
+  const triggerRefresh = useCallback(() => setRefreshTick(t => t + 1), [])
+
+  // Poll status + credits
+  useEffect(() => {
+    if (appState !== 'dashboard') return
+    const fetchData = async () => {
+      try {
+        const [s, c] = await Promise.all([
+          api('/v1/node/status'),
+          api('/v1/node/credits'),
+        ])
+        setStatus(s)
+        setCredits(c)
+      } catch { /* node offline */ }
+    }
+    fetchData()
+    const iv = setInterval(fetchData, 3000)
+    return () => clearInterval(iv)
+  }, [appState, refreshTick])
+
+  // SSE log stream
+  useEffect(() => {
+    if (appState !== 'dashboard') return
+
+    // Fetch initial logs
+    api('/v1/node/logs?limit=200').then(d => setLogs(d.logs || [])).catch(() => {})
+
+    // Stream new logs
+    const es = new EventSource('/v1/node/logs/stream')
+    es.onmessage = (event) => {
+      try {
+        const entry = JSON.parse(event.data)
+        setLogs(prev => {
+          const next = [...prev, entry]
+          return next.length > 500 ? next.slice(-500) : next
+        })
+      } catch {}
+    }
+    return () => es.close()
+  }, [appState])
+
+  if (appState === 'booting') {
+    return <BootScreen onDone={() => setAppState('dashboard')} />
+  }
+
   const nodeName = status?.node_name || 'mycellm-node'
   const peerId = status?.peer_id || ''
 
   return (
     <div className="min-h-screen bg-void text-console font-sans">
-      {/* Top Nav */}
+      {/* Header */}
       <header className="border-b border-white/10 bg-void/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <pre className="text-[4px] leading-none text-compute drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
             <span className="font-mono text-xl font-bold tracking-tighter text-white">
@@ -152,143 +712,50 @@ export default function App() {
             </span>
             <div className="h-4 w-px bg-white/20 mx-2" />
             <span className="font-mono text-xs bg-white/10 text-gray-300 px-2 py-1 rounded">{nodeName}</span>
+            {peerId && <span className="font-mono text-xs text-gray-600 hidden md:inline">{peerId.slice(0, 12)}...</span>}
           </div>
-          <div className="flex items-center space-x-6 font-mono text-sm">
-            <div className="flex items-center space-x-2 text-ledger drop-shadow-[0_0_8px_rgba(250,204,21,0.2)]">
-              <Key size={14} />
-              <span>{credits.balance?.toFixed(2) || '0.00'}</span>
+          <div className="flex items-center space-x-5 font-mono text-sm">
+            <div className="flex items-center space-x-1.5 text-relay">
+              <Activity size={13} />
+              <span>{status?.peers?.length || 0} peers</span>
             </div>
-            <div className="flex items-center space-x-2 text-spore">
-              <Shield size={14} />
-              <span>{peerId ? 'Authorized' : 'Pending'}</span>
+            <div className="flex items-center space-x-1.5 text-ledger drop-shadow-[0_0_8px_rgba(250,204,21,0.15)]">
+              <Key size={13} />
+              <span>{credits.balance?.toFixed(2)}</span>
+            </div>
+            <div className={`flex items-center space-x-1.5 ${status ? 'text-spore' : 'text-gray-600'}`}>
+              <Shield size={13} />
+              <span className="hidden sm:inline">{status ? 'Online' : 'Offline'}</span>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column */}
-        <div className="lg:col-span-4 space-y-6">
-          {/* Mode Toggle */}
-          <div className="border border-white/10 bg-[#111] rounded-xl p-5 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-relay to-transparent opacity-50" />
-            <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Operational Mode</h2>
-            <div className="flex bg-black rounded-lg p-1 border border-white/10">
-              <button
-                onClick={() => setNetworkMode('local')}
-                className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-md text-sm font-medium transition-all ${
-                  networkMode === 'local' ? 'bg-console text-black shadow-sm' : 'text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                <Server size={16} /><span>Local Root</span>
-              </button>
-              <button
-                onClick={() => setNetworkMode('federated')}
-                className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-md text-sm font-medium transition-all ${
-                  networkMode === 'federated' ? 'bg-relay text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]' : 'text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                <Globe size={16} /><span>Federated</span>
-              </button>
-            </div>
-            <p className="text-xs text-gray-400 mt-4 leading-relaxed">
-              {networkMode === 'local'
-                ? 'Node isolated. Serving local API endpoints only.'
-                : 'Connected to swarm. Seeding inference layers.'}
-            </p>
-          </div>
-
-          {/* Hardware Card */}
-          <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest">Hardware</h2>
-              <span className="text-xs font-mono text-compute animate-pulse">● Active</span>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>{hw.gpu}</span>
-                  <span className="font-mono">{hw.vram_gb > 0 ? `${hw.vram_gb.toFixed(1)} GB` : 'CPU'}</span>
-                </div>
-                {hw.vram_gb > 0 && (
-                  <div className="w-full bg-black rounded-full h-2 overflow-hidden border border-white/5">
-                    <div className="h-full bg-compute transition-all" style={{ width: '60%' }} />
-                  </div>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                <div className="bg-black border border-white/5 p-3 rounded-lg">
-                  <div className="text-xs text-gray-500 font-mono mb-1">Backend</div>
-                  <div className="text-xl font-bold flex items-center space-x-2">
-                    <Cpu size={16} className="text-compute" />
-                    <span className="uppercase">{hw.backend}</span>
-                  </div>
-                </div>
-                <div className="bg-black border border-white/5 p-3 rounded-lg">
-                  <div className="text-xs text-gray-500 font-mono mb-1">Inference</div>
-                  <div className="text-xl font-bold font-mono">
-                    {status?.inference?.active || 0}/{status?.inference?.max_concurrent || 2}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Tab nav */}
+      <nav className="border-b border-white/5 bg-void/60">
+        <div className="max-w-7xl mx-auto px-4 flex space-x-1 overflow-x-auto">
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+                tab === t.id
+                  ? 'border-spore text-white'
+                  : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}>
+              <t.icon size={14} />
+              <span>{t.label}</span>
+            </button>
+          ))}
         </div>
+      </nav>
 
-        {/* Right Column */}
-        <div className="lg:col-span-8 space-y-6 flex flex-col">
-          {/* Metrics Row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className={`border p-5 rounded-xl transition-colors ${
-              networkMode === 'federated' ? 'border-relay/30 bg-relay/5' : 'border-white/10 bg-[#111]'
-            }`}>
-              <h3 className="font-mono text-xs text-gray-500 mb-2">Connected Peers</h3>
-              <div className="text-3xl font-mono text-white flex items-center space-x-2">
-                <Activity size={24} className={networkMode === 'federated' ? 'text-relay' : 'text-gray-600'} />
-                <span>{peers.length}</span>
-              </div>
-            </div>
-            <div className="border border-white/10 bg-[#111] p-5 rounded-xl">
-              <h3 className="font-mono text-xs text-gray-500 mb-2">Active Models</h3>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {models.length > 0
-                  ? models.map((m, i) => <span key={i} className="text-xs font-mono bg-white/10 px-2 py-1 rounded">{m.name}</span>)
-                  : <span className="text-xs text-gray-600">None loaded</span>}
-              </div>
-            </div>
-            <div className="border border-white/10 bg-[#111] p-5 rounded-xl">
-              <h3 className="font-mono text-xs text-gray-500 mb-2">Credits</h3>
-              <div className="text-2xl font-mono text-ledger">{credits.balance?.toFixed(2)}</div>
-              <div className="text-xs text-gray-500 mt-1">
-                +{credits.earned?.toFixed(2)} / -{credits.spent?.toFixed(2)}
-              </div>
-            </div>
-          </div>
-
-          {/* Terminal Log */}
-          <div className="flex-grow border border-white/10 bg-black rounded-xl overflow-hidden flex flex-col h-[400px]">
-            <div className="h-10 border-b border-white/10 bg-[#111] flex items-center px-4 justify-between">
-              <div className="flex items-center space-x-2 text-xs font-mono text-gray-400">
-                <Terminal size={14} />
-                <span>mycellm-node.log</span>
-              </div>
-              <div className="flex space-x-2">
-                <div className="w-3 h-3 rounded-full bg-white/10" />
-                <div className="w-3 h-3 rounded-full bg-white/10" />
-                <div className="w-3 h-3 rounded-full bg-white/10" />
-              </div>
-            </div>
-            <div className="p-4 font-mono text-xs leading-relaxed overflow-y-auto custom-scrollbar flex-grow bg-[#050505]">
-              {logs.map((log, i) => (
-                <div key={i} className="mb-1 flex hover:bg-white/[0.02]">
-                  <span className="text-gray-600 mr-3 w-20 shrink-0">{log.time}</span>
-                  <span className={log.color}>{log.text}</span>
-                </div>
-              ))}
-              <div ref={logsEndRef} />
-            </div>
-          </div>
-        </div>
+      {/* Content */}
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {tab === 'overview' && <OverviewTab status={status} credits={credits} />}
+        {tab === 'network' && <NetworkTab status={status} />}
+        {tab === 'models' && <ModelsTab status={status} onRefresh={triggerRefresh} />}
+        {tab === 'chat' && <ChatTab />}
+        {tab === 'credits' && <CreditsTab credits={credits} />}
+        {tab === 'logs' && <LogsTab logs={logs} />}
       </main>
     </div>
   )
