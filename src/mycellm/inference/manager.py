@@ -167,7 +167,10 @@ class InferenceManager:
                 if remote:
                     config["api_base"] = remote.api_base
                     config["api_model"] = remote.api_model
-                    config["api_key"] = remote.api_key  # Will be encrypted in future
+                    # Extract API key from client headers
+                    auth = remote.client.headers.get("authorization", "")
+                    if auth.startswith("Bearer "):
+                        config["api_key"] = auth[7:]
             configs.append(config)
 
         config_path = data_dir / "model_configs.json"
