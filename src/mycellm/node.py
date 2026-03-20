@@ -127,6 +127,9 @@ class MycellmNode:
         # Log broadcaster for dashboard SSE
         self.log_broadcaster = LogBroadcaster()
 
+        # Managed node registry (bootstrap/admin node tracks announced nodes)
+        self.node_registry: dict[str, dict] = {}  # peer_id -> node info
+
         # API server ref for shutdown
         self._api_server = None
 
@@ -490,6 +493,9 @@ class MycellmNode:
         # Connect to bootstrap peers in background
         asyncio.create_task(self._connect_to_bootstrap_peers())
 
+        # Announce to bootstrap nodes via HTTP
+        asyncio.create_task(self._announce_to_bootstrap())
+
         # Start health checker
         await self.health_checker.start()
 
@@ -497,6 +503,53 @@ class MycellmNode:
 
         # Start API server (blocks)
         await self._start_api()
+
+    async def _announce_to_bootstrap(self) -> None:
+        """Announce this node to bootstrap peers via HTTP API."""
+        import httpx
+
+        peers = self._settings.get_bootstrap_list()
+        if not peers:
+            return
+
+        # Build announcement payload
+        sys_info = self.get_system_info()
+        payload = {
+            "peer_id": self.peer_id,
+            "node_name": self._settings.node_name or self.device_name,
+            "api_addr": f"{self.api_host}:{self.api_port}",
+            "role": self.capabilities.role,
+            "capabilities": self.capabilities.to_dict(),
+            "system": sys_info,
+        }
+
+        for host, port in peers:
+            # Bootstrap peer list has QUIC port — API is on port - 1 by convention
+            api_port = port - 1
+            url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        logger.info(f"{styled_tag('NODE')} Announced to bootstrap {host}:{api_port}")
+                    else:
+                        logger.debug(f"{styled_tag('NODE')} Announce to {host}:{api_port}: {resp.status_code}")
+            except Exception as e:
+                logger.debug(f"{styled_tag('NODE')} Failed to announce to {host}:{api_port}: {e}")
+
+        # Re-announce periodically (every 60s) to keep registry fresh
+        while self._running:
+            await asyncio.sleep(60)
+            for host, port in peers:
+                api_port = port - 1
+                url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
+                try:
+                    # Update models/capabilities
+                    payload["capabilities"] = self.capabilities.to_dict()
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        await client.post(url, json=payload)
+                except Exception:
+                    pass
 
     async def announce_capabilities(self) -> None:
         """Re-announce capabilities to all connected peers (e.g. after model load)."""

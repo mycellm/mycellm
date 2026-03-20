@@ -351,15 +351,23 @@ function OverviewTab({ status, credits }) {
   )
 }
 
-// ── Network Tab (with node management) ──
+// ── Network Tab (with auto-discovered + manual nodes) ──
 
 function NetworkTab({ status }) {
-  const { nodes, addNode, removeNode } = useNodeRegistry()
+  const { nodes: manualNodes, addNode, removeNode } = useNodeRegistry()
+  const [registryNodes, setRegistryNodes] = useState([])
   const [networkModels, setNetworkModels] = useState([])
-  const [remoteStatuses, setRemoteStatuses] = useState({}) // addr -> status|error
   const [newAddr, setNewAddr] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const peers = status?.peers || []
+
+  // Poll the server-side node registry (auto-announced nodes)
+  useEffect(() => {
+    const fetch_ = () => api('/v1/admin/nodes').then(d => setRegistryNodes(d.nodes || [])).catch(() => {})
+    fetch_()
+    const iv = setInterval(fetch_, 5000)
+    return () => clearInterval(iv)
+  }, [])
 
   // Fetch network-wide models from local node
   useEffect(() => {
@@ -369,34 +377,8 @@ function NetworkTab({ status }) {
     return () => clearInterval(iv)
   }, [])
 
-  // Poll remote node statuses + system info
-  const nodeAddrs = nodes.map(n => n.addr).join(',')
-  useEffect(() => {
-    if (nodes.length === 0) return
-    const fetchRemote = async () => {
-      const results = {}
-      await Promise.all(nodes.map(async (n) => {
-        try {
-          const [s, c, sys] = await Promise.all([
-            remoteApi(n.addr, '/v1/node/status'),
-            remoteApi(n.addr, '/v1/node/credits'),
-            remoteApi(n.addr, '/v1/node/system').catch(() => null),
-          ])
-          results[n.addr] = { ...s, credits: c, system: sys, online: true }
-        } catch (e) {
-          results[n.addr] = { online: false, error: e.message }
-        }
-      }))
-      setRemoteStatuses(results)
-    }
-    fetchRemote()
-    const iv = setInterval(fetchRemote, 10000)
-    return () => clearInterval(iv)
-  }, [nodeAddrs])
-
   const handleAddNode = () => {
     if (!newAddr.trim()) return
-    // Normalize: ensure it has port
     let addr = newAddr.trim()
     if (!addr.includes(':')) addr += ':8420'
     addNode(addr, newLabel.trim() || addr)
@@ -404,89 +386,132 @@ function NetworkTab({ status }) {
     setNewLabel('')
   }
 
+  const handleApprove = async (peerId) => {
+    try {
+      await api(`/v1/admin/nodes/${peerId}/approve`, { method: 'POST' })
+      // Refresh registry
+      api('/v1/admin/nodes').then(d => setRegistryNodes(d.nodes || [])).catch(() => {})
+    } catch {}
+  }
+
+  const handleRemoveRegistry = async (peerId) => {
+    try {
+      await api(`/v1/admin/nodes/${peerId}/remove`, { method: 'POST' })
+      api('/v1/admin/nodes').then(d => setRegistryNodes(d.nodes || [])).catch(() => {})
+    } catch {}
+  }
+
+  // Also sync registry nodes into the managed nodes (for Models tab targeting)
+  useEffect(() => {
+    for (const rn of registryNodes) {
+      if (rn.api_addr && rn.status === 'approved') {
+        addNode(rn.api_addr, rn.node_name || rn.api_addr)
+      }
+    }
+  }, [registryNodes])
+
   return (
     <div className="space-y-6">
-      {/* Add Managed Node */}
+      {/* Auto-discovered Nodes (from registry) */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Managed Nodes</h2>
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">
+          Fleet ({registryNodes.length} node{registryNodes.length !== 1 ? 's' : ''})
+        </h2>
         <p className="text-xs text-gray-500 mb-4">
-          Register remote node addresses to manage them from this dashboard.
-          Your browser connects directly to each node's API.
+          Nodes announce themselves when they start with this node as bootstrap.
+          Approve to enable management from this dashboard.
         </p>
-        <div className="flex space-x-2 mb-4">
-          <input value={newLabel} onChange={e => setNewLabel(e.target.value)}
-            placeholder="Label (e.g. hokulea)"
-            className="w-36 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-          <input value={newAddr} onChange={e => setNewAddr(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddNode()}
-            placeholder="IP:port (e.g. 10.1.1.11:8420)"
-            className="flex-grow bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-          <button onClick={handleAddNode} disabled={!newAddr.trim()}
-            className="bg-spore text-black px-3 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 transition-all">
-            <Plus size={14} />
-          </button>
-        </div>
 
-        {/* Node cards */}
         <div className="space-y-3">
-          {nodes.map((n) => {
-            const rs = remoteStatuses[n.addr]
-            const online = rs?.online
-            const models = rs?.models || []
-            const peerCount = rs?.peers?.length || 0
-            const sys = rs?.system
+          {registryNodes.map((rn) => {
+            const sys = rn.system || {}
+            const cpu = sys.cpu || {}
+            const mem = sys.memory || {}
+            const gpu = sys.gpu || {}
+            const os_ = sys.os || {}
+            const caps = rn.capabilities || {}
+            const models = caps.models || []
+            const isPending = rn.status === 'pending'
+            const osLabel = os_.distro || (os_.macos_version ? `macOS ${os_.macos_version}` : os_.system || '?')
+
             return (
-              <div key={n.addr} className={`border rounded-xl p-4 ${online ? 'border-white/10 bg-black' : 'border-compute/20 bg-compute/5'}`}>
+              <div key={rn.peer_id} className={`border rounded-xl p-4 ${
+                isPending ? 'border-ledger/30 bg-ledger/5' : rn.online ? 'border-white/10 bg-black' : 'border-compute/20 bg-compute/5'
+              }`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center space-x-3">
-                    <div className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-spore animate-pulse' : 'bg-compute'}`} />
-                    <span className="font-mono text-sm font-medium">{n.label}</span>
-                    <span className="font-mono text-xs text-gray-500">{n.addr}</span>
-                    {online && rs?.node_name && rs.node_name !== n.label && (
-                      <span className="text-xs text-gray-600">({rs.node_name})</span>
-                    )}
+                    <div className={`w-2.5 h-2.5 rounded-full ${
+                      isPending ? 'bg-ledger animate-pulse' : rn.online ? 'bg-spore animate-pulse' : 'bg-compute'
+                    }`} />
+                    <span className="font-mono text-sm font-medium">{rn.node_name || 'unnamed'}</span>
+                    <span className="font-mono text-xs text-gray-500">{rn.api_addr}</span>
+                    <span className="font-mono text-xs text-gray-600">{rn.peer_id?.slice(0, 12)}...</span>
                   </div>
-                  <div className="flex items-center space-x-3">
-                    {online && (
-                      <div className="flex items-center space-x-3 text-xs font-mono">
-                        <span className="text-relay">{peerCount} peers</span>
-                        <span className="text-spore">{models.length} models</span>
-                        {rs?.credits && <span className="text-ledger">{rs.credits.balance?.toFixed(1)} cr</span>}
-                      </div>
+                  <div className="flex items-center space-x-2">
+                    {isPending && (
+                      <button onClick={() => handleApprove(rn.peer_id)}
+                        className="flex items-center space-x-1 bg-spore text-black px-2.5 py-1 rounded text-xs font-medium hover:bg-spore/90 transition-all">
+                        <Check size={12} /><span>Approve</span>
+                      </button>
                     )}
-                    <span className={`text-xs font-mono ${online ? 'text-spore' : 'text-compute'}`}>
-                      {online ? 'online' : 'offline'}
+                    <span className={`text-xs font-mono px-2 py-0.5 rounded ${
+                      isPending ? 'bg-ledger/10 text-ledger' :
+                      rn.online ? 'bg-spore/10 text-spore' : 'bg-compute/10 text-compute'
+                    }`}>
+                      {isPending ? 'pending' : rn.online ? 'approved' : 'offline'}
                     </span>
-                    <button onClick={() => removeNode(n.addr)}
+                    <button onClick={() => handleRemoveRegistry(rn.peer_id)}
                       className="text-gray-600 hover:text-compute transition-colors p-1">
                       <X size={14} />
                     </button>
                   </div>
                 </div>
-                {online && sys && (
+
+                {/* Compact system info */}
+                {sys.cpu && (
                   <div className="mt-3 pt-3 border-t border-white/5">
                     <SystemInfoPanel sysInfo={sys} compact />
                   </div>
                 )}
-                {online && models.length > 0 && (
+
+                {/* Models */}
+                {models.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-white/5 flex flex-wrap gap-1.5">
                     {models.map((m, i) => (
-                      <span key={i} className="text-xs font-mono bg-spore/10 text-spore px-2 py-0.5 rounded">{m.name}</span>
+                      <span key={i} className="text-xs font-mono bg-spore/10 text-spore px-2 py-0.5 rounded">
+                        {m.name || m}
+                      </span>
                     ))}
                   </div>
-                )}
-                {!online && rs?.error && (
-                  <div className="text-xs text-compute/70 mt-1">{rs.error}</div>
                 )}
               </div>
             )
           })}
-          {nodes.length === 0 && (
+          {registryNodes.length === 0 && (
             <div className="text-center py-6 text-gray-600 text-sm">
               <Radio size={24} className="mx-auto mb-2 opacity-30" />
-              No remote nodes registered. Add node addresses above.
+              <p>No nodes have announced yet.</p>
+              <p className="text-xs mt-1">Start remote nodes with MYCELLM_BOOTSTRAP_PEERS pointing here.</p>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Manual node add (fallback) */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Add Node Manually</h2>
+        <div className="flex space-x-2">
+          <input value={newLabel} onChange={e => setNewLabel(e.target.value)}
+            placeholder="Label"
+            className="w-32 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+          <input value={newAddr} onChange={e => setNewAddr(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAddNode()}
+            placeholder="IP:port (e.g. 10.1.1.11:8420)"
+            className="flex-grow bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+          <button onClick={handleAddNode} disabled={!newAddr.trim()}
+            className="bg-white/10 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-white/20 disabled:opacity-40 transition-all">
+            <Plus size={14} />
+          </button>
         </div>
       </div>
 
@@ -993,6 +1018,7 @@ export default function App() {
   const [credits, setCredits] = useState({ balance: 0, earned: 0, spent: 0 })
   const [logs, setLogs] = useState([])
   const [refreshTick, setRefreshTick] = useState(0)
+  const [fleetCount, setFleetCount] = useState(0)
   const nodeRegistry = useManagedNodes()
 
   const triggerRefresh = useCallback(() => setRefreshTick(t => t + 1), [])
@@ -1014,6 +1040,15 @@ export default function App() {
     const iv = setInterval(fetchData, 3000)
     return () => clearInterval(iv)
   }, [appState, refreshTick])
+
+  // Poll fleet count from registry
+  useEffect(() => {
+    if (appState !== 'dashboard') return
+    const fetch_ = () => api('/v1/admin/nodes').then(d => setFleetCount((d.nodes || []).length)).catch(() => {})
+    fetch_()
+    const iv = setInterval(fetch_, 5000)
+    return () => clearInterval(iv)
+  }, [appState])
 
   // SSE log stream
   useEffect(() => {
@@ -1061,7 +1096,7 @@ export default function App() {
               </div>
               <div className="flex items-center space-x-1.5 text-relay">
                 <Radio size={13} />
-                <span>{nodeRegistry.nodes.length} nodes</span>
+                <span>{fleetCount} fleet</span>
               </div>
               <div className="flex items-center space-x-1.5 text-ledger drop-shadow-[0_0_8px_rgba(250,204,21,0.15)]">
                 <Key size={13} />

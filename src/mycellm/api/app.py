@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from mycellm.api.admin import router as admin_router
 from mycellm.api.node import router as node_router
 from mycellm.api.openai import router as openai_router
 
@@ -37,6 +38,7 @@ def create_app(node: MycellmNode) -> FastAPI:
     # API routes
     app.include_router(openai_router, prefix="/v1")
     app.include_router(node_router, prefix="/v1/node")
+    app.include_router(admin_router, prefix="/v1/admin")
 
     # Health check
     @app.get("/health")
