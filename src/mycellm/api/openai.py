@@ -127,7 +127,22 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             max_tokens=body.max_tokens or 2048,
             top_p=body.top_p,
         )
-        result = await node.inference.generate(req)
+        try:
+            result = await node.inference.generate(req)
+        except Exception as e:
+            node.activity.record(_ET.INFERENCE_FAILED, model=model_name, error=str(e)[:200])
+            error_msg = str(e)
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                error_msg = f"API key rejected by upstream provider for model '{model_name}'. Check your API key."
+            elif "ConnectError" in error_msg or "connect" in error_msg.lower():
+                error_msg = f"Cannot reach backend for model '{model_name}'. Is the API endpoint available?"
+            return ChatCompletionResponse(
+                model=model_name,
+                choices=[ChatCompletionChoice(
+                    message=ChatMessage(role="assistant", content=f"[mycellm] Inference error: {error_msg}"),
+                    finish_reason="error",
+                )],
+            )
         node.activity.record(
             EventType.INFERENCE_COMPLETE,
             model=model_name,

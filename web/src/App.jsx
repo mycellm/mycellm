@@ -2139,12 +2139,14 @@ function ChatTab() {
   const [sending, setSending] = useState(false)
   const endRef = useRef(null)
 
-  // Fetch models periodically (includes fleet)
+  // Fetch models on mount + poll (includes fleet)
   useEffect(() => {
     const fetch_ = () => api('/v1/models').then(d => setModels(d.data || [])).catch(() => {})
     fetch_()
-    const iv = setInterval(fetch_, 10000)
-    return () => clearInterval(iv)
+    // Poll faster initially to catch fleet announcements, then slow down
+    const fast = setInterval(fetch_, 3000)
+    const slowDown = setTimeout(() => { clearInterval(fast); setInterval(fetch_, 10000) }, 15000)
+    return () => { clearInterval(fast); clearTimeout(slowDown) }
   }, [])
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
