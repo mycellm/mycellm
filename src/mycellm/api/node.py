@@ -27,6 +27,19 @@ async def system_info(request: Request):
     return node.get_system_info()
 
 
+@router.get("/debug/config")
+async def debug_config(request: Request):
+    """Debug: show relevant runtime config."""
+    node = request.app.state.node
+    return {
+        "node_name": node._settings.node_name,
+        "bootstrap_peers": node._settings.bootstrap_peers,
+        "bootstrap_parsed": [f"{h}:{p}" for h, p in node._settings.get_bootstrap_list()],
+        "api_key_set": bool(node._settings.api_key),
+        "announce_task_alive": node._announce_task is not None and not node._announce_task.done() if hasattr(node, '_announce_task') else False,
+    }
+
+
 @router.get("/peers")
 async def node_peers(request: Request):
     """List connected peers."""

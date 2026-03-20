@@ -84,6 +84,7 @@ class OpenAICompatibleBackend(InferenceBackend):
         self._models[model_name] = _RemoteModel(
             name=model_name,
             api_model=api_model,
+            api_base=api_base,
             client=client,
         )
         logger.info(f"Remote model '{model_name}' registered (upstream={api_model} via {api_base})")
@@ -163,18 +164,22 @@ class OpenAICompatibleBackend(InferenceBackend):
     def get_capabilities(self) -> dict:
         models = {}
         for name, remote in self._models.items():
-            models[name] = remote.api_model
+            models[name] = {
+                "api_model": remote.api_model,
+                "api_base": remote.api_base,
+            }
         return {"backend": "openai-compatible", "models": models}
 
 
 class _RemoteModel:
     """Internal state for a registered remote model."""
 
-    __slots__ = ("name", "api_model", "client")
+    __slots__ = ("name", "api_model", "api_base", "client")
 
-    def __init__(self, name: str, api_model: str, client: httpx.AsyncClient):
+    def __init__(self, name: str, api_model: str, api_base: str, client: httpx.AsyncClient):
         self.name = name
         self.api_model = api_model
+        self.api_base = api_base
         self.client = client
 
 

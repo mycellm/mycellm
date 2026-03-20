@@ -685,6 +685,10 @@ function ModelsTab({ status, onRefresh }) {
   const handleLoad = async () => {
     setLoading(true); setResult(null)
     try {
+      // If editing, unload old model first
+      if (editingModel) {
+        await doApi('/v1/node/models/unload', { model: editingModel })
+      }
       const body = { backend: backendType, name: form.name }
       if (backendType === 'llama.cpp') { body.model_path = form.model_path }
       else {
@@ -693,14 +697,28 @@ function ModelsTab({ status, onRefresh }) {
       }
       const resp = await doApi('/v1/node/models/load', body)
       const target = isRemote ? ` on ${selectedDevice.name}` : ''
-      setResult(resp.error ? { error: resp.error } : { success: `"${resp.model}" loaded${target}` })
-      if (!resp.error) onRefresh()
+      const action = editingModel ? 'Updated' : 'Loaded'
+      setResult(resp.error ? { error: resp.error } : { success: `${action} "${resp.model}"${target}` })
+      if (!resp.error) { setEditingModel(null); onRefresh() }
     } catch (e) { setResult({ error: e.message }) }
     setLoading(false)
   }
 
+  const [editingModel, setEditingModel] = useState(null) // name of model being edited
+
+  const handleEdit = (m) => {
+    setEditingModel(m.name)
+    setBackendType(m.backend === 'llama.cpp' ? 'llama.cpp' : 'openai')
+    setForm(f => ({ ...f, name: m.name, api_model: '', api_key: '', ctx_len: m.ctx_len || 4096 }))
+    setResult(null)
+  }
+
   const handleUnload = async (modelName) => {
-    try { await doApi('/v1/node/models/unload', { model: modelName }); onRefresh() }
+    try {
+      await doApi('/v1/node/models/unload', { model: modelName })
+      if (editingModel === modelName) setEditingModel(null)
+      onRefresh()
+    }
     catch (e) { setResult({ error: e.message }) }
   }
 
@@ -782,16 +800,24 @@ function ModelsTab({ status, onRefresh }) {
               <h3 className="font-mono text-xs text-gray-500 mb-2">Loaded Models</h3>
               <div className="space-y-1.5">
                 {models.map((m, i) => (
-                  <div key={i} className="flex items-center justify-between bg-black border border-white/5 p-2.5 rounded-lg">
-                    <div className="flex items-center space-x-3">
+                  <div key={i} className={`flex items-center justify-between p-2.5 rounded-lg border transition-colors ${
+                    editingModel === m.name ? 'bg-relay/10 border-relay/30' : 'bg-black border-white/5'
+                  }`}>
+                    <div className="flex items-center space-x-3 cursor-pointer" onClick={() => handleEdit(m)}>
                       <Boxes size={13} className="text-spore" />
                       <span className="font-mono text-sm">{m.name}</span>
                       <span className="text-xs text-gray-600 bg-white/5 px-1.5 py-0.5 rounded">{m.backend}</span>
                     </div>
-                    <button onClick={() => handleUnload(m.name)}
-                      className="text-gray-600 hover:text-compute transition-colors p-1">
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center space-x-1">
+                      <button onClick={() => handleEdit(m)} title="Edit"
+                        className="text-gray-600 hover:text-relay transition-colors p-1">
+                        <RefreshCw size={13} />
+                      </button>
+                      <button onClick={() => handleUnload(m.name)} title="Unload"
+                        className="text-gray-600 hover:text-compute transition-colors p-1">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -800,7 +826,15 @@ function ModelsTab({ status, onRefresh }) {
 
           {/* Load Model Form */}
           <div className="border-t border-white/5 pt-4">
-            <h3 className="font-mono text-xs text-gray-500 mb-3">Load Model</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-mono text-xs text-gray-500">
+                {editingModel ? `Edit: ${editingModel}` : 'Load Model'}
+              </h3>
+              {editingModel && (
+                <button onClick={() => { setEditingModel(null); setForm(f => ({ ...f, name: '' })); setResult(null) }}
+                  className="text-xs text-gray-500 hover:text-gray-300">Cancel edit</button>
+              )}
+            </div>
 
             <div className="flex bg-black rounded-lg p-1 border border-white/10 mb-4">
               <button onClick={() => setBackendType('openai')}
@@ -856,7 +890,7 @@ function ModelsTab({ status, onRefresh }) {
               <button onClick={handleLoad} disabled={loading || !form.name}
                 className="flex items-center space-x-2 bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                 {loading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                <span>{loading ? 'Loading...' : 'Load Model'}</span>
+                <span>{loading ? 'Loading...' : editingModel ? 'Update Model' : 'Load Model'}</span>
               </button>
 
               {result && (
@@ -1136,7 +1170,11 @@ function AuthGate({ onAuth }) {
 
 export default function App() {
   const [appState, setAppState] = useState('checking') // checking → auth | booting → dashboard
-  const [tab, setTab] = useState('overview')
+  const [tab, _setTab] = useState(() => {
+    const hash = window.location.hash.slice(1)
+    return TABS.find(t => t.id === hash) ? hash : 'overview'
+  })
+  const setTab = (id) => { _setTab(id); window.location.hash = id }
   const [status, setStatus] = useState(null)
   const [credits, setCredits] = useState({ balance: 0, earned: 0, spent: 0 })
   const [logs, setLogs] = useState([])

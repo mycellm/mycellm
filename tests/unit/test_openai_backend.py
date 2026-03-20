@@ -112,7 +112,8 @@ class TestOpenAICompatibleBackend:
 
             assert "test-model" in backend.get_loaded_models()
             caps = backend.get_capabilities()
-            assert caps["models"]["test-model"] == "gpt-4o-mini"
+            assert caps["models"]["test-model"]["api_model"] == "gpt-4o-mini"
+            assert caps["models"]["test-model"]["api_base"] == "https://api.example.com/v1"
 
             req = InferenceRequest(
                 messages=[{"role": "user", "content": "hello"}],

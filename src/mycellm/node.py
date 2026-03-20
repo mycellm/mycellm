@@ -539,7 +539,8 @@ class MycellmNode:
                 api_port = port - 1
                 url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
                 try:
-                    async with httpx.AsyncClient(timeout=10) as client:
+                    transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+                    async with httpx.AsyncClient(timeout=10, transport=transport) as client:
                         resp = await client.post(url, json=payload, headers=headers)
                         if resp.status_code == 200:
                             logger.info(f"{styled_tag('NODE')} Announced to bootstrap {host}:{api_port}")
@@ -547,7 +548,7 @@ class MycellmNode:
                         elif resp.status_code == 401:
                             logger.warning(f"{styled_tag('SECURITY')} Bootstrap rejected announce (bad API key)")
                 except Exception as e:
-                    logger.debug(f"{styled_tag('NODE')} Announce to {host}:{api_port} failed: {e}")
+                    logger.warning(f"{styled_tag('NODE')} Announce to {host}:{api_port} failed: {e}")
             return False
 
         # Initial announce
@@ -563,7 +564,7 @@ class MycellmNode:
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                logger.debug(f"{styled_tag('NODE')} Announce loop error: {e}")
+                logger.warning(f"{styled_tag('NODE')} Announce loop error: {e}")
                 interval = 30
 
     async def announce_capabilities(self) -> None:
