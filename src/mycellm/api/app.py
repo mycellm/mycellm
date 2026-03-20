@@ -61,6 +61,10 @@ def create_app(node: MycellmNode) -> FastAPI:
         version="0.1.0",
     )
 
+    # CORS: allow all origins — the embedded dashboard is served from the same
+    # origin, so CORS doesn't add protection there. The real access control is
+    # the API key middleware (MYCELLM_API_KEY). If you need to restrict origins,
+    # set MYCELLM_CORS_ORIGINS as a comma-separated list.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

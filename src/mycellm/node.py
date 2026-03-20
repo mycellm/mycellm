@@ -591,7 +591,9 @@ class MycellmNode:
             }
         cache_path = self._settings.data_dir / "node_state.json"
         try:
-            cache_path.write_text(json.dumps(cache, indent=2))
+            tmp = cache_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(cache, indent=2))
+            tmp.rename(cache_path)  # atomic on POSIX
         except Exception as e:
             logger.debug(f"Failed to save peer cache: {e}")
 

@@ -35,6 +35,11 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     stream: bool = False
     top_p: float = 1.0
+    stop: list[str] | str | None = None
+    frequency_penalty: float = 0
+    presence_penalty: float = 0
+    seed: int | None = None
+    response_format: dict | None = None  # {"type": "json_object"}
     mycellm: MycellmRouting | None = None
 
 
@@ -165,12 +170,22 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     if model_name:
         from mycellm.inference.base import InferenceRequest
 
+        # Normalize stop to list[str] | None
+        stop = body.stop
+        if isinstance(stop, str):
+            stop = [stop]
+
         req = InferenceRequest(
             messages=messages,
             model=model_name,
             temperature=body.temperature,
             max_tokens=body.max_tokens or 2048,
             top_p=body.top_p,
+            stop=stop,
+            frequency_penalty=body.frequency_penalty,
+            presence_penalty=body.presence_penalty,
+            seed=body.seed,
+            response_format=body.response_format,
         )
         try:
             result = await node.inference.generate(req)
@@ -277,12 +292,22 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
         if model_name:
             from mycellm.inference.base import InferenceRequest
 
+            # Normalize stop to list[str] | None
+            stop = body.stop
+            if isinstance(stop, str):
+                stop = [stop]
+
             req = InferenceRequest(
                 messages=messages,
                 model=model_name,
                 temperature=body.temperature,
                 max_tokens=body.max_tokens or 2048,
                 top_p=body.top_p,
+                stop=stop,
+                frequency_penalty=body.frequency_penalty,
+                presence_penalty=body.presence_penalty,
+                seed=body.seed,
+                response_format=body.response_format,
             )
 
             # Send role delta first
@@ -386,7 +411,7 @@ async def _route_via_fleet(
                 "top_p": body.top_p,
             }
 
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()

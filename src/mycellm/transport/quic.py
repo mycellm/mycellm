@@ -52,6 +52,12 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
             buf = self._buffers.get(stream_id, b"")
             buf += event.data
 
+            # Limit buffer size to prevent DoS
+            if len(buf) > 10 * 1024 * 1024:  # 10MB max per stream
+                logger.warning(f"Stream {stream_id} exceeded 10MB buffer limit, dropping")
+                self._buffers.pop(stream_id, None)
+                return
+
             if event.end_stream:
                 self._buffers.pop(stream_id, None)
                 self._dispatch_message(buf, stream_id)

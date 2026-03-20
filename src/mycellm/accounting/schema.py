@@ -48,4 +48,5 @@ async def init_db(db_path: str) -> None:
 
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(SCHEMA_SQL)
+        await db.execute("PRAGMA journal_mode=WAL")
         await db.commit()

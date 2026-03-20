@@ -109,6 +109,16 @@ class OpenAICompatibleBackend(InferenceBackend):
             "top_p": request.top_p,
             "stream": False,
         }
+        if request.stop:
+            body["stop"] = request.stop
+        if request.frequency_penalty:
+            body["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty:
+            body["presence_penalty"] = request.presence_penalty
+        if request.seed is not None:
+            body["seed"] = request.seed
+        if request.response_format:
+            body["response_format"] = request.response_format
 
         resp = await remote.client.post("/chat/completions", json=body)
         resp.raise_for_status()
@@ -140,6 +150,16 @@ class OpenAICompatibleBackend(InferenceBackend):
             "top_p": request.top_p,
             "stream": True,
         }
+        if request.stop:
+            body["stop"] = request.stop
+        if request.frequency_penalty:
+            body["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty:
+            body["presence_penalty"] = request.presence_penalty
+        if request.seed is not None:
+            body["seed"] = request.seed
+        if request.response_format:
+            body["response_format"] = request.response_format
 
         async with remote.client.stream("POST", "/chat/completions", json=body) as resp:
             resp.raise_for_status()

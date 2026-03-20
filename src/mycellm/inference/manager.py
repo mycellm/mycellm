@@ -74,6 +74,38 @@ class InferenceManager:
             self._load_status[model_name]["phase"] = "creating backend"
             backend = self._create_backend(backend_type)
 
+            # Memory check for llama.cpp models
+            if backend_type == "llama.cpp" and model_path:
+                file_size = Path(model_path).stat().st_size if Path(model_path).exists() else 0
+                if file_size > 0:
+                    est_ram_needed = file_size * 1.2  # model + KV cache overhead
+                    try:
+                        import platform as _platform
+                        avail_ram = 0
+                        if _platform.system() == "Linux":
+                            with open("/proc/meminfo") as f:
+                                for line in f:
+                                    if line.startswith("MemAvailable:"):
+                                        avail_ram = int(line.split()[1]) * 1024
+                                        break
+                        elif _platform.system() == "Darwin":
+                            import subprocess
+                            r = subprocess.run(
+                                ["sysctl", "-n", "hw.memsize"],
+                                capture_output=True, text=True, timeout=3,
+                            )
+                            if r.returncode == 0:
+                                avail_ram = int(r.stdout.strip())
+
+                        if avail_ram > 0 and est_ram_needed > avail_ram * 0.85:
+                            logger.warning(
+                                f"Model {model_name} ({file_size/1024**3:.1f}GB) may exceed available RAM "
+                                f"({avail_ram/1024**3:.1f}GB). Loading anyway — watch for OOM."
+                            )
+                            self._load_status[model_name]["phase"] = f"loading {file_size/1024**3:.1f}GB (RAM warning)"
+                    except Exception:
+                        pass
+
             if backend_type == "llama.cpp":
                 self._load_status[model_name]["phase"] = "loading model into memory"
                 if model_path:
@@ -220,7 +252,9 @@ class InferenceManager:
 
         configs = list(self._saved_configs.values())
         config_path = data_dir / "model_configs.json"
-        config_path.write_text(json.dumps(configs, indent=2))
+        tmp = config_path.with_suffix('.tmp')
+        tmp.write_text(json.dumps(configs, indent=2))
+        tmp.rename(config_path)  # atomic on POSIX
         logger.debug(f"Saved {len(configs)} model configs to {config_path}")
 
     async def restore_models(self, data_dir: Path) -> int:

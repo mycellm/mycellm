@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import queue
 import threading
 from typing import AsyncIterator
 
@@ -59,12 +58,24 @@ class LlamaCppBackend(InferenceBackend):
             raise RuntimeError(f"Model '{model_name}' not loaded")
 
         llm = self._models[model_name]
+        extra_kwargs = {}
+        if request.stop:
+            extra_kwargs["stop"] = request.stop
+        if request.frequency_penalty:
+            extra_kwargs["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty:
+            extra_kwargs["presence_penalty"] = request.presence_penalty
+        if request.seed is not None:
+            extra_kwargs["seed"] = request.seed
+        if request.response_format:
+            extra_kwargs["response_format"] = request.response_format
         response = await asyncio.to_thread(
             llm.create_chat_completion,
             messages=request.messages,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             top_p=request.top_p,
+            **extra_kwargs,
         )
 
         choice = response["choices"][0]
@@ -86,9 +97,22 @@ class LlamaCppBackend(InferenceBackend):
 
         llm = self._models[model_name]
 
-        # Use a thread + queue to bridge sync iterator to async generator
-        chunk_queue: queue.Queue = queue.Queue()
+        # Use a thread + asyncio.Queue to bridge sync iterator to async generator
+        loop = asyncio.get_running_loop()
+        chunk_queue: asyncio.Queue = asyncio.Queue()
         _SENTINEL = object()
+
+        extra_kwargs = {}
+        if request.stop:
+            extra_kwargs["stop"] = request.stop
+        if request.frequency_penalty:
+            extra_kwargs["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty:
+            extra_kwargs["presence_penalty"] = request.presence_penalty
+        if request.seed is not None:
+            extra_kwargs["seed"] = request.seed
+        if request.response_format:
+            extra_kwargs["response_format"] = request.response_format
 
         def _run_stream():
             try:
@@ -98,22 +122,20 @@ class LlamaCppBackend(InferenceBackend):
                     max_tokens=request.max_tokens,
                     top_p=request.top_p,
                     stream=True,
+                    **extra_kwargs,
                 )
                 for chunk in stream:
-                    chunk_queue.put(chunk)
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
             except Exception as e:
-                chunk_queue.put(e)
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, e)
             finally:
-                chunk_queue.put(_SENTINEL)
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
 
         thread = threading.Thread(target=_run_stream, daemon=True)
         thread.start()
 
         while True:
-            # Poll queue without blocking the event loop
-            while chunk_queue.empty():
-                await asyncio.sleep(0.01)
-            item = chunk_queue.get()
+            item = await chunk_queue.get()
             if item is _SENTINEL:
                 break
             if isinstance(item, Exception):

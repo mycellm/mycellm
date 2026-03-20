@@ -15,7 +15,7 @@ PRIORITY_NICE = {"low": 15, "normal": 0, "high": -5}
 
 @app.callback(invoke_without_command=True)
 def serve(
-    host: str = typer.Option("0.0.0.0", "--host", "-h", help="API bind address"),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="API bind address"),
     port: int = typer.Option(8420, "--port", "-p", help="API port"),
     quic_port: int = typer.Option(8421, "--quic-port", help="QUIC transport port"),
     dht_port: int = typer.Option(8422, "--dht-port", help="DHT discovery port"),
@@ -198,9 +198,10 @@ def _install_launchd(mycellm_bin, host, port, quic_port, dht_port, device, no_dh
     console.print(f"[dim]Priority: {priority} (nice {nice_val})[/dim]")
 
     # Load it
-    os.system(f"launchctl unload {plist_path} 2>/dev/null")
-    ret = os.system(f"launchctl load {plist_path}")
-    if ret == 0:
+    import subprocess
+    subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+    result = subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True)
+    if result.returncode == 0:
         console.print(f"[green]Service loaded. mycellm will auto-start and auto-restart.[/green]")
     else:
         console.print(f"[yellow]Wrote plist but launchctl load failed. Run manually:[/yellow]")
@@ -244,9 +245,10 @@ WantedBy=default.target
     console.print(f"[green]Installed:[/green] {service_path}")
     console.print(f"[dim]Priority: {priority} (nice {nice_val})[/dim]")
 
-    os.system("systemctl --user daemon-reload")
-    ret = os.system("systemctl --user enable --now mycellm.service")
-    if ret == 0:
+    import subprocess
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+    result = subprocess.run(["systemctl", "--user", "enable", "--now", "mycellm.service"], capture_output=True)
+    if result.returncode == 0:
         console.print("[green]Service enabled. mycellm will auto-start and auto-restart.[/green]")
     else:
         console.print("[yellow]Wrote unit file. Enable manually:[/yellow]")
@@ -255,14 +257,15 @@ WantedBy=default.target
 
 def _uninstall_service():
     """Remove mycellm system service."""
-    import os
     import platform
     from pathlib import Path
+
+    import subprocess
 
     if platform.system() == "Darwin":
         plist = Path.home() / "Library" / "LaunchAgents" / "com.mycellm.node.plist"
         if plist.exists():
-            os.system(f"launchctl unload {plist} 2>/dev/null")
+            subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
             plist.unlink()
             console.print(f"[green]Removed {plist}[/green]")
         else:
@@ -270,9 +273,9 @@ def _uninstall_service():
     elif platform.system() == "Linux":
         unit = Path.home() / ".config" / "systemd" / "user" / "mycellm.service"
         if unit.exists():
-            os.system("systemctl --user disable --now mycellm.service 2>/dev/null")
+            subprocess.run(["systemctl", "--user", "disable", "--now", "mycellm.service"], capture_output=True)
             unit.unlink()
-            os.system("systemctl --user daemon-reload")
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
             console.print(f"[green]Removed {unit}[/green]")
         else:
             console.print("[dim]No systemd service found.[/dim]")
