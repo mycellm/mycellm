@@ -2134,17 +2134,17 @@ function ModelsTab({ status, onRefresh }) {
 function ChatTab() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [model, setModel] = useState('')
+  const [model, setModel] = useState('auto')  // 'auto' = best available
   const [models, setModels] = useState([])
   const [sending, setSending] = useState(false)
   const endRef = useRef(null)
 
+  // Fetch models periodically (includes fleet)
   useEffect(() => {
-    api('/v1/models').then(d => {
-      const list = d.data || []
-      setModels(list)
-      if (list.length > 0 && !model) setModel(list[0].id)
-    }).catch(() => {})
+    const fetch_ = () => api('/v1/models').then(d => setModels(d.data || [])).catch(() => {})
+    fetch_()
+    const iv = setInterval(fetch_, 10000)
+    return () => clearInterval(iv)
   }, [])
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
@@ -2162,15 +2162,16 @@ function ChatTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: model || undefined,
+          model: model === 'auto' ? '' : model,  // empty = auto-route
           messages: history.map(m => ({ role: m.role, content: m.content })),
           max_tokens: 2048,
         }),
       })
       const text = resp.choices?.[0]?.message?.content || '[no response]'
       const usage = resp.usage || {}
+      const routedTo = resp.model || 'unknown'
       setMessages([...history, {
-        role: 'assistant', content: text, model: resp.model,
+        role: 'assistant', content: text, model: routedTo,
         tokens: `${usage.prompt_tokens || 0}+${usage.completion_tokens || 0}`,
       }])
     } catch (e) {
@@ -2179,20 +2180,30 @@ function ChatTab() {
     setSending(false)
   }
 
+  // Group models by source
+  const localModels = models.filter(m => m.owned_by === 'local')
+  const peerModels = models.filter(m => m.owned_by?.startsWith('peer:'))
+  const fleetModels = models.filter(m => m.owned_by?.startsWith('fleet:'))
+
   return (
     <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden flex flex-col h-[calc(100vh-220px)]">
       {/* Model selector */}
       <div className="h-12 border-b border-white/10 bg-black/50 flex items-center px-4 space-x-3">
         <MessageSquare size={14} className="text-spore" />
         <select value={model} onChange={e => setModel(e.target.value)}
-          className="bg-black border border-white/10 rounded px-2 py-1 text-sm font-mono text-white focus:outline-none">
-          {models.map(m => <option key={m.id} value={m.id}>{m.id} ({m.owned_by})</option>)}
-          {models.length === 0 && <option value="">No models available</option>}
+          className="bg-black border border-white/10 rounded px-2 py-1 text-sm font-mono text-white focus:outline-none min-w-[200px]">
+          <option value="auto">Automatic (best available)</option>
+          {localModels.length > 0 && <optgroup label="Local">
+            {localModels.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
+          </optgroup>}
+          {fleetModels.length > 0 && <optgroup label="Fleet">
+            {fleetModels.map(m => <option key={m.id} value={m.id}>{m.id} ({m.owned_by.replace('fleet:', '')})</option>)}
+          </optgroup>}
+          {peerModels.length > 0 && <optgroup label="Peers (QUIC)">
+            {peerModels.map(m => <option key={m.id} value={m.id}>{m.id} ({m.owned_by.replace('peer:', '')})</option>)}
+          </optgroup>}
         </select>
-        <button onClick={() => api('/v1/models').then(d => { setModels(d.data || []) }).catch(() => {})}
-          className="text-gray-500 hover:text-gray-300 transition-colors">
-          <RefreshCw size={12} />
-        </button>
+        <span className="text-xs text-gray-600">{models.length} model{models.length !== 1 ? 's' : ''} on network</span>
         <button onClick={() => setMessages([])}
           className="ml-auto text-xs text-gray-500 hover:text-gray-300 flex items-center space-x-1">
           <Trash2 size={12} /><span>Clear</span>
@@ -2204,8 +2215,16 @@ function ChatTab() {
         {messages.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             <MessageSquare size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Send a message to test inference routing.</p>
-            <p className="text-xs mt-1 text-gray-600">Requests route through the network to the best available peer.</p>
+            <p className="text-sm">Send a message to start a conversation.</p>
+            <p className="text-xs mt-1 text-gray-600">
+              {model === 'auto'
+                ? 'Automatic mode — routes to the best available model on the network.'
+                : `Using ${model}. The network handles routing and failover.`
+              }
+            </p>
+            {models.length === 0 && (
+              <p className="text-xs mt-2 text-compute">No models available. Load a model on the Models tab first.</p>
+            )}
           </div>
         )}
         {messages.map((m, i) => (
