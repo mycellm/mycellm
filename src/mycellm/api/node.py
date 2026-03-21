@@ -27,10 +27,20 @@ async def node_version(request: Request):
                 latest = resp.json().get("info", {}).get("version", "")
                 if latest:
                     result["latest"] = latest
-                    result["update_available"] = latest != __version__
+                    result["update_available"] = _is_newer(latest, __version__)
     except Exception:
         pass  # offline or not published yet
     return result
+
+
+def _is_newer(latest: str, current: str) -> bool:
+    """Check if latest version is newer than current using tuple comparison."""
+    try:
+        def parse(v):
+            return tuple(int(x) for x in v.split(".")[:3])
+        return parse(latest) > parse(current)
+    except (ValueError, TypeError):
+        return False
 
 
 @router.get("/status")
