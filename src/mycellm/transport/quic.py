@@ -211,6 +211,7 @@ async def dial_peer(
         is_client=True,
         alpn_protocols=["mycellm-v1"],
         idle_timeout=idle_timeout,
+        server_name=host,
     )
     configuration.verify_mode = ssl.CERT_NONE
 
@@ -221,7 +222,7 @@ async def dial_peer(
     addr = infos[0]
     server_addr = addr[4]
 
-    connection = QuicConnection(configuration=configuration, server_name=host)
+    connection = QuicConnection(configuration=configuration)
 
     loop = asyncio.get_event_loop()
     transport, protocol = await asyncio.wait_for(
