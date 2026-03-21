@@ -6,10 +6,12 @@ import Page from '../layouts/Page.astro';
   <!-- Hero -->
   <div class="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 py-10 sm:py-16">
     <div class="w-full max-w-xl text-center space-y-6">
-      <div class="flex justify-center mb-2">
-        <img src="/brand/logo-icon/svg/mycellm-red-logo-sans.svg" alt=""
-             class="w-14 h-14 sm:w-16 sm:h-16 animate-pulse"
-             style="filter: drop-shadow(0px 0px 16px rgba(239, 68, 68, 0.5));">
+      <div class="flex justify-center mb-4">
+        <div class="relative w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28">
+          <img id="heroShroom" src="/brand/logo-icon/svg/mycellm-red-logo-sans.svg" alt=""
+               class="w-full h-full transition-all duration-700"
+               style="filter: drop-shadow(0px 0px 20px rgba(239, 68, 68, 0.6));">
+        </div>
       </div>
 
       <div>
@@ -21,13 +23,13 @@ import Page from '../layouts/Page.astro';
         </p>
       </div>
 
-      <div class="relative">
+      <div class="relative flex items-stretch">
         <textarea id="heroInput" rows="2" placeholder="Ask anything..."
-          class="w-full glass-green rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 pr-14 text-white text-base sm:text-lg resize-none transition-all focus:outline-none focus:border-spore/40 focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08)]"
+          class="w-full glass-green rounded-2xl rounded-r-none px-4 sm:px-5 py-3.5 sm:py-4 text-white text-base sm:text-lg resize-none transition-all focus:outline-none focus:border-spore/40 focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08)]"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sessionStorage.setItem('mycellm_initial_prompt',this.value);location.href='/chat'}"></textarea>
         <button onclick="sessionStorage.setItem('mycellm_initial_prompt',document.getElementById('heroInput').value);location.href='/chat'"
-          class="absolute right-3 bottom-3 w-9 h-9 sm:w-10 sm:h-10 bg-spore text-black rounded-xl flex items-center justify-center shadow-lg shadow-spore/20 hover:scale-105 active:scale-95 transition-transform">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          class="w-12 sm:w-14 bg-spore text-black rounded-2xl rounded-l-none flex items-center justify-center shadow-lg shadow-spore/20 hover:bg-spore-glow active:scale-95 transition-all shrink-0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
 
@@ -36,13 +38,8 @@ import Page from '../layouts/Page.astro';
         <span>Prompts processed by distributed GPU nodes. Don't share passwords or API keys.</span>
       </p>
 
-      <div class="flex flex-wrap justify-center gap-2 pt-1">
-        <button onclick="sessionStorage.setItem('mycellm_initial_prompt','Explain distributed computing in simple terms');location.href='/chat'"
-          class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer">Explain distributed computing</button>
-        <button onclick="sessionStorage.setItem('mycellm_initial_prompt','Write a Python function to find prime numbers');location.href='/chat'"
-          class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer">Write a Python function</button>
-        <button onclick="sessionStorage.setItem('mycellm_initial_prompt','What makes P2P networks resilient?');location.href='/chat'"
-          class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer">P2P network resilience</button>
+      <div id="promptChips" class="flex flex-wrap justify-center gap-2 pt-1">
+        <!-- Populated by JS -->
       </div>
     </div>
   </div>
@@ -103,22 +100,34 @@ import Page from '../layouts/Page.astro';
       <p class="text-gray-500 text-center text-sm mb-8">pip, Docker, or one-liner — your choice.</p>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <div class="glass rounded-xl p-5">
-          <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">pip</div>
+        <div class="glass rounded-xl p-5 relative group">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-xs text-gray-500 font-mono uppercase tracking-wider">pip</div>
+            <button onclick="navigator.clipboard.writeText('pip install mycellm && mycellm init && mycellm serve');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)"
+              class="text-[10px] text-gray-600 hover:text-spore transition-colors opacity-0 group-hover:opacity-100">Copy</button>
+          </div>
           <div class="font-mono text-sm space-y-1.5">
             <div><span class="text-gray-600">$</span> <span class="text-spore-glow">pip install mycellm</span></div>
             <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm init</span></div>
             <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm serve</span></div>
           </div>
         </div>
-        <div class="glass rounded-xl p-5">
-          <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Docker</div>
+        <div class="glass rounded-xl p-5 relative group">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-xs text-gray-500 font-mono uppercase tracking-wider">Docker</div>
+            <button onclick="navigator.clipboard.writeText('docker run -d --name mycellm -p 8420:8420 -v mycellm-data:/data/mycellm ghcr.io/mycellm/mycellm');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)"
+              class="text-[10px] text-gray-600 hover:text-spore transition-colors opacity-0 group-hover:opacity-100">Copy</button>
+          </div>
           <div class="font-mono text-xs text-spore-glow break-all leading-relaxed">
-            docker run -d --name mycellm<br>-p 8420:8420<br>-v mycellm-data:/data/mycellm<br>ghcr.io/mycellm/mycellm
+            docker run -d --name mycellm -p 8420:8420 -v mycellm-data:/data/mycellm ghcr.io/mycellm/mycellm
           </div>
         </div>
-        <div class="glass rounded-xl p-5">
-          <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">One-liner</div>
+        <div class="glass rounded-xl p-5 relative group">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-xs text-gray-500 font-mono uppercase tracking-wider">One-liner</div>
+            <button onclick="navigator.clipboard.writeText('curl -fsSL https://mycellm.dev/install.sh | sh');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)"
+              class="text-[10px] text-gray-600 hover:text-spore transition-colors opacity-0 group-hover:opacity-100">Copy</button>
+          </div>
           <div class="font-mono text-sm text-spore-glow break-all">
             curl -fsSL mycellm.dev/install.sh | sh
           </div>
@@ -152,4 +161,61 @@ import Page from '../layouts/Page.astro';
       </div>
     </div>
   </section>
+
+  <script>
+    // ── Mushroom color cycling ──
+    const colors = [
+      { file: 'mycellm-red-logo-sans.svg', shadow: 'rgba(239, 68, 68, 0.6)' },
+      { file: 'mycellm-green-logo-sans.svg', shadow: 'rgba(34, 197, 94, 0.6)' },
+      { file: 'mycellm-blue-logo-sans.svg', shadow: 'rgba(59, 130, 246, 0.6)' },
+      { file: 'mycellm-gold-logo-sans.svg', shadow: 'rgba(250, 204, 21, 0.6)' },
+      { file: 'mycellm-purple-logo-sans.svg', shadow: 'rgba(168, 85, 247, 0.6)' },
+    ];
+    let colorIdx = 0;
+    const shroom = document.getElementById('heroShroom');
+    if (shroom) {
+      setInterval(() => {
+        colorIdx = (colorIdx + 1) % colors.length;
+        const c = colors[colorIdx];
+        shroom.style.opacity = '0.4';
+        setTimeout(() => {
+          shroom.src = `/brand/logo-icon/svg/${c.file}`;
+          shroom.style.filter = `drop-shadow(0px 0px 20px ${c.shadow})`;
+          shroom.style.opacity = '1';
+        }, 350);
+      }, 3000);
+    }
+
+    // ── Randomized sample prompts ──
+    const allPrompts = [
+      'Explain distributed computing in simple terms',
+      'Write a Python function to find prime numbers',
+      'What makes peer-to-peer networks resilient?',
+      'Compare TCP and UDP in 3 sentences',
+      'Write a haiku about open source',
+      'How does BitTorrent work?',
+      'Explain public key cryptography simply',
+      'Write a bash one-liner to find large files',
+      'What is consensus in distributed systems?',
+      'Explain MapReduce to a beginner',
+      'Write a REST API endpoint in Python',
+      'What are the benefits of edge computing?',
+      'Explain the CAP theorem',
+      'Write a Docker compose for a web app',
+      'How do neural networks learn?',
+      'Compare SQL and NoSQL databases',
+      'Write a regex to validate email addresses',
+      'Explain WebSockets vs HTTP polling',
+    ];
+    // Pick 3 random, non-repeating
+    const shuffled = allPrompts.sort(() => Math.random() - 0.5).slice(0, 3);
+    const chips = document.getElementById('promptChips');
+    if (chips) {
+      chips.innerHTML = shuffled.map(p => {
+        const short = p.length > 30 ? p.slice(0, 28) + '...' : p;
+        return `<button onclick="sessionStorage.setItem('mycellm_initial_prompt','${p.replace(/'/g, "\\'")}');location.href='/chat'"
+          class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer">${short}</button>`;
+      }).join('');
+    }
+  </script>
 </Page>
