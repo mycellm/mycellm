@@ -138,6 +138,78 @@ async def _cmd_config(client, endpoint, headers, args):
     console.print()
 
 
+# Public bootstrap — zero-config fallback
+PUBLIC_BOOTSTRAP = "https://api.mycellm.dev"
+
+
+async def _discover_endpoint(endpoint: str, headers: dict, console: Console) -> tuple[str, str]:
+    """Auto-discover the best endpoint and model.
+
+    Discovery chain:
+      1. Local node (localhost:8420) — check for loaded + fleet + peer models
+      2. Configured bootstrap (from MYCELLM_BOOTSTRAP_PEERS .env) — LAN/private network
+      3. Public bootstrap (api.mycellm.dev) — zero-config last resort
+
+    Returns (endpoint, model_name). Model may be empty if nothing found.
+    """
+    import httpx
+    from mycellm.cli.banner import SPORE_GREEN, LEDGER_GOLD
+
+    async def _try_endpoint(url: str, client: httpx.AsyncClient) -> list[dict]:
+        try:
+            resp = await client.get(f"{url}/v1/models", headers=headers)
+            if resp.status_code == 200:
+                return resp.json().get("data", [])
+        except Exception:
+            pass
+        return []
+
+    async with httpx.AsyncClient(timeout=5) as c:
+        # 1. Local node
+        models = await _try_endpoint(endpoint, c)
+        if models:
+            return endpoint, models[0]["id"]
+
+        # 2. Configured bootstrap (LAN / private network)
+        try:
+            local_running = True
+            from mycellm.config import get_settings
+            settings = get_settings()
+            bootstrap = settings.get_bootstrap_list()
+            if bootstrap:
+                bhost, bport = bootstrap[0]
+                bapi = bport - 1
+                bootstrap_url = f"http://{bhost}:{bapi}"
+                models = await _try_endpoint(bootstrap_url, c)
+                if models:
+                    console.print(f"  [{LEDGER_GOLD}]No local models — connecting to {bootstrap_url}[/{LEDGER_GOLD}]")
+                    return bootstrap_url, models[0]["id"]
+        except Exception:
+            local_running = False
+
+        # 3. Public network (zero-config fallback)
+        try:
+            resp = await c.get(f"{PUBLIC_BOOTSTRAP}/v1/node/public/stats")
+            if resp.status_code == 200:
+                stats = resp.json()
+                model_names = stats.get("models", {}).get("names", [])
+                if model_names:
+                    console.print(f"  [{LEDGER_GOLD}]Using public mycellm network ({stats.get('nodes', {}).get('online', '?')} nodes online)[/{LEDGER_GOLD}]")
+                    return PUBLIC_BOOTSTRAP, ""  # gateway auto-selects
+        except Exception:
+            pass
+
+        # Nothing found — give helpful guidance
+        if not local_running:
+            console.print(f"  [red]No mycellm node running.[/red]")
+            console.print(f"  [dim]Start one:  mycellm init && mycellm serve[/dim]")
+        else:
+            console.print(f"  [yellow]No models available on the network.[/yellow]")
+            console.print(f"  [dim]Load one:   open http://localhost:8420 → Models tab[/dim]")
+
+    return endpoint, ""
+
+
 # ── Chat loop ──
 
 async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
@@ -154,41 +226,17 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    # Auto-detect model — check local node, fall back to bootstrap
+    # Auto-discover: local → configured bootstrap → public network
     if not model:
-        try:
-            async with httpx.AsyncClient(timeout=5) as c:
-                resp = await c.get(f"{endpoint}/v1/models", headers=headers)
-                models_list = resp.json().get("data", [])
-                if models_list:
-                    model = models_list[0]["id"]
-                elif endpoint == "http://localhost:8420":
-                    # No local models — try bootstrap node if configured
-                    from mycellm.config import get_settings
-                    settings = get_settings()
-                    bootstrap = settings.get_bootstrap_list()
-                    if bootstrap:
-                        bhost, bport = bootstrap[0]
-                        bapi = bport - 1  # QUIC port → API port
-                        bootstrap_url = f"http://{bhost}:{bapi}"
-                        try:
-                            resp2 = await c.get(f"{bootstrap_url}/v1/models", headers=headers)
-                            bmodels = resp2.json().get("data", [])
-                            if bmodels:
-                                endpoint = bootstrap_url
-                                model = bmodels[0]["id"]
-                                console.print(f"  [yellow]No local models — using bootstrap at {bootstrap_url}[/yellow]")
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+        endpoint, model = await _discover_endpoint(endpoint, headers, console)
 
     if model:
         console.print(f"  Model: [bold green]{model}[/bold green]")
     else:
         console.print(f"  Model: [yellow]auto[/yellow] (routes to best available on network)")
     console.print(f"  Node:  [dim]{endpoint}[/dim]")
-    console.print(f"  Type [green]/help[/green] for commands, [green]/q[/green] to exit\n")
+    console.print(f"  Type [green]/help[/green] for commands, [green]/q[/green] to exit")
+    console.print(f"  [dim]Tip: run 'mycellm init' to configure your node[/dim]\n")
 
     messages: list[dict] = []
     current_model = model
@@ -246,9 +294,11 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                 full_text = ""
                 resp_model = ""
 
+                # Use public gateway for public bootstrap, authenticated endpoint otherwise
+                chat_path = "/v1/public/chat/completions" if endpoint.startswith("https://") else "/v1/chat/completions"
                 async with client.stream(
                     "POST",
-                    f"{endpoint}/v1/chat/completions",
+                    f"{endpoint}{chat_path}",
                     json={
                         "model": current_model or "auto",
                         "messages": messages,
