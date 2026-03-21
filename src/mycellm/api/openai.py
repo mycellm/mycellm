@@ -144,12 +144,18 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 )
                 if result:
                     text = result.get("text", "") if isinstance(result, dict) else result.text
+                    prompt_tokens = result.get("prompt_tokens", 0) if isinstance(result, dict) else 0
+                    completion_tokens = result.get("completion_tokens", 0) if isinstance(result, dict) else 0
+                    total_tokens = prompt_tokens + completion_tokens
                     routed_to = f"quic:{best.peer_id[:8]}"
                     node.activity.record(
                         EventType.INFERENCE_COMPLETE,
                         model=best.model_name,
                         source="quic",
                         routed_to=routed_to,
+                        tokens=total_tokens,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
                         latency_ms=round((time.time() - start_time) * 1000),
                     )
                     resp_data = ChatCompletionResponse(
@@ -159,6 +165,11 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                                 message=ChatMessage(role="assistant", content=text),
                             )
                         ],
+                        usage=Usage(
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            total_tokens=total_tokens,
+                        ),
                     )
                     response = JSONResponse(content=resp_data.model_dump())
                     response.headers["X-Mycellm-Routed-To"] = routed_to
