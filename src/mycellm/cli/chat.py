@@ -146,9 +146,9 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
     from rich.markdown import Markdown
     from rich.live import Live
     from rich.text import Text
-    from mycellm.cli.banner import print_banner, SPORE_GREEN, COMPUTE_RED, RELAY_BLUE, LEDGER_GOLD
+    from mycellm.cli.banner import print_chat_header, SPORE_GREEN, COMPUTE_RED, RELAY_BLUE, LEDGER_GOLD, CONSOLE_GRAY
 
-    print_banner(console)
+    print_chat_header(console)
 
     headers = {}
     if api_key:
@@ -166,11 +166,12 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
             pass
 
     if model:
-        console.print(f"  Model: [bold green]{model}[/bold green]")
+        console.print(f"  [{SPORE_GREEN}]Model[/{SPORE_GREEN}]  {model}")
     else:
-        console.print(f"  Model: [yellow]auto[/yellow] (will use best available)")
-    console.print(f"  Node:  [dim]{endpoint}[/dim]")
-    console.print(f"  Type [green]/help[/green] for commands, [green]/q[/green] to exit\n")
+        console.print(f"  [{SPORE_GREEN}]Model[/{SPORE_GREEN}]  [{LEDGER_GOLD}]auto[/{LEDGER_GOLD}] (best available)")
+    console.print(f"  [{SPORE_GREEN}]Node[/{SPORE_GREEN}]   [dim]{endpoint}[/dim]")
+    console.print(f"  [{SPORE_GREEN}]Help[/{SPORE_GREEN}]   [dim]/help for commands, /q to exit[/dim]")
+    console.print()
 
     messages: list[dict] = []
     current_model = model
@@ -178,7 +179,7 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=300.0)) as client:
         while True:
             try:
-                user_input = console.input(f"[bold {SPORE_GREEN}]> [/bold {SPORE_GREEN}]")
+                user_input = console.input(f"[{COMPUTE_RED}]>[/{COMPUTE_RED}] ")
             except (EOFError, KeyboardInterrupt):
                 console.print("\n[dim]Goodbye.[/dim]")
                 break
@@ -202,7 +203,7 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                         result = await COMMANDS[cmd_name]["fn"](client, endpoint, headers, cmd_args)
                         if cmd_name == "use" and result:
                             current_model = result
-                            console.print(f"  Switched to [bold green]{current_model}[/bold green]\n")
+                            console.print(f"  [{SPORE_GREEN}]Switched to[/{SPORE_GREEN}] {current_model}\n")
                         elif result == "__clear__":
                             messages.clear()
                             console.print("  [dim]Conversation cleared.[/dim]\n")
@@ -270,7 +271,7 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
 
                 # Attribution line
                 via = resp_model or current_model or "auto"
-                console.print(f"[dim]  via {via}[/dim]\n")
+                console.print(f"  [{CONSOLE_GRAY}]via[/{CONSOLE_GRAY}] [{COMPUTE_RED}]{via}[/{COMPUTE_RED}]\n")
 
             except httpx.ConnectError:
                 console.print(f"\n[red]Cannot connect to {endpoint}[/red]. Is 'mycellm serve' running?\n")
