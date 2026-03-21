@@ -99,11 +99,16 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         )
 
     if not model_name and node.model_resolver:
+        # Get consumer balance for priority routing
+        _balance = -1.0  # -1 = no restriction (default)
+        if node.ledger:
+            _balance = await node.ledger.balance(node.peer_id)
         resolved = node.model_resolver.resolve(
             body.model,
             node.inference.loaded_models,
             fleet_registry=node.node_registry,
             constraints=constraints,
+            consumer_balance=_balance,
         )
         if not resolved and constraints and body.mycellm:
             if body.mycellm.fallback == "reject":
@@ -473,15 +478,26 @@ async def _route_via_fleet(
                     # Reset failure count on success
                     entry["failure_count"] = 0
 
-                    # Debit consumer credits
+                    # Debit consumer credits + store receipt
                     if node.ledger:
                         tokens = usage.get("completion_tokens", 0)
                         from mycellm.accounting.pricing import compute_cost
                         cost = compute_cost(max(tokens, 1))
+                        seeder_peer = entry.get("peer_id", "")
                         try:
-                            await node.ledger.debit(
+                            tx_id = await node.ledger.debit(
                                 node.peer_id, cost, "inference_consumed",
-                                counterparty_id=entry.get("peer_id", ""),
+                                counterparty_id=seeder_peer,
+                            )
+                            # Store a fleet receipt (unsigned — HTTP, not QUIC)
+                            await node.ledger.store_receipt(
+                                tx_id=tx_id,
+                                consumer_id=node.peer_id,
+                                seeder_id=seeder_peer,
+                                model=model_to_route or body.model,
+                                tokens=tokens,
+                                cost=cost,
+                                signature="fleet",  # marker: fleet receipt, not Ed25519 signed
                             )
                         except ValueError as e:
                             logger.warning(f"Credit debit failed: {e}")

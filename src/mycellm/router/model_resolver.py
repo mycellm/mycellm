@@ -99,6 +99,7 @@ class ModelResolver:
         local_models: list[ModelCapability],
         fleet_registry: dict[str, dict] | None = None,
         constraints: QualityConstraints | None = None,
+        consumer_balance: float = -1.0,
     ) -> list[ResolvedModel]:
         """Resolve a model request to a scored list of candidates.
 
@@ -107,6 +108,12 @@ class ModelResolver:
         - Tag match: "code" -> best code model on network
         - Tier match: "capable" -> best model in that tier
         - Empty/default: highest-tier model available
+
+        Priority routing by credit balance:
+        - balance < 10:   Tier 1 only (free tier)
+        - balance < 50:   Tier 1 + 2 (contributor)
+        - balance >= 50:  All tiers (power seeder)
+        - balance < 0:    Passed as -1 = no restriction (local use)
 
         Returns all candidates sorted by score (best first).
         """
@@ -179,6 +186,10 @@ class ModelResolver:
         if constraints:
             candidates = self._apply_constraints(candidates, constraints)
 
+        # Apply credit-based tier restrictions
+        if consumer_balance >= 0:
+            candidates = self._apply_balance_filter(candidates, consumer_balance)
+
         # Sort by score (best first)
         candidates.sort(key=lambda c: c.score, reverse=True)
         return candidates
@@ -241,6 +252,34 @@ class ModelResolver:
             filtered.append(c)
 
         return filtered
+
+    def _apply_balance_filter(
+        self, candidates: list[ResolvedModel], balance: float
+    ) -> list[ResolvedModel]:
+        """Filter candidates based on consumer credit balance.
+
+        Tier access by balance:
+          <10 credits:   tiny + fast only (Tier 1 equivalent)
+          <50 credits:   up to capable (Tier 1 + 2)
+          >=50 credits:  all tiers (power seeder access)
+        """
+        tier_order = {"frontier": 4, "capable": 3, "fast": 2, "tiny": 1}
+
+        if balance >= 50:
+            max_tier = 4  # all tiers
+        elif balance >= 10:
+            max_tier = 3  # up to capable
+        else:
+            max_tier = 2  # tiny + fast only
+
+        filtered = [c for c in candidates if tier_order.get(c.tier, 1) <= max_tier]
+
+        # If filtering removed everything, keep at least tiny/fast models
+        if not filtered and candidates:
+            filtered = [c for c in candidates if tier_order.get(c.tier, 1) <= 2]
+
+        # Last resort: return all candidates (don't block completely)
+        return filtered or candidates
 
     def _score_model(
         self,

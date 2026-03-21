@@ -27,6 +27,12 @@ from mycellm.router.model_resolver import ModelResolver
 from mycellm.transport.tls import generate_self_signed_cert
 from mycellm.transport.auth import build_node_hello, build_hello_ack, verify_hello_message
 from mycellm.accounting.reputation import ReputationTracker
+from mycellm.accounting.receipts import (
+    ReceiptValidator,
+    build_receipt_data,
+    sign_receipt,
+    verify_receipt_signature,
+)
 from mycellm.transport.messages import (
     inference_response,
     error_message,
@@ -124,6 +130,7 @@ class MycellmNode:
         self.model_resolver = ModelResolver(self.registry)
         self.ledger = None  # initialized in run()
         self.reputation = ReputationTracker()
+        self.receipt_validator = ReceiptValidator()
 
         # Peer manager
         self.peer_manager = PeerManager(self)
@@ -439,32 +446,39 @@ class MycellmNode:
                 )
                 await protocol.reply_on_stream(stream_id, resp)
 
-            # Credit the seeder
+            # Credit the seeder (with rate limiting)
             if self.ledger:
                 tokens = result.completion_tokens if not stream else 0
                 from mycellm.accounting.pricing import compute_reward
                 reward = compute_reward(max(tokens, 1))
-                await self.ledger.credit(self.peer_id, reward, "inference_served",
-                                         counterparty_id=msg.from_peer)
 
-                # Send signed credit receipt to consumer
+                if self.receipt_validator.check_credit_rate(self.peer_id):
+                    await self.ledger.credit(self.peer_id, reward, "inference_served",
+                                             counterparty_id=msg.from_peer)
+                else:
+                    logger.warning(f"Credit rate limit reached, skipping self-credit")
+
+                # Send signed credit receipt to consumer (with request_id binding)
                 if not stream:
-                    import cbor2
-                    receipt_data = cbor2.dumps({
-                        "consumer": msg.from_peer,
-                        "seeder": self.peer_id,
-                        "model": model_name,
-                        "tokens": result.completion_tokens,
-                        "cost": reward,
-                        "ts": time.time(),
-                    })
-                    sig = self.device_key.sign(receipt_data).hex()
+                    ts = time.time()
+                    receipt_data = build_receipt_data(
+                        consumer_id=msg.from_peer,
+                        seeder_id=self.peer_id,
+                        model=model_name,
+                        tokens=result.completion_tokens,
+                        cost=reward,
+                        request_id=msg.id,
+                        timestamp=ts,
+                    )
+                    sig = sign_receipt(self.device_key, receipt_data)
                     from mycellm.transport.messages import signed_credit_receipt
                     receipt_msg = signed_credit_receipt(
                         self.peer_id, msg.from_peer, self.peer_id,
                         model_name, result.completion_tokens, reward,
-                        time.time(), sig,
+                        ts, sig,
                     )
+                    # Include request_id for replay protection
+                    receipt_msg.payload["request_id"] = msg.id
                     await protocol.send_message(receipt_msg)
 
                 self.reputation.record_success(msg.from_peer, result.completion_tokens if not stream else 0, 0.0)
@@ -540,25 +554,57 @@ class MycellmNode:
             await protocol.reply_on_stream(stream_id, err)
 
     async def _handle_credit_receipt(self, msg: MessageEnvelope) -> None:
-        """Handle a signed credit receipt from a peer."""
+        """Handle a signed credit receipt from a peer.
+
+        Verifies:
+          1. Sender is an authenticated peer
+          2. Ed25519 signature is valid against seeder's public key
+          3. Request ID hasn't been seen before (replay protection)
+        """
         payload = msg.payload
         signature = payload.get("signature", "")
+        request_id = payload.get("request_id", "")
 
-        # Verify signature (receipt signed by seeder's device key)
-        # For now, store if from authenticated peer
-        if msg.from_peer in self._peer_connections:
-            if self.ledger:
-                await self.ledger.store_receipt(
-                    tx_id=msg.id,
-                    consumer_id=payload.get("consumer_id", ""),
-                    seeder_id=payload.get("seeder_id", ""),
-                    model=payload.get("model", ""),
-                    tokens=payload.get("tokens", 0),
-                    cost=payload.get("cost", 0.0),
-                    signature=signature,
-                )
-            self.reputation.record_receipt(msg.from_peer)
-            logger.debug(f"Receipt from {msg.from_peer[:8]}: {payload.get('tokens', 0)} tokens")
+        # Must be from authenticated peer
+        conn = self._peer_connections.get(msg.from_peer)
+        if not conn:
+            logger.warning(f"Receipt from unauthenticated peer {msg.from_peer[:16]}")
+            return
+
+        # Replay protection
+        if not self.receipt_validator.check_replay(request_id):
+            logger.warning(f"Replay receipt rejected from {msg.from_peer[:16]}")
+            return
+
+        # Verify Ed25519 signature
+        if signature and conn.hello and conn.hello.cert:
+            receipt_data = build_receipt_data(
+                consumer_id=payload.get("consumer_id", ""),
+                seeder_id=payload.get("seeder_id", ""),
+                model=payload.get("model", ""),
+                tokens=payload.get("tokens", 0),
+                cost=payload.get("cost", 0.0),
+                request_id=request_id,
+                timestamp=payload.get("timestamp", 0.0),
+            )
+            seeder_pubkey = conn.hello.cert.device_pubkey
+            if not verify_receipt_signature(receipt_data, signature, seeder_pubkey):
+                logger.warning(f"Invalid receipt signature from {msg.from_peer[:16]}")
+                return
+
+        # Store verified receipt
+        if self.ledger:
+            await self.ledger.store_receipt(
+                tx_id=msg.id,
+                consumer_id=payload.get("consumer_id", ""),
+                seeder_id=payload.get("seeder_id", ""),
+                model=payload.get("model", ""),
+                tokens=payload.get("tokens", 0),
+                cost=payload.get("cost", 0.0),
+                signature=signature,
+            )
+        self.reputation.record_receipt(msg.from_peer)
+        logger.debug(f"Verified receipt from {msg.from_peer[:8]}: {payload.get('tokens', 0)} tokens")
 
     def _handle_peer_exchange(self, msg: MessageEnvelope) -> None:
         """Handle peer exchange -- learn about peers from connected peer."""
