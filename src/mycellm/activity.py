@@ -147,11 +147,13 @@ class ActivityTracker:
         """Get rolling statistics."""
         now = time.time()
 
-        # Count events in last 1m and 5m
+        # Count events in last 1m, 5m, 15m (load average style)
         req_1m = sum(1 for e in self._events if e.type == EventType.INFERENCE_COMPLETE and now - e.timestamp < 60)
         req_5m = sum(1 for e in self._events if e.type == EventType.INFERENCE_COMPLETE and now - e.timestamp < 300)
+        req_15m = sum(1 for e in self._events if e.type == EventType.INFERENCE_COMPLETE and now - e.timestamp < 900)
         tok_1m = sum(e.data.get("tokens", 0) for e in self._events if e.type == EventType.INFERENCE_COMPLETE and now - e.timestamp < 60)
         tok_5m = sum(e.data.get("tokens", 0) for e in self._events if e.type == EventType.INFERENCE_COMPLETE and now - e.timestamp < 300)
+        tok_15m = sum(e.data.get("tokens", 0) for e in self._events if e.type == EventType.INFERENCE_COMPLETE and now - e.timestamp < 900)
         err_5m = sum(1 for e in self._events if e.type == EventType.INFERENCE_FAILED and now - e.timestamp < 300)
 
         return {
@@ -159,6 +161,14 @@ class ActivityTracker:
             "total_tokens": self._token_count,
             "total_errors": self._error_count,
             "requests_per_min": req_1m,
+            "load": {
+                "req_1m": req_1m,
+                "req_5m": round(req_5m / 5, 1),
+                "req_15m": round(req_15m / 15, 1),
+                "tok_1m": tok_1m,
+                "tok_5m": round(tok_5m / 5),
+                "tok_15m": round(tok_15m / 15),
+            },
             "requests_5min": req_5m,
             "tokens_per_min": tok_1m,
             "tokens_5min": tok_5m,

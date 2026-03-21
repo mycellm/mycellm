@@ -1254,27 +1254,30 @@ OPENAI_MODEL=${models[0]?.name || 'auto'}`}</pre>
 
       {/* Aggregate Fleet Banner (root mode) */}
       {fleetHardware && fleetHardware.aggregate && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
-            <div className="text-xs text-gray-500 font-mono">NODES</div>
-            <div className="text-2xl font-mono text-white mt-1">{fleetHardware.aggregate.online_nodes}/{fleetHardware.aggregate.total_nodes}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="border border-white/10 bg-[#111] rounded-xl p-3 sm:p-4 text-center">
+            <div className="text-[10px] sm:text-xs text-gray-500 font-mono">NODES</div>
+            <div className="text-xl sm:text-2xl font-mono text-white mt-1">{fleetHardware.aggregate.online_nodes}/{fleetHardware.aggregate.total_nodes}</div>
           </div>
-          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
-            <div className="text-xs text-gray-500 font-mono">AGGREGATE T/s</div>
-            <div className="text-2xl font-mono text-compute mt-1">{fleetHardware.aggregate.total_tps}</div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-3 sm:p-4 text-center">
+            <div className="text-[10px] sm:text-xs text-gray-500 font-mono">THROUGHPUT</div>
+            <div className="text-xl sm:text-2xl font-mono text-compute mt-1">{fleetHardware.aggregate.total_tps} <span className="text-xs text-gray-500">T/s</span></div>
           </div>
-          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
-            <div className="text-xs text-gray-500 font-mono">COMPUTE</div>
-            <div className="text-2xl font-mono text-relay mt-1">{fleetHardware.aggregate.total_vram_gb}GB</div>
-            <div className="text-xs text-gray-600">VRAM</div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-3 sm:p-4 text-center">
+            <div className="text-[10px] sm:text-xs text-gray-500 font-mono">REQUESTS</div>
+            <div className="text-xl sm:text-2xl font-mono text-ledger mt-1">{fleetHardware.aggregate.total_requests || stats.total_requests || 0}</div>
           </div>
-          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
-            <div className="text-xs text-gray-500 font-mono">RAM</div>
-            <div className="text-2xl font-mono text-poison mt-1">{fleetHardware.aggregate.total_ram_gb}GB</div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-3 sm:p-4 text-center">
+            <div className="text-[10px] sm:text-xs text-gray-500 font-mono">TOKENS</div>
+            <div className="text-xl sm:text-2xl font-mono text-poison mt-1">{fleetHardware.aggregate.total_tokens || stats.total_tokens || 0}</div>
           </div>
-          <div className="border border-white/10 bg-[#111] rounded-xl p-4 text-center">
-            <div className="text-xs text-gray-500 font-mono">MODELS</div>
-            <div className="text-2xl font-mono text-spore mt-1">{fleetHardware.aggregate.total_models}</div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-3 sm:p-4 text-center">
+            <div className="text-[10px] sm:text-xs text-gray-500 font-mono">VRAM</div>
+            <div className="text-xl sm:text-2xl font-mono text-relay mt-1">{fleetHardware.aggregate.total_vram_gb}<span className="text-xs text-gray-500">GB</span></div>
+          </div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-3 sm:p-4 text-center">
+            <div className="text-[10px] sm:text-xs text-gray-500 font-mono">MODELS</div>
+            <div className="text-xl sm:text-2xl font-mono text-spore mt-1">{fleetHardware.aggregate.total_models}</div>
           </div>
         </div>
       )}
@@ -1307,11 +1310,13 @@ OPENAI_MODEL=${models[0]?.name || 'auto'}`}</pre>
           <div className="text-xs text-gray-600">+{credits.earned?.toFixed(1) || '0'} / -{credits.spent?.toFixed(1) || '0'}</div>
         </div>
         <div className="border border-white/10 bg-[#111] rounded-xl p-4">
-          <div className="text-xs text-gray-500 font-mono">THROUGHPUT</div>
-          <div className={`text-2xl font-mono mt-1 ${stats.tps > 0 ? 'text-compute' : 'text-gray-400'}`}>
-            {stats.tps || 0} <span className="text-sm text-gray-500">T/s</span>
+          <div className="text-xs text-gray-500 font-mono">LOAD</div>
+          <div className="font-mono mt-1 flex items-baseline space-x-1.5">
+            <span className={`text-lg ${(stats.load?.req_1m || 0) > 0 ? 'text-compute' : 'text-gray-400'}`}>{stats.load?.req_1m || 0}</span>
+            <span className="text-sm text-gray-500">{stats.load?.req_5m || 0}</span>
+            <span className="text-sm text-gray-600">{stats.load?.req_15m || 0}</span>
           </div>
-          <div className="text-xs text-gray-600">{stats.avg_latency_ms ? `${stats.avg_latency_ms}ms avg` : 'idle'}</div>
+          <div className="text-[10px] text-gray-600 mt-0.5">req/min: 1m · 5m · 15m</div>
         </div>
       </div>
 
