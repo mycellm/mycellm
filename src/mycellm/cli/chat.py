@@ -291,8 +291,14 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
             messages.append({"role": "user", "content": stripped})
 
             try:
+                import json as json_mod
+                import time as time_mod
+
                 full_text = ""
                 resp_model = ""
+                node_id = ""
+                server_latency = 0
+                start_time = time_mod.time()
 
                 # Use public gateway for public bootstrap, authenticated endpoint otherwise
                 chat_path = "/v1/public/chat/completions" if endpoint.startswith("https://") else "/v1/chat/completions"
@@ -325,10 +331,15 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                             if payload == "[DONE]":
                                 break
 
-                            import json
                             try:
-                                chunk = json.loads(payload)
+                                chunk = json_mod.loads(payload)
                                 resp_model = chunk.get("model", resp_model)
+                                # Extract node attribution
+                                meta = chunk.get("mycellm", {})
+                                if meta:
+                                    node_id = meta.get("node", node_id)
+                                    if meta.get("latency_ms"):
+                                        server_latency = meta["latency_ms"]
                                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                                 content = delta.get("content", "")
                                 if content:
@@ -343,9 +354,14 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
 
                 messages.append({"role": "assistant", "content": full_text})
 
-                # Attribution line
+                # Attribution line — model, node, latency (like portal + dashboard)
+                latency = server_latency or round((time_mod.time() - start_time) * 1000)
                 via = resp_model or current_model or "auto"
-                console.print(f"\n[dim]  via {via}[/dim]\n")
+                parts = [f"[dim]{via}[/dim]"]
+                if node_id:
+                    parts.append(f"[dim]via node[/dim] [{SPORE_GREEN}]{node_id}[/{SPORE_GREEN}]")
+                parts.append(f"[dim]{latency}ms[/dim]")
+                console.print(f"\n  {' · '.join(parts)}\n")
 
             except httpx.ConnectError:
                 console.print(f"\n[red]Cannot connect to {endpoint}[/red]. Is 'mycellm serve' running?\n")
