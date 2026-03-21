@@ -1041,8 +1041,10 @@ function OverviewTab({ status, credits, fleetNodes }) {
   const [federation, setFederation] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [fleetHardware, setFleetHardware] = useState(null)
-  const [fleetView, setFleetView] = useState('grid')
-  const [fleetSort, setFleetSort] = useState('name')
+  const [fleetView, _setFleetView] = useState(() => localStorage.getItem('mycellm_fleet_view') || 'grid')
+  const setFleetView = (v) => { _setFleetView(v); localStorage.setItem('mycellm_fleet_view', v) }
+  const [fleetSort, _setFleetSort] = useState(() => localStorage.getItem('mycellm_fleet_sort') || 'name')
+  const setFleetSort = (v) => { _setFleetSort(v); localStorage.setItem('mycellm_fleet_sort', v) }
   const peers = status?.peers || []
   const models = status?.models || []
   const uptime = status?.uptime_seconds || 0
