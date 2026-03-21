@@ -13,7 +13,7 @@ import Page from '../layouts/Page.astro';
     </div>
 
     <!-- The metaphor -->
-    <div class="glass rounded-xl p-6 sm:p-8 mb-8">
+    <div class="glass rounded-xl p-6 sm:p-8 mb-10">
       <h2 class="text-xl font-bold text-white mb-4">The network beneath the forest</h2>
       <div class="space-y-4 text-sm text-gray-400 leading-relaxed">
         <p>
@@ -29,48 +29,72 @@ import Page from '../layouts/Page.astro';
     </div>
 
     <!-- Beliefs -->
-    <div class="space-y-6 mb-12">
-      <h2 class="text-xl font-bold text-white">What we believe</h2>
+    <div class="mb-12">
+      <h2 class="text-xl font-bold text-white mb-6">What we believe</h2>
 
-      <div class="space-y-4 text-sm text-gray-400 leading-relaxed">
-        <div class="flex items-start space-x-3">
-          <span class="text-compute text-lg mt-0.5 shrink-0">1</span>
-          <div>
-            <p class="text-white font-medium mb-1">AI inference should not be centralized</p>
-            <p>A handful of companies control access to AI. You pay their prices, accept their terms, trust their privacy policies. There's a better way.</p>
-          </div>
+      <div class="space-y-4">
+        <div class="glass rounded-lg p-4 sm:p-5">
+          <p class="text-white font-medium mb-1">AI inference should not be centralized</p>
+          <p class="text-sm text-gray-400 leading-relaxed">A handful of companies control access to AI. You pay their prices, accept their terms, trust their privacy policies. There's a better way.</p>
         </div>
 
-        <div class="flex items-start space-x-3">
-          <span class="text-spore text-lg mt-0.5 shrink-0">2</span>
-          <div>
-            <p class="text-white font-medium mb-1">GPU compute is everywhere</p>
-            <p>Gamers, researchers, hobbyists, studios — millions of capable GPUs sit idle most of the day. mycellm turns that spare capacity into a shared resource.</p>
-          </div>
+        <div class="glass rounded-lg p-4 sm:p-5">
+          <p class="text-white font-medium mb-1">GPU compute is everywhere</p>
+          <p class="text-sm text-gray-400 leading-relaxed">Gamers, researchers, hobbyists, studios, universities — millions of capable GPUs sit idle most of the day. mycellm turns that spare capacity into a shared resource.</p>
         </div>
 
-        <div class="flex items-start space-x-3">
-          <span class="text-relay text-lg mt-0.5 shrink-0">3</span>
-          <div>
-            <p class="text-white font-medium mb-1">Fair exchange, not charity</p>
-            <p>The credit system ensures reciprocity. Serve inference, earn credits. Consume inference, spend credits. No subscriptions, no free-riding (after the grace period).</p>
-          </div>
+        <div class="glass rounded-lg p-4 sm:p-5">
+          <p class="text-white font-medium mb-1">Fair exchange, not charity</p>
+          <p class="text-sm text-gray-400 leading-relaxed">The credit system ensures reciprocity. Serve inference, earn credits. Consume inference, spend credits. No subscriptions, no free-riding.</p>
         </div>
 
-        <div class="flex items-start space-x-3">
-          <span class="text-ledger text-lg mt-0.5 shrink-0">4</span>
-          <div>
-            <p class="text-white font-medium mb-1">Transparency requires open source</p>
-            <p>If you can't read the code, you can't trust the system. mycellm is Apache 2.0 — audit it, fork it, extend it. Privacy claims are verifiable, not promissory.</p>
-          </div>
+        <div class="glass rounded-lg p-4 sm:p-5">
+          <p class="text-white font-medium mb-1">Transparency requires open source</p>
+          <p class="text-sm text-gray-400 leading-relaxed">If you can't read the code, you can't trust the system. mycellm is Apache 2.0 — audit it, fork it, extend it. Privacy claims are verifiable, not promissory.</p>
         </div>
 
-        <div class="flex items-start space-x-3">
-          <span class="text-gray-300 text-lg mt-0.5 shrink-0">5</span>
-          <div>
-            <p class="text-white font-medium mb-1">Your network, your rules</p>
-            <p>Public network for the commons. Private networks for teams. Org networks for enterprises. Same protocol, different trust models. You choose what fits.</p>
+        <div class="glass rounded-lg p-4 sm:p-5">
+          <p class="text-white font-medium mb-1">Your network, your rules</p>
+          <p class="text-sm text-gray-400 leading-relaxed">Public network for the commons. Private networks for teams and research labs. Org networks for enterprises. Same protocol, different trust models.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Use cases -->
+    <div class="mb-12">
+      <h2 class="text-xl font-bold text-white mb-6">Built for</h2>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-relay shrink-0"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+            <span class="text-white font-medium text-sm">Universities &amp; research labs</span>
           </div>
+          <p class="text-xs text-gray-400 leading-relaxed">Pool GPU clusters across departments. Give students credit-based access. Keep research data on-premises with private networks.</p>
+        </div>
+
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-spore shrink-0"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h-8l-2 4h12z"/></svg>
+            <span class="text-white font-medium text-sm">Organizations</span>
+          </div>
+          <p class="text-xs text-gray-400 leading-relaxed">Run an org fleet with full trust. IT controls membership, models, and data handling. Employees get inference without sending data to third parties.</p>
+        </div>
+
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ledger shrink-0"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+            <span class="text-white font-medium text-sm">Contributors</span>
+          </div>
+          <p class="text-xs text-gray-400 leading-relaxed">Anyone with a GPU can earn credits by seeding. Use earned credits to run models you couldn't afford to host alone.</p>
+        </div>
+
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-compute shrink-0"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/></svg>
+            <span class="text-white font-medium text-sm">Developers</span>
+          </div>
+          <p class="text-xs text-gray-400 leading-relaxed">Drop-in OpenAI replacement. Use with any tool — OpenCode, Claude Code, LangChain, aider. One env var to switch.</p>
         </div>
       </div>
     </div>
@@ -78,20 +102,32 @@ import Page from '../layouts/Page.astro';
     <!-- Creator -->
     <div class="glass rounded-xl p-6 sm:p-8 mb-8">
       <h2 class="text-xl font-bold text-white mb-4">Created by</h2>
-      <div class="text-sm text-gray-400 leading-relaxed">
-        <p>
-          <span class="text-white">Michael Gifford-Santos</span> — building tools at the intersection of distributed systems and AI.
-        </p>
-        <p class="mt-3">
-          <a href="mailto:michael@mycellm.ai" class="text-spore hover:text-spore-glow">michael@mycellm.ai</a>
-        </p>
+      <div class="flex items-start space-x-4">
+        <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-2xl shrink-0">
+          <!-- Replace with <img src="/path/to/photo.jpg" class="w-full h-full rounded-full object-cover"> -->
+          M
+        </div>
+        <div class="text-sm text-gray-400 leading-relaxed">
+          <p class="text-white font-medium text-base">Michael Gifford-Santos</p>
+          <p class="mt-1">Building tools at the intersection of distributed systems and AI.</p>
+          <div class="mt-3 flex flex-wrap items-center gap-3">
+            <a href="mailto:michael@mycellm.ai" class="text-spore hover:text-spore-glow transition-colors flex items-center space-x-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+              <span>michael@mycellm.ai</span>
+            </a>
+            <a href="https://linkedin.com/in/michaelgsantos" target="_blank" rel="noopener" class="text-gray-500 hover:text-white transition-colors flex items-center space-x-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+              <span>LinkedIn</span>
+            </a>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Technical identity -->
+    <!-- Closing -->
     <div class="text-center text-xs text-gray-600 space-y-1">
       <p>Apache 2.0 &middot; Python &middot; QUIC &middot; Ed25519 &middot; SQLAlchemy &middot; FastAPI</p>
-      <p>The mushroom is the fruiting body. The network is underground.</p>
+      <p class="italic">The mushroom is the fruiting body. The network is underground.</p>
     </div>
 
   </div>
