@@ -10,7 +10,7 @@ mycellm is open-source, peer-to-peer software for distributed LLM inference. Whe
 
 ## What we collect
 
-### On mycellm.dev (this website)
+### On mycellm.ai and mycellm.dev
 
 - **Analytics**: We use Umami (self-hosted, privacy-focused) to collect anonymous page views. No cookies, no personal data, no tracking across sites.
 - **Chat**: Prompts submitted through the public chat are processed by distributed GPU nodes. We do not store prompt or response content on our servers. Metadata (timestamp, model, token count, latency) may be retained for service monitoring.

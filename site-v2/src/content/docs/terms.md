@@ -6,7 +6,7 @@ title: "Terms of Use"
 
 ## The short version
 
-mycellm is open-source software you run yourself. The public chat at mycellm.dev is a free demo with rate limits. Don't abuse it, don't send sensitive data through it, and don't use it for anything illegal. That's the gist.
+mycellm is open-source software you run yourself. The public chat at mycellm.ai is a free demo with rate limits. Don't abuse it, don't send sensitive data through it, and don't use it for anything illegal. That's the gist.
 
 ## Software license
 
@@ -18,7 +18,7 @@ mycellm software is licensed under the [Apache License 2.0](https://www.apache.o
 
 ## Public network and chat
 
-The public chat at mycellm.dev and the API gateway at api.mycellm.dev are provided as-is, free of charge, with the following conditions:
+The public chat at mycellm.ai and the API gateway at api.mycellm.dev are provided as-is, free of charge, with the following conditions:
 
 ### Acceptable use
 
