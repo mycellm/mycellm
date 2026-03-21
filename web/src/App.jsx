@@ -4,7 +4,7 @@ import {
   Send, Plus, Trash2, RefreshCw, MessageSquare, BarChart3, Network,
   Boxes, ChevronRight, Loader2, AlertCircle, Check, X, Eye, EyeOff,
   Radio, MonitorSmartphone, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
-  Wifi, WifiOff, Clock, TrendingUp, Heart, Gauge,
+  Wifi, WifiOff, Clock, TrendingUp, Heart, Gauge, LayoutGrid, List,
 } from 'lucide-react'
 
 // ── Constants ──
@@ -62,11 +62,12 @@ function NetworkCanvas({ selfNode, peers, fleetNodes, activityEvents }) {
       role: 'bootstrap',
       x: 0, y: 0,
       vx: 0, vy: 0,
-      r: 6,
+      r: 8,
       color: '#22C55E', // spore
       models: selfNode?.models?.length || 0,
       fixed: true,
       pulse: 0,
+      isFleet: true,
     })
 
     // QUIC peers
@@ -79,11 +80,12 @@ function NetworkCanvas({ selfNode, peers, fleetNodes, activityEvents }) {
         x: existing?.x || (Math.random() - 0.5) * 300,
         y: existing?.y || (Math.random() - 0.5) * 200,
         vx: 0, vy: 0,
-        r: 4,
+        r: 5,
         color: p.status === 'routable' ? '#3B82F6' : '#666',
         models: p.models?.length || 0,
         connectedTo: 'self',
         pulse: 0,
+        isFleet: true,
       })
     }
 
@@ -98,11 +100,12 @@ function NetworkCanvas({ selfNode, peers, fleetNodes, activityEvents }) {
         x: existing?.x || (Math.random() - 0.5) * 400,
         y: existing?.y || (Math.random() - 0.5) * 300,
         vx: 0, vy: 0,
-        r: 4,
+        r: 6,
         color: '#FACC15', // ledger (fleet = gold)
         models: (f.capabilities?.models || []).length,
         connectedTo: 'self',
         pulse: 0,
+        isFleet: true,
       })
     }
 
@@ -206,12 +209,13 @@ function NetworkCanvas({ selfNode, peers, fleetNodes, activityEvents }) {
         const target = nodes.find(n => n.id === node.connectedTo)
         if (!target) continue
 
-        const alpha = 0.08 + Math.max(node.pulse, target.pulse) * 0.15
+        const isFleetEdge = node.isFleet && target.isFleet
+        const alpha = (isFleetEdge ? 0.15 : 0.06) + Math.max(node.pulse, target.pulse) * 0.2
         ctx.beginPath()
         ctx.moveTo(cx + node.x, cy + node.y)
         ctx.lineTo(cx + target.x, cy + target.y)
         ctx.strokeStyle = `rgba(34, 197, 94, ${alpha})`
-        ctx.lineWidth = 0.8
+        ctx.lineWidth = isFleetEdge ? 1.2 : 0.5
         ctx.stroke()
       }
 
@@ -254,7 +258,8 @@ function NetworkCanvas({ selfNode, peers, fleetNodes, activityEvents }) {
         ctx.beginPath()
         ctx.arc(nx, ny, node.r, 0, Math.PI * 2)
         ctx.fillStyle = node.color
-        ctx.globalAlpha = 0.15 + node.pulse * 0.5
+        const baseAlpha = node.isFleet ? 0.35 : 0.12
+        ctx.globalAlpha = baseAlpha + node.pulse * 0.5
         ctx.fill()
         ctx.globalAlpha = 1
 
@@ -262,17 +267,17 @@ function NetworkCanvas({ selfNode, peers, fleetNodes, activityEvents }) {
         ctx.beginPath()
         ctx.arc(nx, ny, node.r, 0, Math.PI * 2)
         ctx.strokeStyle = node.color
-        ctx.lineWidth = 1
-        ctx.globalAlpha = 0.3 + node.pulse * 0.5
+        ctx.lineWidth = node.isFleet ? 1.5 : 0.5
+        ctx.globalAlpha = (node.isFleet ? 0.5 : 0.2) + node.pulse * 0.5
         ctx.stroke()
         ctx.globalAlpha = 1
 
-        // Label (only if enough nodes to be useful)
-        if (nodes.length > 1) {
-          ctx.font = '9px JetBrains Mono, monospace'
-          ctx.fillStyle = `rgba(229, 229, 229, ${0.15 + node.pulse * 0.3})`
+        // Label
+        if (node.isFleet) {
+          ctx.font = `${node.id === 'self' ? 'bold 11px' : '10px'} JetBrains Mono, monospace`
+          ctx.fillStyle = `rgba(229, 229, 229, ${0.4 + node.pulse * 0.4})`
           ctx.textAlign = 'center'
-          ctx.fillText(node.label, nx, ny + node.r + 12)
+          ctx.fillText(node.label, nx, ny + node.r + 14)
         }
       }
 
@@ -315,7 +320,8 @@ function NetworkCanvas({ selfNode, peers, fleetNodes, activityEvents }) {
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-0"
+      className="fixed inset-0 pointer-events-none"
+      style={{ zIndex: 1 }}
     />
   )
 }
@@ -1035,6 +1041,8 @@ function OverviewTab({ status, credits, fleetNodes }) {
   const [federation, setFederation] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [fleetHardware, setFleetHardware] = useState(null)
+  const [fleetView, setFleetView] = useState('grid')
+  const [fleetSort, setFleetSort] = useState('name')
   const peers = status?.peers || []
   const models = status?.models || []
   const uptime = status?.uptime_seconds || 0
@@ -1197,55 +1205,134 @@ function OverviewTab({ status, credits, fleetNodes }) {
       {/* Network Health */}
       <NetworkHealthBar connections={connections} peers={peers} fleetNodes={fleetNodes || []} />
 
-      {/* Fleet Hardware Grid (multi-node) */}
-      {fleetHardware && fleetHardware.nodes && fleetHardware.nodes.length > 1 && (
-        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3 flex items-center space-x-2">
-            <Cpu size={12} />
-            <span>Fleet Hardware ({fleetHardware.nodes.length} nodes)</span>
-            {fleetHardware.aggregate && fleetHardware.aggregate.total_tps > 0 && (
-              <span className="text-compute font-mono ml-2">{fleetHardware.aggregate.total_tps} T/s aggregate</span>
+      {/* Fleet Hardware */}
+      {fleetHardware && fleetHardware.nodes && fleetHardware.nodes.length > 1 && (() => {
+        const sortDir = fleetSort.startsWith('-') ? 'desc' : 'asc'
+        const sortKey = fleetSort.replace(/^-/, '')
+        const sorted = [...fleetHardware.nodes].sort((a, b) => {
+          // Self always first
+          if (a.type === 'self') return -1
+          if (b.type === 'self') return 1
+          let av, bv
+          switch (sortKey) {
+            case 'name': av = (a.name || '').toLowerCase(); bv = (b.name || '').toLowerCase(); break
+            case 'gpu': av = (a.gpu || '').toLowerCase(); bv = (b.gpu || '').toLowerCase(); break
+            case 'backend': av = (a.backend || '').toLowerCase(); bv = (b.backend || '').toLowerCase(); break
+            case 'ram': av = a.ram_gb || 0; bv = b.ram_gb || 0; break
+            case 'tps': av = a.tps || 0; bv = b.tps || 0; break
+            case 'models': av = (a.models || []).length; bv = (b.models || []).length; break
+            case 'status': av = a.online !== false ? 1 : 0; bv = b.online !== false ? 1 : 0; break
+            default: av = (a.name || ''); bv = (b.name || '')
+          }
+          if (av < bv) return sortDir === 'asc' ? -1 : 1
+          if (av > bv) return sortDir === 'asc' ? 1 : -1
+          return 0
+        })
+        const toggleSort = (key) => {
+          if (sortKey === key) {
+            setFleetSort(sortDir === 'asc' ? `-${key}` : key)
+          } else {
+            setFleetSort(key)
+          }
+        }
+        const SortIcon = ({ col }) => {
+          if (sortKey !== col) return <ArrowUpDown size={10} className="text-gray-600 ml-1" />
+          return sortDir === 'asc' ? <ArrowUp size={10} className="text-spore ml-1" /> : <ArrowDown size={10} className="text-spore ml-1" />
+        }
+        return (
+          <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest flex items-center space-x-2">
+                <Cpu size={12} />
+                <span>Fleet Hardware ({fleetHardware.nodes.length} nodes)</span>
+                {fleetHardware.aggregate && fleetHardware.aggregate.total_tps > 0 && (
+                  <span className="text-compute font-mono ml-2">{fleetHardware.aggregate.total_tps} T/s aggregate</span>
+                )}
+              </h2>
+              <div className="flex items-center border border-white/10 rounded-lg overflow-hidden">
+                <button onClick={() => setFleetView('grid')}
+                  className={`p-1.5 transition-colors ${fleetView === 'grid' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                  title="Grid view">
+                  <LayoutGrid size={14} />
+                </button>
+                <button onClick={() => setFleetView('list')}
+                  className={`p-1.5 transition-colors ${fleetView === 'list' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                  title="List view">
+                  <List size={14} />
+                </button>
+              </div>
+            </div>
+
+            {fleetView === 'grid' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {sorted.map((n, i) => (
+                  <HardwareCard key={i} node={n} />
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs font-mono">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-white/5">
+                      <th className="text-left py-2 px-2 font-normal w-6"></th>
+                      <th className="text-left py-2 px-2 font-normal cursor-pointer select-none" onClick={() => toggleSort('name')}>
+                        <span className="flex items-center">Node<SortIcon col="name" /></span>
+                      </th>
+                      <th className="text-left py-2 px-2 font-normal cursor-pointer select-none" onClick={() => toggleSort('gpu')}>
+                        <span className="flex items-center">GPU<SortIcon col="gpu" /></span>
+                      </th>
+                      <th className="text-left py-2 px-2 font-normal cursor-pointer select-none" onClick={() => toggleSort('backend')}>
+                        <span className="flex items-center">Backend<SortIcon col="backend" /></span>
+                      </th>
+                      <th className="text-right py-2 px-2 font-normal cursor-pointer select-none" onClick={() => toggleSort('ram')}>
+                        <span className="flex items-center justify-end">RAM<SortIcon col="ram" /></span>
+                      </th>
+                      <th className="text-right py-2 px-2 font-normal cursor-pointer select-none" onClick={() => toggleSort('tps')}>
+                        <span className="flex items-center justify-end">T/s<SortIcon col="tps" /></span>
+                      </th>
+                      <th className="text-right py-2 px-2 font-normal cursor-pointer select-none" onClick={() => toggleSort('models')}>
+                        <span className="flex items-center justify-end">Models<SortIcon col="models" /></span>
+                      </th>
+                      <th className="text-right py-2 px-2 font-normal cursor-pointer select-none" onClick={() => toggleSort('status')}>
+                        <span className="flex items-center justify-end">Status<SortIcon col="status" /></span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((n, i) => {
+                      const backendColors = { cuda: 'text-spore', metal: 'text-relay', rocm: 'text-poison', cpu: 'text-gray-500' }
+                      return (
+                        <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-2 px-2">
+                            <div className={`w-2 h-2 rounded-full ${n.online !== false ? 'bg-spore' : 'bg-gray-600'}`} />
+                          </td>
+                          <td className="py-2 px-2 text-white">{n.name}</td>
+                          <td className="py-2 px-2 text-gray-300">{n.gpu || 'CPU'}</td>
+                          <td className="py-2 px-2">
+                            <span className={backendColors[n.backend] || 'text-gray-500'}>{(n.backend || 'cpu').toUpperCase()}</span>
+                          </td>
+                          <td className="py-2 px-2 text-right text-gray-400">{n.ram_gb ? `${n.ram_gb} GB` : '-'}</td>
+                          <td className="py-2 px-2 text-right text-compute">{n.tps > 0 ? n.tps : '-'}</td>
+                          <td className="py-2 px-2 text-right text-gray-400">{(n.models || []).length}</td>
+                          <td className="py-2 px-2 text-right">
+                            <span className={n.online !== false ? 'text-spore' : 'text-gray-500'}>
+                              {n.online !== false ? 'Online' : 'Offline'}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {fleetHardware.nodes.map((n, i) => (
-              <HardwareCard key={i} node={n} />
-            ))}
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Single node hardware card (standalone) */}
       {fleetHardware && fleetHardware.nodes && fleetHardware.nodes.length === 1 && (
         <HardwareCard node={fleetHardware.nodes[0]} />
-      )}
-
-      {/* Legacy Fleet Grid fallback (when no hardware endpoint) */}
-      {!fleetHardware && fleetGrid.length > 1 && (
-        <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-          <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3">Fleet ({fleetGrid.length} nodes)</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-            {fleetGrid.map(node => (
-              <button key={node.id} onClick={() => setSelectedNode(node)}
-                className={`text-left bg-black border rounded-lg p-3 hover:bg-white/[0.03] transition-colors ${
-                  node.type === 'self' ? 'border-spore/30' : node.status === 'fleet' ? 'border-ledger/20' : 'border-white/10'
-                }`}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm">{roleIcons[node.role] || '\u{1F5A5}\uFE0F'}</span>
-                    <span className="font-mono text-xs text-white truncate max-w-[100px]">{node.name}</span>
-                  </div>
-                  <div className={`w-2 h-2 rounded-full ${statusDots[node.status] || 'bg-gray-600'}`} />
-                </div>
-                <div className="text-xs text-gray-500">
-                  {node.modelCount} model{node.modelCount !== 1 ? 's' : ''}
-                  <span className="mx-1">&middot;</span>
-                  <span className={node.type === 'self' ? 'text-spore' : node.type === 'fleet' ? 'text-ledger' : 'text-relay'}>{node.type}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
       )}
 
       {/* Activity Feed */}
@@ -2781,7 +2868,7 @@ export default function App() {
 
   return (
     <NodeRegistryContext.Provider value={nodeRegistry}>
-      <div className="min-h-screen bg-void text-console font-sans relative">
+      <div className="min-h-screen text-console font-sans relative">
         <NetworkCanvas
           selfNode={status}
           peers={status?.peers || []}
