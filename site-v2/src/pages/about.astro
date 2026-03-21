@@ -108,33 +108,68 @@ import Page from '../layouts/Page.astro';
             A single NVIDIA RTX 4090 generates ~100 tokens/sec on a 7B model. Ten nodes = 1,000 T/s. A hundred nodes = 10,000 T/s — comparable to a small cloud inference cluster, with zero infrastructure cost.
           </p>
 
-          <!-- Scale chart — bars anchored to bottom -->
-          <div class="mt-4 mb-4 glass rounded-lg p-4">
-            <div class="flex items-end gap-3 sm:gap-4" style="height: 140px;">
-              <div class="flex-1 flex flex-col items-center justify-end h-full">
-                <div class="w-full bg-spore/30 rounded-t min-h-[4px]" style="height: 12px;"></div>
-                <div class="text-center mt-2"><div class="text-[10px] text-gray-500">3</div><div class="text-[10px] text-spore font-mono font-bold">300</div></div>
+          <!-- Quality comparison chart -->
+          <div class="mt-4 mb-4 glass rounded-lg p-4 sm:p-5">
+            <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">What the network can run vs paid APIs</div>
+            <div class="space-y-3">
+              <!-- Row: network tier → equivalent quality -->
+              <div class="flex items-center gap-3">
+                <div class="w-20 sm:w-24 shrink-0 text-right">
+                  <div class="text-xs text-gray-400">3-10 nodes</div>
+                  <div class="text-[10px] text-gray-600">8GB each</div>
+                </div>
+                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
+                  <div class="h-full bg-spore/40 rounded-full" style="width: 55%"></div>
+                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">7-8B models (Qwen 7B, Llama 8B, Phi-4)</span>
+                </div>
               </div>
-              <div class="flex-1 flex flex-col items-center justify-end h-full">
-                <div class="w-full bg-spore/40 rounded-t" style="height: 28px;"></div>
-                <div class="text-center mt-2"><div class="text-[10px] text-gray-500">10</div><div class="text-[10px] text-spore font-mono font-bold">1K</div></div>
+              <div class="flex items-center gap-3">
+                <div class="w-20 sm:w-24 shrink-0 text-right">
+                  <div class="text-xs text-gray-400">10-50 nodes</div>
+                  <div class="text-[10px] text-gray-600">16GB+ each</div>
+                </div>
+                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
+                  <div class="h-full bg-spore/60 rounded-full" style="width: 72%"></div>
+                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">24-34B models (Mistral Small, Qwen 32B)</span>
+                </div>
               </div>
-              <div class="flex-1 flex flex-col items-center justify-end h-full">
-                <div class="w-full bg-spore/50 rounded-t" style="height: 56px;"></div>
-                <div class="text-center mt-2"><div class="text-[10px] text-gray-500">50</div><div class="text-[10px] text-spore font-mono font-bold">5K</div></div>
+              <div class="flex items-center gap-3">
+                <div class="w-20 sm:w-24 shrink-0 text-right">
+                  <div class="text-xs text-gray-400">50-100 nodes</div>
+                  <div class="text-[10px] text-gray-600">sharded</div>
+                </div>
+                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
+                  <div class="h-full bg-relay/50 rounded-full" style="width: 88%"></div>
+                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">70B models (Llama 70B, Qwen 72B)</span>
+                </div>
               </div>
-              <div class="flex-1 flex flex-col items-center justify-end h-full">
-                <div class="w-full bg-spore/70 rounded-t" style="height: 84px;"></div>
-                <div class="text-center mt-2"><div class="text-[10px] text-gray-500">100</div><div class="text-[10px] text-relay font-mono font-bold">10K</div></div>
-              </div>
-              <div class="flex-1 flex flex-col items-center justify-end h-full">
-                <div class="w-full bg-spore rounded-t" style="height: 112px;"></div>
-                <div class="text-center mt-2"><div class="text-[10px] text-gray-500">1K</div><div class="text-[10px] text-ledger font-mono font-bold">100K</div></div>
+              <div class="flex items-center gap-3">
+                <div class="w-20 sm:w-24 shrink-0 text-right">
+                  <div class="text-xs text-gray-400">1K+ nodes</div>
+                  <div class="text-[10px] text-gray-600">ensemble</div>
+                </div>
+                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
+                  <div class="h-full bg-ledger/50 rounded-full" style="width: 95%"></div>
+                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">405B+ models, best-of-N routing</span>
+                </div>
               </div>
             </div>
-            <div class="border-t border-white/10 mt-3 pt-2 flex justify-between text-[10px] text-gray-600">
-              <span>Nodes →</span>
-              <span>Tokens/sec (Tier 1, consumer GPUs)</span>
+            <!-- Reference lines -->
+            <div class="mt-4 pt-3 border-t border-white/5 space-y-1.5">
+              <div class="flex items-center gap-2 text-[10px]">
+                <div class="w-20 sm:w-24 text-right text-gray-600">For comparison</div>
+                <div class="flex-1 flex items-center gap-3 text-gray-500">
+                  <span>GPT-3.5 ≈ 7B open</span>
+                  <span class="text-gray-700">|</span>
+                  <span>GPT-4o ≈ 70B open</span>
+                  <span class="text-gray-700">|</span>
+                  <span>Sonnet ≈ 70B+ open</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 text-[10px]">
+                <div class="w-20 sm:w-24 text-right text-gray-600">Cost</div>
+                <div class="flex-1 text-spore font-medium">$0 on mycellm (credit-based) vs $2-75 / million tokens on paid APIs</div>
+              </div>
             </div>
           </div>
 
