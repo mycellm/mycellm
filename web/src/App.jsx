@@ -769,10 +769,12 @@ function Sparkline({ data, color = '#22C55E', height = 32, width = 120 }) {
 }
 
 function ActivityFeed({ events }) {
-  const endRef = useRef(null)
+  const containerRef = useRef(null)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Scroll within the feed container only, not the page
+    const el = containerRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [events])
 
   const typeColors = {
@@ -839,7 +841,7 @@ function ActivityFeed({ events }) {
   }
 
   return (
-    <div className="space-y-1 max-h-[250px] overflow-y-auto custom-scrollbar text-xs font-mono">
+    <div ref={containerRef} className="space-y-1 max-h-[250px] overflow-y-auto custom-scrollbar text-xs font-mono">
       {events.length === 0 && (
         <div className="text-gray-600 text-center py-4">No activity yet. Send an inference request to see events.</div>
       )}
@@ -854,7 +856,6 @@ function ActivityFeed({ events }) {
           </span>
         </div>
       ))}
-      <div ref={endRef} />
     </div>
   )
 }
@@ -3561,28 +3562,29 @@ export default function App() {
         />
         {/* Header */}
         <header className="border-b border-white/10 bg-void/80 backdrop-blur-md sticky top-0 z-50 relative">
-          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <img src="/brand/mycellm-h-R.svg" alt="mycellm" className="h-6" />
-              <div className="h-4 w-px bg-white/20 mx-1" />
-              <span className="font-mono text-xs bg-white/10 text-gray-300 px-2 py-1 rounded">{nodeName}</span>
-              {peerId && <span className="font-mono text-xs text-gray-600 hidden md:inline">{peerId.slice(0, 12)}...</span>}
+          <div className="max-w-7xl mx-auto px-4 h-12 sm:h-14 flex items-center justify-between">
+            <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+              <img src="/brand/mycellm-h-R.svg" alt="mycellm" className="h-5 sm:h-6 shrink-0" />
+              <div className="h-4 w-px bg-white/20 mx-1 hidden sm:block" />
+              <span className="font-mono text-xs bg-white/10 text-gray-300 px-2 py-1 rounded truncate max-w-[100px] sm:max-w-none">{nodeName}</span>
+              {peerId && <span className="font-mono text-xs text-gray-600 hidden lg:inline">{peerId.slice(0, 12)}...</span>}
             </div>
-            <div className="flex items-center space-x-5 font-mono text-sm">
-              <div className="flex items-center space-x-1.5 text-relay">
-                <Activity size={13} />
-                <span>{status?.peers?.length || 0} peers</span>
+            <div className="flex items-center space-x-3 sm:space-x-5 font-mono text-xs sm:text-sm shrink-0">
+              <div className="flex items-center space-x-1 sm:space-x-1.5 text-relay">
+                <Activity size={12} />
+                <span className="hidden sm:inline">{status?.peers?.length || 0} peers</span>
+                <span className="sm:hidden">{status?.peers?.length || 0}</span>
               </div>
-              <div className="flex items-center space-x-1.5 text-relay">
-                <Radio size={13} />
+              <div className="flex items-center space-x-1 sm:space-x-1.5 text-relay hidden sm:flex">
+                <Radio size={12} />
                 <span>{fleetCount} fleet</span>
               </div>
-              <div className="flex items-center space-x-1.5 text-ledger drop-shadow-[0_0_8px_rgba(250,204,21,0.15)]">
-                <Key size={13} />
-                <span>{credits.balance?.toFixed(2)}</span>
+              <div className="flex items-center space-x-1 sm:space-x-1.5 text-ledger">
+                <Key size={12} />
+                <span>{credits.balance?.toFixed(0)}</span>
               </div>
-              <div className={`flex items-center space-x-1.5 ${status ? 'text-spore' : 'text-gray-600'}`}>
-                <Shield size={13} />
+              <div className={`flex items-center space-x-1 ${status ? 'text-spore' : 'text-gray-600'}`}>
+                <Shield size={12} />
                 <span className="hidden sm:inline">{status ? 'Online' : 'Offline'}</span>
               </div>
             </div>
@@ -3591,16 +3593,16 @@ export default function App() {
 
         {/* Tab nav */}
         <nav className="border-b border-white/5 bg-void/60 relative z-10">
-          <div className="max-w-7xl mx-auto px-4 flex space-x-1 overflow-x-auto">
+          <div className="max-w-7xl mx-auto px-2 sm:px-4 flex space-x-0.5 sm:space-x-1 overflow-x-auto scrollbar-none">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+                className={`flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
                   tab === t.id
                     ? 'border-spore text-white'
                     : 'border-transparent text-gray-500 hover:text-gray-300'
                 }`}>
                 <t.icon size={14} />
-                <span>{t.label}</span>
+                <span className="hidden sm:inline">{t.label}</span>
               </button>
             ))}
           </div>

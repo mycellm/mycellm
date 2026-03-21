@@ -27,6 +27,10 @@ body {
   color: black;
 }
 
+/* Hide scrollbar for horizontal tab nav */
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Chat markdown rendering */
 .chat-md p { margin: 0.4em 0; }
 .chat-md p:first-child { margin-top: 0; }
