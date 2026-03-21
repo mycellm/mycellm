@@ -103,6 +103,13 @@ class MycellmSettings(BaseSettings):
     # PostgreSQL: "postgresql+asyncpg://user:pass@host/dbname"
     db_url: str = ""
 
+    # Logging
+    log_level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR
+
+    # HuggingFace token (MYCELLM_HF_TOKEN env var)
+    # Unlocks gated models, higher rate limits, faster downloads
+    hf_token: str = ""
+
     # Security — optional API key (MYCELLM_API_KEY env var)
     # When set, all API endpoints (except /health) require Authorization: Bearer <key>
     api_key: str = ""

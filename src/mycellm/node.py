@@ -146,6 +146,9 @@ class MycellmNode:
         # Managed node registry (bootstrap/admin node tracks announced nodes)
         self.node_registry: dict[str, dict] = {}  # peer_id -> node info
 
+        # Encrypted secret store (initialized after identity load)
+        self.secret_store = None
+
         # API server ref for shutdown
         self._api_server = None
 
@@ -156,8 +159,9 @@ class MycellmNode:
         return time.time() - self._start_time
 
     def _setup_logging(self) -> None:
+        level = getattr(logging, self._settings.log_level.upper(), logging.INFO)
         logging.basicConfig(
-            level=logging.INFO,
+            level=level,
             format="%(message)s",
             handlers=[
                 RichHandler(console=console, show_time=True, show_path=False),
@@ -188,6 +192,16 @@ class MycellmNode:
             f"{styled_tag('BOOT')} Device '{self.device_name}' loaded "
             f"(peer: {self.peer_id[:16]}...)"
         )
+
+        # Initialize encrypted secret store
+        from mycellm.secrets import SecretStore
+        self.secret_store = SecretStore(
+            self._settings.data_dir / "secrets.json",
+            self.account_key,
+        )
+        n_secrets = len(self.secret_store.list_names())
+        if n_secrets:
+            logger.info(f"{styled_tag('SECURITY')} Secret store loaded ({n_secrets} key(s))")
 
     def _detect_hardware(self) -> HardwareInfo:
         """Detect GPU hardware (CUDA, Metal, or CPU)."""

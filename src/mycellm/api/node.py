@@ -84,6 +84,11 @@ async def load_model(request: Request):
     model_path = body.get("model_path", "")
     name = body.get("name")
 
+    # Resolve secret references in api_key (e.g. "secret:openrouter" → actual key)
+    api_key = body.get("api_key", "")
+    if api_key and hasattr(node, "secret_store") and node.secret_store:
+        api_key = node.secret_store.resolve(api_key)
+
     # Local backends require model_path; remote backends don't
     if backend_type == "llama.cpp" and not model_path:
         return {"error": "model_path required for llama.cpp backend"}
@@ -121,7 +126,7 @@ async def load_model(request: Request):
     try:
         loaded_name = await node.inference.load_model(
             model_path, name=name, backend_type=backend_type,
-            api_base=body.get("api_base", ""), api_key=body.get("api_key", ""),
+            api_base=body.get("api_base", ""), api_key=api_key,
             api_model=body.get("api_model", ""), ctx_len=body.get("ctx_len", 4096),
             timeout=body.get("timeout", 120),
         )
@@ -204,7 +209,11 @@ async def update_model(request: Request):
     # Merge overrides — only update fields that were provided
     if body.get("api_base"): config["api_base"] = body["api_base"]
     if body.get("api_model"): config["api_model"] = body["api_model"]
-    if body.get("api_key"): config["api_key"] = body["api_key"]
+    if body.get("api_key"):
+        new_key = body["api_key"]
+        if hasattr(node, "secret_store") and node.secret_store:
+            new_key = node.secret_store.resolve(new_key)
+        config["api_key"] = new_key
     if body.get("ctx_len"): config["ctx_len"] = body["ctx_len"]
 
     # Unload if currently loaded

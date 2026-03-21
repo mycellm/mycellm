@@ -18,6 +18,16 @@ router = APIRouter()
 _downloads: dict[str, dict] = {}  # download_id -> {status, progress, ...}
 
 
+def _hf_headers() -> dict[str, str]:
+    """Build HuggingFace API headers with optional auth token."""
+    from mycellm.config import get_settings
+    settings = get_settings()
+    headers = {}
+    if settings.hf_token:
+        headers["Authorization"] = f"Bearer {settings.hf_token}"
+    return headers
+
+
 def _get_node_resources() -> dict:
     """Get available RAM and disk space for compatibility checks."""
     import platform
@@ -76,7 +86,7 @@ async def search_models(request: Request, q: str = "", limit: int = 20):
         return {"models": [], "query": ""}
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, headers=_hf_headers()) as client:
             resp = await client.get(
                 "https://huggingface.co/api/models",
                 params={
@@ -144,7 +154,7 @@ async def list_repo_files(repo_id: str, request: Request):
     import re
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, headers=_hf_headers()) as client:
             # Use tree API for file sizes
             tree_resp = await client.get(f"https://huggingface.co/api/models/{repo_id}/tree/main")
             tree_resp.raise_for_status()
@@ -280,7 +290,7 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
     info = _downloads[download_id]
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=3600.0), follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=3600.0), follow_redirects=True, headers=_hf_headers()) as client:
             async with client.stream("GET", url) as resp:
                 resp.raise_for_status()
                 total = int(resp.headers.get("content-length", 0))
