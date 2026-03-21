@@ -73,6 +73,8 @@ async def debug_config(request: Request):
         "db_backend": db_backend,
         "log_level": node._settings.log_level,
         "no_log_inference": node._settings.no_log_inference,
+        "admission_require_receipts": node._settings.admission_require_receipts,
+        "admission_grace_requests": node._settings.admission_grace_requests,
         "telemetry": node._settings.telemetry,
         "announce_task_alive": node._announce_task is not None and not node._announce_task.done() if hasattr(node, '_announce_task') else False,
     }

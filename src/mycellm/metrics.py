@@ -116,6 +116,14 @@ hardware_ram_total_gb = Gauge(
 )
 
 # --- Uptime ---
+# --- Admission ---
+admission_checks_total = Counter(
+    "mycellm_admission_checks_total",
+    "Peer admission checks on inference requests",
+    ["result"],  # allowed, denied
+    registry=REGISTRY,
+)
+
 # --- Receipts ---
 receipts_received_total = Counter(
     "mycellm_receipts_received_total",

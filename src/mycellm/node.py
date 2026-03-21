@@ -408,6 +408,35 @@ class MycellmNode:
         messages = payload.get("messages", [])
         stream = payload.get("stream", False)
 
+        # Admission control — check peer reputation before serving
+        admission = self.reputation.check_admission(
+            msg.from_peer,
+            min_score=self._settings.admission_min_score,
+            require_receipts=self._settings.admission_require_receipts,
+            grace_requests=self._settings.admission_grace_requests,
+        )
+        try:
+            from mycellm.metrics import admission_checks_total
+            admission_checks_total.labels(result="allowed" if admission.allowed else "denied").inc()
+        except ImportError:
+            pass
+
+        if not admission.allowed:
+            logger.info(
+                f"{styled_tag('SECURITY')} Refused inference to {msg.from_peer[:16]}... "
+                f"({admission.reason})"
+            )
+            err = error_message(
+                self.peer_id, msg.id, ErrorCode.INSUFFICIENT_CREDIT,
+                f"Admission denied: {admission.reason}",
+            )
+            await protocol.reply_on_stream(stream_id, err)
+            self.activity.record(
+                EventType.INFERENCE_FAILED, model=model, source="peer",
+                peer=msg.from_peer[:16], reason=f"admission:{admission.reason}",
+            )
+            return
+
         self.activity.record(EventType.INFERENCE_START, model=model, source="peer", peer=msg.from_peer[:16])
         _infer_start = time.time()
 

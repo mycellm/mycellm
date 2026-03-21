@@ -85,6 +85,16 @@ class PeerReputation:
         }
 
 
+class AdmissionResult:
+    """Result of a peer admission check."""
+    __slots__ = ("allowed", "reason", "score")
+
+    def __init__(self, allowed: bool, reason: str = "", score: float = 0.0):
+        self.allowed = allowed
+        self.reason = reason
+        self.score = score
+
+
 class ReputationTracker:
     """Tracks reputation scores for all known peers."""
 
@@ -112,3 +122,58 @@ class ReputationTracker:
         return [rep.to_dict() for rep in sorted(
             self._peers.values(), key=lambda r: r.score, reverse=True
         )]
+
+    def check_admission(
+        self,
+        peer_id: str,
+        min_score: float = 0.0,
+        require_receipts: bool = False,
+        grace_requests: int = 5,
+    ) -> AdmissionResult:
+        """Check if a peer should be served based on reputation.
+
+        Policy:
+          - New peers (< grace_requests interactions): always allowed
+            (everyone starts somewhere)
+          - Peers with receipts (they've served others): always allowed
+          - Peers below min_score after grace period: rejected
+          - Peers who only consume and never seed: rejected after grace
+
+        Args:
+            peer_id: The requesting peer.
+            min_score: Minimum reputation score (0.0 = no minimum).
+            require_receipts: If True, reject peers with zero receipts
+                after the grace period.
+            grace_requests: Number of free requests before enforcement.
+
+        Returns:
+            AdmissionResult with allowed flag and reason.
+        """
+        rep = self.get(peer_id)
+        score = rep.score
+
+        # Grace period for new peers — let them try the network
+        if rep.total_requests < grace_requests:
+            return AdmissionResult(True, "grace_period", score)
+
+        # Peers who have served others (have receipts) are good citizens
+        if rep.receipt_count > 0:
+            return AdmissionResult(True, "has_receipts", score)
+
+        # Score check
+        if min_score > 0 and score < min_score:
+            return AdmissionResult(
+                False,
+                f"reputation_too_low ({score:.2f} < {min_score})",
+                score,
+            )
+
+        # Require receipts — reject freeloaders who only consume
+        if require_receipts and rep.receipt_count == 0 and rep.total_requests >= grace_requests:
+            return AdmissionResult(
+                False,
+                "no_contribution (consuming without seeding)",
+                score,
+            )
+
+        return AdmissionResult(True, "ok", score)

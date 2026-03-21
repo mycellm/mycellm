@@ -122,6 +122,14 @@ class MycellmSettings(BaseSettings):
     # Credit
     initial_credits: float = 100.0
 
+    # Admission control — seeder-side peer screening
+    # Minimum reputation score to serve a peer (0.0 = no minimum)
+    admission_min_score: float = 0.0
+    # Require peers to have receipts (proof of seeding) after grace period
+    admission_require_receipts: bool = False
+    # Free requests before admission policy kicks in
+    admission_grace_requests: int = 5
+
     # Privacy — no-log policy for inference content
     # When true, prompt/response content is never written to disk or logs
     no_log_inference: bool = True
