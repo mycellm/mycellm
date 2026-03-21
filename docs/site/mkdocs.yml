@@ -1,0 +1,78 @@
+site_name: mycellm_ docs
+site_url: https://docs.mycellm.dev
+site_description: Documentation for the mycellm distributed LLM inference network
+repo_url: https://repo.zetaix.com/mycellm/mycellm
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: custom
+    accent: custom
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/git-alt
+  logo: assets/mycellm-logo.svg
+  favicon: assets/favicon.svg
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Quick Start:
+    - Installation: quickstart/install.md
+    - First Chat: quickstart/chat.md
+    - Join the Network: quickstart/join.md
+  - Configuration:
+    - Settings: config/settings.md
+    - Secrets: config/secrets.md
+  - API:
+    - Overview: api/overview.md
+    - Chat Completions: api/chat.md
+    - Models: api/models.md
+    - Public Gateway: api/gateway.md
+  - Integrations:
+    - OpenAI SDK: integrations/openai.md
+    - OpenCode: integrations/opencode.md
+    - Claude Code: integrations/claude-code.md
+    - Docker: integrations/docker.md
+  - CLI:
+    - Reference: cli/reference.md
+    - Chat REPL: cli/chat.md
+  - Architecture:
+    - Overview: architecture/overview.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://repo.zetaix.com/mycellm/mycellm
