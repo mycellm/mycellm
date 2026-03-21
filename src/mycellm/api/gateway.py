@@ -80,27 +80,44 @@ def _record_usage(ip: str, tokens: int) -> None:
     state["requests_minute"] += 1
 
 
-def _select_tier1_model(node) -> str | None:
+def _select_tier1_model(node) -> tuple[str | None, str | None]:
     """Select the best available Tier 1 model.
 
-    Prefers models with known param counts, falls back to any loaded model.
+    Checks local models first, then fleet nodes.
+    Returns (model_name, fleet_addr) — fleet_addr is None for local models.
     """
-    candidates = []
+    # Check local models
+    local_candidates = []
     for m in node.inference.loaded_models:
         tier = classify_tier(m.param_count_b)
         if tier == 1:
-            candidates.append(m)
+            local_candidates.append(m)
 
-    if not candidates:
-        # Fallback: if no model has param_count_b set, use any loaded model
-        # (common when models are loaded without metadata)
-        if node.inference.loaded_models:
-            return node.inference.loaded_models[0].name
-        return None
+    if local_candidates:
+        local_candidates.sort(key=lambda m: m.param_count_b, reverse=True)
+        return local_candidates[0].name, None
 
-    # Prefer largest Tier 1 model (better quality within tier)
-    candidates.sort(key=lambda m: m.param_count_b, reverse=True)
-    return candidates[0].name
+    # Fallback: any local model (param_count_b unknown)
+    if node.inference.loaded_models:
+        return node.inference.loaded_models[0].name, None
+
+    # Check fleet nodes for Tier 1 models
+    import time as _time
+    for entry in node.node_registry.values():
+        if entry.get("status") != "approved":
+            continue
+        if _time.time() - entry.get("last_seen", 0) > 120:
+            continue  # offline
+        for m in entry.get("capabilities", {}).get("models", []):
+            if isinstance(m, dict):
+                param_b = m.get("param_count_b", 0)
+                tier = classify_tier(param_b)
+                if tier <= 1:  # Tier 1 or unknown
+                    return m.get("name", ""), entry.get("api_addr", "")
+            elif isinstance(m, str):
+                return m, entry.get("api_addr", "")
+
+    return None, None
 
 
 @router.post("/chat/completions")
@@ -138,7 +155,7 @@ async def public_chat(request: Request):
         return JSONResponse(status_code=429, content={"error": {"message": reason}})
 
     # Select model (Tier 1 only, user cannot choose)
-    model_name = _select_tier1_model(node)
+    model_name, fleet_addr = _select_tier1_model(node)
     if not model_name:
         return JSONResponse(status_code=503, content={
             "error": {"message": "No models currently available. Try again later."}
@@ -151,13 +168,25 @@ async def public_chat(request: Request):
     start_time = time.time()
     request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
 
+    # Route to fleet node if model is remote
+    if fleet_addr:
+        if stream:
+            return await _stream_fleet(
+                node, request_id, model_name, fleet_addr, messages,
+                temperature, max_tokens, client_ip, start_time,
+            )
+        return await _proxy_fleet(
+            node, request_id, model_name, fleet_addr, messages,
+            temperature, max_tokens, client_ip, start_time,
+        )
+
     if stream:
         return await _stream_public(
             node, request_id, model_name, messages,
             temperature, max_tokens, client_ip, start_time,
         )
 
-    # Non-streaming
+    # Non-streaming local inference
     try:
         inf_req = InferenceRequest(
             model=model_name,
@@ -182,27 +211,9 @@ async def public_chat(request: Request):
             tokens=result.completion_tokens, latency_ms=latency_ms,
         )
 
-        # Stripped response — no peer IDs, routing info, or credit data
-        return {
-            "id": request_id,
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model_name,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": result.text},
-                "finish_reason": result.finish_reason,
-            }],
-            "usage": {
-                "prompt_tokens": result.prompt_tokens,
-                "completion_tokens": result.completion_tokens,
-                "total_tokens": total_tokens,
-            },
-            "mycellm": {
-                "latency_ms": latency_ms,
-                "served_by": "mycellm-public",
-            },
-        }
+        return _clean_response(request_id, model_name, result.text,
+                               result.finish_reason, result.prompt_tokens,
+                               result.completion_tokens, latency_ms)
 
     except Exception as e:
         logger.warning(f"Public gateway inference failed: {e}")
@@ -212,8 +223,154 @@ async def public_chat(request: Request):
         })
 
 
+def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, completion_tokens, latency_ms):
+    """Build a clean, metadata-stripped OpenAI-compatible response."""
+    return {
+        "id": request_id,
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_name,
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": text},
+            "finish_reason": finish_reason or "stop",
+        }],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+        "mycellm": {
+            "latency_ms": latency_ms,
+            "served_by": "mycellm-public",
+        },
+    }
+
+
+async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, temperature, max_tokens, client_ip, start_time):
+    """Proxy a non-streaming request to a fleet node."""
+    import httpx
+    from mycellm.activity import EventType
+
+    base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(f"{base}/v1/chat/completions", json={
+                "model": model_name,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+            })
+            resp.raise_for_status()
+            data = resp.json()
+
+        latency_ms = round((time.time() - start_time) * 1000)
+        choice = data.get("choices", [{}])[0]
+        usage = data.get("usage", {})
+        total_tokens = usage.get("total_tokens", 0)
+
+        _record_usage(client_ip, total_tokens)
+        node.activity.record(
+            EventType.INFERENCE_COMPLETE,
+            model=model_name, source="public_gateway_fleet",
+            tokens=usage.get("completion_tokens", 0), latency_ms=latency_ms,
+        )
+
+        return _clean_response(
+            request_id, model_name,
+            choice.get("message", {}).get("content", ""),
+            choice.get("finish_reason", "stop"),
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+            latency_ms,
+        )
+
+    except Exception as e:
+        logger.warning(f"Fleet proxy to {fleet_addr} failed: {e}")
+        node.activity.record(EventType.INFERENCE_FAILED, model=model_name, source="public_gateway_fleet")
+        return JSONResponse(status_code=503, content={
+            "error": {"message": "Fleet node unavailable. Try again."}
+        })
+
+
+async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temperature, max_tokens, client_ip, start_time):
+    """Stream a response from a fleet node via SSE proxy."""
+    import httpx
+    from fastapi.responses import StreamingResponse
+    from mycellm.activity import EventType
+
+    async def generate():
+        total_tokens = 0
+        base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=120.0)) as client:
+                async with client.stream("POST", f"{base}/v1/chat/completions", json={
+                    "model": model_name,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": True,
+                }) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        payload = line[6:].strip()
+                        if payload == "[DONE]":
+                            break
+
+                        try:
+                            chunk = json.loads(payload)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            finish = chunk.get("choices", [{}])[0].get("finish_reason")
+                            if content:
+                                total_tokens += len(content.split())
+
+                            # Re-wrap with our request_id (strip internal IDs)
+                            out = {
+                                "id": request_id,
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": model_name,
+                                "choices": [{"index": 0, "delta": {"content": content} if content else {}, "finish_reason": finish}],
+                            }
+                            yield f"data: {json.dumps(out)}\n\n"
+                            if finish:
+                                break
+                        except json.JSONDecodeError:
+                            continue
+
+            yield "data: [DONE]\n\n"
+
+            latency_ms = round((time.time() - start_time) * 1000)
+            _record_usage(client_ip, total_tokens)
+            node.activity.record(
+                EventType.INFERENCE_COMPLETE,
+                model=model_name, source="public_gateway_fleet",
+                tokens=total_tokens, latency_ms=latency_ms,
+            )
+
+        except Exception as e:
+            logger.warning(f"Fleet stream to {fleet_addr} failed: {e}")
+            error_chunk = {
+                "id": request_id, "object": "chat.completion.chunk",
+                "model": model_name,
+                "choices": [{"index": 0, "delta": {"content": "\n\n[Network error — try again]"}, "finish_reason": "stop"}],
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 async def _stream_public(node, request_id, model_name, messages, temperature, max_tokens, client_ip, start_time):
-    """Stream a public chat response via SSE."""
+    """Stream a public chat response via SSE (local inference)."""
     from fastapi.responses import StreamingResponse
     from mycellm.activity import EventType
     from mycellm.inference.base import InferenceRequest
