@@ -154,21 +154,39 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    # Auto-detect model if not specified
+    # Auto-detect model — check local node, fall back to bootstrap
     if not model:
         try:
             async with httpx.AsyncClient(timeout=5) as c:
                 resp = await c.get(f"{endpoint}/v1/models", headers=headers)
-                models = resp.json().get("data", [])
-                if models:
-                    model = models[0]["id"]
+                models_list = resp.json().get("data", [])
+                if models_list:
+                    model = models_list[0]["id"]
+                elif endpoint == "http://localhost:8420":
+                    # No local models — try bootstrap node if configured
+                    from mycellm.config import get_settings
+                    settings = get_settings()
+                    bootstrap = settings.get_bootstrap_list()
+                    if bootstrap:
+                        bhost, bport = bootstrap[0]
+                        bapi = bport - 1  # QUIC port → API port
+                        bootstrap_url = f"http://{bhost}:{bapi}"
+                        try:
+                            resp2 = await c.get(f"{bootstrap_url}/v1/models", headers=headers)
+                            bmodels = resp2.json().get("data", [])
+                            if bmodels:
+                                endpoint = bootstrap_url
+                                model = bmodels[0]["id"]
+                                console.print(f"  [yellow]No local models — using bootstrap at {bootstrap_url}[/yellow]")
+                        except Exception:
+                            pass
         except Exception:
             pass
 
     if model:
         console.print(f"  Model: [bold green]{model}[/bold green]")
     else:
-        console.print(f"  Model: [yellow]auto[/yellow] (will use best available)")
+        console.print(f"  Model: [yellow]auto[/yellow] (routes to best available on network)")
     console.print(f"  Node:  [dim]{endpoint}[/dim]")
     console.print(f"  Type [green]/help[/green] for commands, [green]/q[/green] to exit\n")
 
