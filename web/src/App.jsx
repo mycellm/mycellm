@@ -5,7 +5,8 @@ import {
   Boxes, ChevronRight, Loader2, AlertCircle, Check, X, Eye, EyeOff,
   Radio, MonitorSmartphone, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
   Wifi, WifiOff, Clock, TrendingUp, Heart, Gauge, LayoutGrid, List,
-  Download, CheckCircle, XCircle, AlertTriangle, HardDrive,
+  Download, CheckCircle, XCircle, AlertTriangle, HardDrive, Settings,
+  Lock, Unlock, ExternalLink, Copy,
 } from 'lucide-react'
 
 // ── Constants ──
@@ -26,6 +27,7 @@ const TABS = [
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'credits', label: 'Credits', icon: Key },
   { id: 'logs', label: 'Logs', icon: Terminal },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
 const LOG_TAG_COLORS = {
@@ -1121,6 +1123,7 @@ function OverviewTab({ status, credits, fleetNodes }) {
             <div className="flex items-center space-x-3 text-xs text-gray-500 mt-0.5">
               <span>{federation?.network_name || 'Standalone'}</span>
               {federation?.network_id && <span className="font-mono">{federation.network_id.slice(0, 8)}...</span>}
+              {federation?.public && <span className="text-spore">public</span>}
               <span>&middot;</span>
               <span>{formatUptime(uptime)} uptime</span>
             </div>
@@ -1894,6 +1897,12 @@ function ModelsTab({ status, onRefresh }) {
     api_base: 'https://openrouter.ai/api/v1', api_key: '', api_model: '', ctx_len: 4096,
   })
   const [showKey, setShowKey] = useState(false)
+  const [storedSecrets, setStoredSecrets] = useState([])
+
+  // Fetch stored secret names for the API key dropdown
+  useEffect(() => {
+    api('/v1/node/settings/secrets').then(d => setStoredSecrets(d.secrets || [])).catch(() => {})
+  }, [])
 
   // Build device list: local node + approved fleet nodes
   useEffect(() => {
@@ -2506,9 +2515,18 @@ function ModelsTab({ status, onRefresh }) {
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">API Key</label>
-                  <input type={showKey ? 'text' : 'password'} value={form.api_key} onChange={e => setForm(f => ({...f, api_key: e.target.value}))}
-                    placeholder="sk-..."
-                    className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                  <div className="flex space-x-1">
+                    <input type={showKey ? 'text' : 'password'} value={form.api_key} onChange={e => setForm(f => ({...f, api_key: e.target.value}))}
+                      placeholder={storedSecrets.length ? 'sk-... or select secret →' : 'sk-...'}
+                      className="flex-1 bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+                    {storedSecrets.length > 0 && (
+                      <select value="" onChange={e => { if (e.target.value) setForm(f => ({...f, api_key: `secret:${e.target.value}`})) }}
+                        className="bg-black border border-white/10 rounded-lg px-2 py-2 text-sm font-mono text-gray-400 focus:outline-none cursor-pointer">
+                        <option value="">secret</option>
+                        {storedSecrets.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Upstream model</label>
@@ -2853,6 +2871,203 @@ function LogsTab({ logs }) {
   )
 }
 
+// ── Settings Tab ──
+
+function SettingsTab() {
+  const [config, setConfig] = useState(null)
+  const [secrets, setSecrets] = useState([])
+  const [newSecret, setNewSecret] = useState({ name: '', value: '' })
+  const [showValue, setShowValue] = useState(false)
+  const [result, setResult] = useState(null)
+
+  useEffect(() => {
+    api('/v1/node/debug/config').then(setConfig).catch(() => {})
+    api('/v1/node/settings/secrets').then(d => setSecrets(d.secrets || [])).catch(() => setSecrets([]))
+  }, [])
+
+  const addSecret = async () => {
+    if (!newSecret.name || !newSecret.value) return
+    try {
+      await api('/v1/node/settings/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newSecret.name, value: newSecret.value }),
+      })
+      setSecrets(s => [...s.filter(n => n !== newSecret.name), newSecret.name])
+      setNewSecret({ name: '', value: '' })
+      setResult({ success: `Secret '${newSecret.name}' stored` })
+      setTimeout(() => setResult(null), 3000)
+    } catch (e) {
+      setResult({ error: e.message })
+    }
+  }
+
+  const removeSecret = async (name) => {
+    try {
+      await api('/v1/node/settings/secrets', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      setSecrets(s => s.filter(n => n !== name))
+    } catch {}
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Secrets Management */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <div className="flex items-center space-x-2 mb-4">
+          <Lock size={16} className="text-poison" />
+          <h3 className="text-white font-medium text-sm">Encrypted Secrets</h3>
+          <span className="text-xs text-gray-600">API keys encrypted at rest with account key</span>
+        </div>
+
+        {/* Existing secrets */}
+        {secrets.length > 0 && (
+          <div className="space-y-1.5 mb-4">
+            {secrets.map(name => (
+              <div key={name} className="flex items-center justify-between bg-black/40 border border-white/5 rounded-lg px-3 py-2">
+                <div className="flex items-center space-x-2">
+                  <Key size={12} className="text-ledger" />
+                  <span className="font-mono text-sm text-white">{name}</span>
+                  <button onClick={() => { navigator.clipboard.writeText(`secret:${name}`) }}
+                    title="Copy secret reference"
+                    className="text-gray-600 hover:text-gray-400">
+                    <Copy size={11} />
+                  </button>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs text-gray-600 font-mono">secret:{name}</span>
+                  <button onClick={() => removeSecret(name)} className="text-gray-600 hover:text-compute">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add secret */}
+        <div className="flex items-end space-x-2">
+          <div className="flex-1">
+            <label className="text-xs text-gray-500 block mb-1">Name</label>
+            <input value={newSecret.name} onChange={e => setNewSecret(s => ({...s, name: e.target.value}))}
+              placeholder="openrouter"
+              className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs text-gray-500 block mb-1">Value</label>
+            <input type={showValue ? 'text' : 'password'} value={newSecret.value}
+              onChange={e => setNewSecret(s => ({...s, value: e.target.value}))}
+              placeholder="sk-or-..."
+              onKeyDown={e => e.key === 'Enter' && addSecret()}
+              className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+          </div>
+          <button onClick={() => setShowValue(!showValue)} className="text-gray-500 hover:text-gray-300 pb-2">
+            {showValue ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+          <button onClick={addSecret} disabled={!newSecret.name || !newSecret.value}
+            className="bg-white/10 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/20 disabled:opacity-40 whitespace-nowrap">
+            Store Secret
+          </button>
+        </div>
+
+        <p className="text-xs text-gray-600 mt-3">
+          Use in model configs as <code className="text-gray-400">secret:name</code> instead of raw API keys.
+        </p>
+
+        {result && (
+          <div className={`flex items-center space-x-2 text-sm p-2 rounded-lg mt-2 ${result.error ? 'bg-compute/10 text-compute' : 'bg-spore/10 text-spore'}`}>
+            {result.error ? <AlertCircle size={14} /> : <Check size={14} />}
+            <span>{result.error || result.success}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Node Configuration */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <div className="flex items-center space-x-2 mb-4">
+          <Settings size={16} className="text-relay" />
+          <h3 className="text-white font-medium text-sm">Node Configuration</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div className="space-y-2.5">
+            <div className="flex justify-between">
+              <span className="text-gray-500">API Key</span>
+              <span className={`font-mono ${config?.api_key_set ? 'text-spore' : 'text-gray-600'}`}>
+                {config?.api_key_set ? 'Configured' : 'Not set'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Bootstrap Peers</span>
+              <span className="font-mono text-gray-300">{config?.bootstrap_peers || 'None'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Bootstrap Active</span>
+              <span className={`font-mono ${config?.announce_task_alive ? 'text-spore' : 'text-gray-600'}`}>
+                {config?.announce_task_alive ? 'Announcing' : 'Inactive'}
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2.5">
+            <div className="flex justify-between">
+              <span className="text-gray-500">HuggingFace Token</span>
+              <span className={`font-mono ${config?.hf_token_set ? 'text-spore' : 'text-ledger'}`}>
+                {config?.hf_token_set ? 'Configured' : 'Not set (rate limited)'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Database</span>
+              <span className="font-mono text-gray-300">{config?.db_backend || 'SQLite'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Log Level</span>
+              <span className="font-mono text-gray-300">{config?.log_level || 'INFO'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Integration Links */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <div className="flex items-center space-x-2 mb-4">
+          <ExternalLink size={16} className="text-spore" />
+          <h3 className="text-white font-medium text-sm">Integrations</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <a href="/metrics" target="_blank" rel="noopener"
+            className="flex items-center space-x-2 bg-black/40 border border-white/5 rounded-lg px-4 py-3 hover:border-white/20 transition-colors">
+            <Gauge size={14} className="text-relay" />
+            <div>
+              <div className="text-white">Prometheus Metrics</div>
+              <div className="text-xs text-gray-600">/metrics endpoint</div>
+            </div>
+          </a>
+          <a href="/health" target="_blank" rel="noopener"
+            className="flex items-center space-x-2 bg-black/40 border border-white/5 rounded-lg px-4 py-3 hover:border-white/20 transition-colors">
+            <Heart size={14} className="text-spore" />
+            <div>
+              <div className="text-white">Health Check</div>
+              <div className="text-xs text-gray-600">/health endpoint</div>
+            </div>
+          </a>
+          <a href="/docs" target="_blank" rel="noopener"
+            className="flex items-center space-x-2 bg-black/40 border border-white/5 rounded-lg px-4 py-3 hover:border-white/20 transition-colors">
+            <Globe size={14} className="text-ledger" />
+            <div>
+              <div className="text-white">API Docs</div>
+              <div className="text-xs text-gray-600">OpenAPI / Swagger</div>
+            </div>
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 // ── Auth Gate ──
 
 function AuthGate({ onAuth }) {
@@ -3096,6 +3311,7 @@ export default function App() {
           {tab === 'chat' && <ChatTab />}
           {tab === 'credits' && <CreditsTab credits={credits} />}
           {tab === 'logs' && <LogsTab logs={logs} />}
+          {tab === 'settings' && <SettingsTab />}
         </main>
       </div>
     </NodeRegistryContext.Provider>

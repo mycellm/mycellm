@@ -34,13 +34,55 @@ async def system_info(request: Request):
 async def debug_config(request: Request):
     """Debug: show relevant runtime config."""
     node = request.app.state.node
+    db_backend = "PostgreSQL" if node._settings.db_url and "postgresql" in node._settings.db_url else "SQLite"
     return {
         "node_name": node._settings.node_name,
         "bootstrap_peers": node._settings.bootstrap_peers,
         "bootstrap_parsed": [f"{h}:{p}" for h, p in node._settings.get_bootstrap_list()],
         "api_key_set": bool(node._settings.api_key),
+        "hf_token_set": bool(node._settings.hf_token),
+        "db_backend": db_backend,
+        "log_level": node._settings.log_level,
         "announce_task_alive": node._announce_task is not None and not node._announce_task.done() if hasattr(node, '_announce_task') else False,
     }
+
+
+@router.get("/settings/secrets")
+async def list_secrets(request: Request):
+    """List stored secret names (not values)."""
+    node = request.app.state.node
+    if not hasattr(node, "secret_store") or not node.secret_store:
+        return {"secrets": []}
+    return {"secrets": node.secret_store.list_names()}
+
+
+@router.post("/settings/secrets")
+async def set_secret(request: Request):
+    """Store an encrypted secret."""
+    node = request.app.state.node
+    if not hasattr(node, "secret_store") or not node.secret_store:
+        return {"error": "Secret store not initialized"}
+    body = await request.json()
+    name = body.get("name", "")
+    value = body.get("value", "")
+    if not name or not value:
+        return {"error": "name and value required"}
+    node.secret_store.set(name, value)
+    return {"status": "ok", "name": name}
+
+
+@router.delete("/settings/secrets")
+async def remove_secret(request: Request):
+    """Remove a stored secret."""
+    node = request.app.state.node
+    if not hasattr(node, "secret_store") or not node.secret_store:
+        return {"error": "Secret store not initialized"}
+    body = await request.json()
+    name = body.get("name", "")
+    if not name:
+        return {"error": "name required"}
+    removed = node.secret_store.remove(name)
+    return {"status": "removed" if removed else "not_found", "name": name}
 
 
 @router.get("/peers")
