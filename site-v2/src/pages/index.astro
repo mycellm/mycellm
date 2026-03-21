@@ -1,0 +1,46 @@
+---
+import Page from '../layouts/Page.astro';
+---
+<Page title="mycellm_ — Free AI, powered by the crowd">
+  <div class="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 py-8 sm:py-12">
+    <div class="w-full max-w-xl text-center space-y-6">
+      <div class="flex justify-center mb-2">
+        <img src="/brand/logo-icon/svg/mycellm-red-logo-sans.svg" alt="" class="w-14 h-14 sm:w-16 sm:h-16 animate-pulse" style="filter: drop-shadow(0px 0px 16px rgba(239, 68, 68, 0.5));">
+      </div>
+      <h1 class="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white leading-tight">
+        Free AI, <span class="text-spore-glow text-glow">powered by the crowd</span>
+      </h1>
+      <p class="text-gray-400 text-sm sm:text-base mt-3 max-w-md mx-auto leading-relaxed">
+        Ask anything — served by GPUs worldwide on the mycellm distributed network. No signup.
+      </p>
+      <div class="relative">
+        <textarea id="heroInput" rows="2" placeholder="Ask anything..."
+          class="w-full glass-green rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 pr-14 text-white text-base sm:text-lg resize-none transition-all focus:outline-none focus:border-spore/40"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();location.href='/chat'}"></textarea>
+        <button onclick="location.href='/chat'"
+          class="absolute right-3 bottom-3 w-9 h-9 sm:w-10 sm:h-10 bg-spore text-black rounded-xl flex items-center justify-center shadow-lg shadow-spore/20 hover:scale-105 active:scale-95 transition-transform">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+      <p class="text-[10px] sm:text-[11px] text-gray-700 flex items-center justify-center space-x-1">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ledger shrink-0"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        <span>Prompts processed by distributed GPU nodes. Don't share passwords or API keys.</span>
+      </p>
+      <div class="flex flex-wrap justify-center gap-2 pt-1">
+        <a href="/chat" class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white transition-colors">Try a chat &rarr;</a>
+        <a href="/join" class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white transition-colors">Join the network</a>
+        <a href="/docs/quickstart/install" class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white transition-colors">Read the docs</a>
+      </div>
+    </div>
+  </div>
+  <section class="border-t border-white/5 bg-[#050505]">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16 text-center">
+      <div class="font-mono text-sm glass rounded-xl p-4 max-w-sm mx-auto text-left space-y-1.5">
+        <div><span class="text-gray-600">$</span> <span class="text-spore-glow">pip install mycellm</span></div>
+        <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm init</span></div>
+        <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm serve</span></div>
+      </div>
+      <p class="text-xs text-gray-600 mt-3">Three commands. Start earning credits.</p>
+    </div>
+  </section>
+</Page>

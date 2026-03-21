@@ -1,0 +1,35 @@
+---
+const { currentPath = '' } = Astro.props;
+const links = [
+  { href: '/', label: 'Chat', match: ['/', '/chat'] },
+  { href: '/stats', label: 'Stats', match: ['/stats'] },
+  { href: '/join', label: 'Join', match: ['/join'] },
+  { href: '/docs/quickstart/install', label: 'Docs', match: ['/docs'] },
+];
+---
+<header class="sticky top-0 z-30 border-b border-white/5 bg-void/80 backdrop-blur-xl">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 h-12 sm:h-14 flex items-center justify-between">
+    <a href="/" class="flex items-center group shrink-0">
+      <img src="/brand/header/svg/mycellm-h-R.svg" alt="mycellm" class="h-5 sm:h-6 group-hover:brightness-110 transition-all">
+    </a>
+    <nav class="flex items-center space-x-1 sm:space-x-4 text-xs sm:text-sm font-mono">
+      {links.map(l => (
+        <a href={l.href} class={`px-2 py-1 rounded transition-colors ${l.match.some(m => currentPath === m || (m !== '/' && currentPath.startsWith(m))) ? 'text-spore' : 'text-gray-500 hover:text-gray-300'}`}>{l.label}</a>
+      ))}
+    </nav>
+    <div class="flex items-center space-x-3 text-[11px] sm:text-xs font-mono text-gray-500 shrink-0">
+      <span class="w-1.5 h-1.5 rounded-full bg-spore animate-pulse" id="hdrDot"></span>
+      <span id="hdrNodes">-</span><span class="hidden sm:inline">&nbsp;nodes</span>
+    </div>
+  </div>
+</header>
+<script>
+  const API = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.lan')
+    ? `${window.location.protocol}//${window.location.hostname}:8420` : 'https://api.mycellm.dev';
+  async function hdrStats() {
+    try { const r = await fetch(`${API}/v1/node/public/stats`); if(!r.ok)return; const d=await r.json();
+      const n=document.getElementById('hdrNodes'); if(n) n.textContent=d.nodes?.online||'-';
+    } catch { const dot=document.getElementById('hdrDot'); if(dot) dot.className='w-1.5 h-1.5 rounded-full bg-gray-600'; }
+  }
+  hdrStats(); setInterval(hdrStats,15000);
+</script>
