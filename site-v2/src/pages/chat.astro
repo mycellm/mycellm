@@ -1,0 +1,105 @@
+---
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import ParticleCanvas from '../components/ParticleCanvas.astro';
+---
+<Base title="mycellm_ — Chat" description="Chat with the mycellm distributed network.">
+  <ParticleCanvas />
+  <div class="relative z-10 min-h-screen min-h-[100dvh] flex flex-col">
+    <Header currentPath="/chat" />
+
+    <div class="flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-6">
+      <!-- Privacy notice -->
+      <div id="privacyNotice" class="glass rounded-lg px-3 py-2 mt-2 flex items-center justify-between text-[11px] text-gray-500">
+        <div class="flex items-center space-x-2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-500 shrink-0"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+          <span>Prompts are processed by distributed GPU nodes. Don't share passwords, API keys, or personal data.</span>
+        </div>
+        <button onclick="this.parentElement.remove()" class="text-gray-600 hover:text-gray-400 ml-2 shrink-0">&times;</button>
+      </div>
+
+      <div id="chatMessages" class="flex-1 overflow-y-auto space-y-3 py-3 min-h-0"></div>
+
+      <div class="border-t border-white/5 py-3">
+        <div class="relative flex items-stretch">
+          <textarea id="chatInput" rows="1" placeholder="Type a message..."
+            class="w-full glass rounded-xl rounded-r-none px-4 py-3 text-white text-sm resize-none transition-all focus:outline-none focus:border-spore/40"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
+            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+          <button id="sendBtn" onclick="sendMessage()"
+            class="w-11 bg-spore text-black rounded-xl rounded-l-none flex items-center justify-center hover:bg-spore-glow active:scale-95 transition-all shrink-0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark-dimmed.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+
+  <script is:inline>
+    const API_BASE = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.lan')
+      ? `${window.location.protocol}//${window.location.hostname}:8420` : 'https://api.mycellm.dev';
+    let messages = [], isStreaming = false;
+
+    if (typeof marked !== 'undefined') marked.setOptions({ highlight: (c,l) => typeof hljs!=='undefined'&&l&&hljs.getLanguage(l)?hljs.highlight(c,{language:l}).value:typeof hljs!=='undefined'?hljs.highlightAuto(c).value:c, breaks:true, gfm:true });
+    function renderMd(t) { try { return marked.parse(t||'') } catch { return (t||'').replace(/</g,'&lt;') } }
+    function escHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML }
+
+    function addMsg(role, content) {
+      messages.push({role, content});
+      const c = document.getElementById('chatMessages'), d = document.createElement('div');
+      const u = role==='user', dots = !u && !content;
+      d.className = `flex ${u?'justify-end':'justify-start'}`;
+      d.innerHTML = `<div class="max-w-[90%] sm:max-w-[80%]"><div class="${u?'glass-green text-white':'glass text-gray-200'} rounded-2xl ${u?'rounded-br-md':'rounded-bl-md'} px-3.5 py-2.5 text-sm leading-relaxed"><div class="msg-content ${u?'':'msg-md'}">${dots?'<span class="inline-flex items-center space-x-1"><span class="typing-dot w-1.5 h-1.5 rounded-full bg-spore"></span><span class="typing-dot w-1.5 h-1.5 rounded-full bg-spore"></span><span class="typing-dot w-1.5 h-1.5 rounded-full bg-spore"></span></span>':(u?escHtml(content):renderMd(content))}</div></div>${u?'':'<div class="msg-attr text-[10px] text-gray-600 mt-1 ml-1 font-mono"></div>'}</div>`;
+      c.appendChild(d); c.scrollTop = c.scrollHeight;
+      return { contentEl: d.querySelector('.msg-content'), attrEl: d.querySelector('.msg-attr') };
+    }
+
+    async function sendMessage() {
+      if (isStreaming) return;
+      const input = document.getElementById('chatInput'), text = input.value.trim();
+      if (!text) return;
+      input.value = ''; input.style.height = 'auto';
+      addMsg('user', text);
+      const {contentEl, attrEl} = addMsg('assistant', '');
+      isStreaming = true;
+      const startTime = Date.now();
+      try {
+        const resp = await fetch(`${API_BASE}/v1/public/chat/completions`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({messages:messages.slice(0,-1).map(m=>({role:m.role,content:m.content})),stream:true}) });
+        if (!resp.ok) { const e=await resp.json().catch(()=>({})); contentEl.textContent=e.error?.message||`Error: ${resp.status}`; isStreaming=false; return }
+        let fullText='',model='',nodeId='',sLat=0;
+        const reader=resp.body.getReader(), dec=new TextDecoder(); let buf='';
+        while(true) { const{done,value}=await reader.read(); if(done)break; buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop();
+          for(const line of lines) { if(!line.startsWith('data: '))continue; const p=line.slice(6).trim(); if(p==='[DONE]')break;
+            try { const ch=JSON.parse(p); model=ch.model||model; if(ch.mycellm){nodeId=ch.mycellm.node||nodeId;if(ch.mycellm.latency_ms)sLat=ch.mycellm.latency_ms;if(attrEl&&nodeId&&!attrEl.textContent)attrEl.textContent=`${model} via node ${nodeId}`}
+              const delta=ch.choices?.[0]?.delta?.content||''; if(delta){fullText+=delta;contentEl.innerHTML=renderMd(fullText);document.getElementById('chatMessages').scrollTop=999999}
+            } catch{} } }
+        messages[messages.length-1].content=fullText;
+        if(attrEl) attrEl.innerHTML=`<span class="text-gray-500">${model}</span> via node ${nodeId||'local'} · ${sLat||(Date.now()-startTime)}ms`;
+      } catch(e) { contentEl.closest('.flex')?.remove(); messages.pop(); messages.pop(); contentEl.textContent='Connection error'; input.value=text }
+      isStreaming = false;
+    }
+
+    // Check for initial prompt from homepage
+    const ip = sessionStorage.getItem('mycellm_initial_prompt');
+    if (ip) { sessionStorage.removeItem('mycellm_initial_prompt'); document.getElementById('chatInput').value=ip; setTimeout(sendMessage,200) }
+    else document.getElementById('chatInput')?.focus();
+  </script>
+
+  <style>
+    .msg-md p { margin: 0.4em 0 } .msg-md p:first-child { margin-top:0 } .msg-md p:last-child { margin-bottom:0 }
+    .msg-md pre { margin:0.5em 0; border-radius:0.5rem; overflow-x:auto; padding:0.75rem; background:rgba(0,0,0,0.5)!important; font-size:0.8rem }
+    .msg-md code { font-family:'JetBrains Mono',monospace; font-size:0.85em }
+    .msg-md :not(pre)>code { background:rgba(255,255,255,0.08); padding:0.15em 0.35em; border-radius:0.25rem }
+    .msg-md strong { color:#fff }
+    @keyframes dot-pulse { 0%,80%,100%{opacity:0.3;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
+    .typing-dot { animation:dot-pulse 1.4s ease-in-out infinite }
+    .typing-dot:nth-child(2) { animation-delay:0.16s }
+    .typing-dot:nth-child(3) { animation-delay:0.32s }
+    .glass { background:rgba(17,17,17,0.7); backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,0.06) }
+    .glass-green { background:rgba(34,197,94,0.04); border:1px solid rgba(34,197,94,0.12) }
+  </style>
+</Base>

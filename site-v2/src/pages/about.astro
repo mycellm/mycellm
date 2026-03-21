@@ -112,63 +112,31 @@ import Page from '../layouts/Page.astro';
           <div class="mt-4 mb-4 glass rounded-lg p-4 sm:p-5">
             <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">What the network can run vs paid APIs</div>
             <div class="space-y-3">
-              <!-- Row: network tier → equivalent quality -->
-              <div class="flex items-center gap-3">
-                <div class="w-20 sm:w-24 shrink-0 text-right">
-                  <div class="text-xs text-gray-400">3-10 nodes</div>
-                  <div class="text-[10px] text-gray-600">8GB each</div>
-                </div>
-                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
-                  <div class="h-full bg-spore/40 rounded-full" style="width: 55%"></div>
-                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">7-8B models (Qwen 7B, Llama 8B, Phi-4)</span>
-                </div>
+              <div>
+                <div class="flex justify-between text-[11px] mb-1"><span class="text-gray-400">3-10 nodes (8GB)</span><span class="text-gray-500">7-8B models</span></div>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden"><div class="h-full bg-spore/40 rounded-full" style="width:55%"></div></div>
               </div>
-              <div class="flex items-center gap-3">
-                <div class="w-20 sm:w-24 shrink-0 text-right">
-                  <div class="text-xs text-gray-400">10-50 nodes</div>
-                  <div class="text-[10px] text-gray-600">16GB+ each</div>
-                </div>
-                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
-                  <div class="h-full bg-spore/60 rounded-full" style="width: 72%"></div>
-                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">24-34B models (Mistral Small, Qwen 32B)</span>
-                </div>
+              <div>
+                <div class="flex justify-between text-[11px] mb-1"><span class="text-gray-400">10-50 nodes (16GB+)</span><span class="text-gray-500">24-34B models</span></div>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden"><div class="h-full bg-spore/60 rounded-full" style="width:72%"></div></div>
               </div>
-              <div class="flex items-center gap-3">
-                <div class="w-20 sm:w-24 shrink-0 text-right">
-                  <div class="text-xs text-gray-400">50-100 nodes</div>
-                  <div class="text-[10px] text-gray-600">sharded</div>
-                </div>
-                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
-                  <div class="h-full bg-relay/50 rounded-full" style="width: 88%"></div>
-                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">70B models (Llama 70B, Qwen 72B)</span>
-                </div>
+              <div>
+                <div class="flex justify-between text-[11px] mb-1"><span class="text-gray-400">50-100 nodes (sharded)</span><span class="text-relay text-gray-500">70B models</span></div>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden"><div class="h-full bg-relay/50 rounded-full" style="width:88%"></div></div>
               </div>
-              <div class="flex items-center gap-3">
-                <div class="w-20 sm:w-24 shrink-0 text-right">
-                  <div class="text-xs text-gray-400">1K+ nodes</div>
-                  <div class="text-[10px] text-gray-600">ensemble</div>
-                </div>
-                <div class="flex-1 h-6 rounded-full bg-white/5 overflow-hidden relative">
-                  <div class="h-full bg-ledger/50 rounded-full" style="width: 95%"></div>
-                  <span class="absolute inset-0 flex items-center px-3 text-[10px] text-white font-medium">405B+ models, best-of-N routing</span>
-                </div>
+              <div>
+                <div class="flex justify-between text-[11px] mb-1"><span class="text-gray-400">1K+ nodes (ensemble)</span><span class="text-ledger">405B+ models</span></div>
+                <div class="h-3 rounded-full bg-white/5 overflow-hidden"><div class="h-full bg-ledger/50 rounded-full" style="width:95%"></div></div>
               </div>
             </div>
             <!-- Reference lines -->
             <div class="mt-4 pt-3 border-t border-white/5 space-y-1.5">
-              <div class="flex items-center gap-2 text-[10px]">
-                <div class="w-20 sm:w-24 text-right text-gray-600">For comparison</div>
-                <div class="flex-1 flex items-center gap-3 text-gray-500">
-                  <span>GPT-3.5 ≈ 7B open</span>
-                  <span class="text-gray-700">|</span>
-                  <span>GPT-4o ≈ 70B open</span>
-                  <span class="text-gray-700">|</span>
-                  <span>Sonnet ≈ 70B+ open</span>
-                </div>
+              <div class="text-[10px] text-gray-500">
+                <span class="text-gray-600">Comparable to:</span>
+                GPT-3.5 ≈ 7B &middot; GPT-4o ≈ 70B &middot; Sonnet ≈ 70B+
               </div>
-              <div class="flex items-center gap-2 text-[10px]">
-                <div class="w-20 sm:w-24 text-right text-gray-600">Cost</div>
-                <div class="flex-1 text-spore font-medium">$0 on mycellm (credit-based) vs $2-75 / million tokens on paid APIs</div>
+              <div class="text-[10px] text-spore font-medium">
+                $0 on mycellm (credit-based) vs $2-75/M tokens on paid APIs
               </div>
             </div>
           </div>
