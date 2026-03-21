@@ -8,7 +8,11 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'mycellm_',
-      logo: { src: './src/assets/mycellm-lockup.svg', replacesTitle: true },
+      logo: {
+        dark: './src/assets/mycellm-lockup.svg',
+        light: './src/assets/mycellm-lockup-light.svg',
+        replacesTitle: true,
+      },
       customCss: ['./src/styles/starlight.css'],
       sidebar: [
         { label: 'Quick Start', items: [
