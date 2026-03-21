@@ -9,8 +9,7 @@ import Page from '../layouts/Page.astro';
       <div class="flex justify-center mb-4">
         <div class="relative w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28">
           <img id="heroShroom" src="/brand/logo-icon/svg/mycellm-red-logo-sans.svg" alt=""
-               class="w-full h-full transition-all duration-700"
-               style="filter: drop-shadow(0px 0px 20px rgba(239, 68, 68, 0.6));">
+               class="w-full h-full transition-all duration-700">
         </div>
       </div>
 
@@ -165,22 +164,20 @@ import Page from '../layouts/Page.astro';
   <script>
     // ── Mushroom color cycling ──
     const colors = [
-      { file: 'mycellm-red-logo-sans.svg', shadow: 'rgba(239, 68, 68, 0.6)' },
-      { file: 'mycellm-green-logo-sans.svg', shadow: 'rgba(34, 197, 94, 0.6)' },
-      { file: 'mycellm-blue-logo-sans.svg', shadow: 'rgba(59, 130, 246, 0.6)' },
-      { file: 'mycellm-gold-logo-sans.svg', shadow: 'rgba(250, 204, 21, 0.6)' },
-      { file: 'mycellm-purple-logo-sans.svg', shadow: 'rgba(168, 85, 247, 0.6)' },
+      'mycellm-red-logo-sans.svg',
+      'mycellm-green-logo-sans.svg',
+      'mycellm-blue-logo-sans.svg',
+      'mycellm-gold-logo-sans.svg',
+      'mycellm-purple-logo-sans.svg',
     ];
     let colorIdx = 0;
     const shroom = document.getElementById('heroShroom');
     if (shroom) {
       setInterval(() => {
         colorIdx = (colorIdx + 1) % colors.length;
-        const c = colors[colorIdx];
-        shroom.style.opacity = '0.4';
+        shroom.style.opacity = '0.3';
         setTimeout(() => {
-          shroom.src = `/brand/logo-icon/svg/${c.file}`;
-          shroom.style.filter = `drop-shadow(0px 0px 20px ${c.shadow})`;
+          shroom.src = `/brand/logo-icon/svg/${colors[colorIdx]}`;
           shroom.style.opacity = '1';
         }, 350);
       }, 3000);
@@ -188,34 +185,29 @@ import Page from '../layouts/Page.astro';
 
     // ── Randomized sample prompts ──
     const allPrompts = [
-      'Explain distributed computing in simple terms',
-      'Write a Python function to find prime numbers',
-      'What makes peer-to-peer networks resilient?',
-      'Compare TCP and UDP in 3 sentences',
-      'Write a haiku about open source',
+      'Explain distributed computing',
+      'Write a Python sort function',
+      'Why are P2P networks resilient?',
+      'Compare TCP and UDP',
+      'Write a haiku about code',
       'How does BitTorrent work?',
-      'Explain public key cryptography simply',
-      'Write a bash one-liner to find large files',
-      'What is consensus in distributed systems?',
-      'Explain MapReduce to a beginner',
-      'Write a REST API endpoint in Python',
-      'What are the benefits of edge computing?',
-      'Explain the CAP theorem',
-      'Write a Docker compose for a web app',
+      'Explain public key crypto',
+      'What is the CAP theorem?',
       'How do neural networks learn?',
-      'Compare SQL and NoSQL databases',
-      'Write a regex to validate email addresses',
-      'Explain WebSockets vs HTTP polling',
+      'SQL vs NoSQL databases',
+      'Explain WebSockets',
+      'What is edge computing?',
+      'Write a Docker compose file',
+      'Explain MapReduce simply',
+      'What is consensus?',
     ];
-    // Pick 3 random, non-repeating
     const shuffled = allPrompts.sort(() => Math.random() - 0.5).slice(0, 3);
     const chips = document.getElementById('promptChips');
     if (chips) {
-      chips.innerHTML = shuffled.map(p => {
-        const short = p.length > 30 ? p.slice(0, 28) + '...' : p;
-        return `<button onclick="sessionStorage.setItem('mycellm_initial_prompt','${p.replace(/'/g, "\\'")}');location.href='/chat'"
-          class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer">${short}</button>`;
-      }).join('');
+      chips.innerHTML = shuffled.map(p =>
+        `<button onclick="sessionStorage.setItem('mycellm_initial_prompt','${p.replace(/'/g, "\\'")}');location.href='/chat'"
+          class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors cursor-pointer">${p}</button>`
+      ).join('');
     }
   </script>
 </Page>
