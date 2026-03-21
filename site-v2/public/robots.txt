@@ -1,0 +1,15 @@
+# mycellm — distributed LLM inference
+# https://mycellm.dev
+
+User-agent: *
+Allow: /
+
+# Sitemaps
+Sitemap: https://mycellm.dev/sitemap-index.xml
+
+# Don't index API docs pages individually (too granular)
+# Let the main docs pages get indexed
+Disallow: /404
+
+# Rate limit crawlers
+Crawl-delay: 2
