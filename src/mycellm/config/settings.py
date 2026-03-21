@@ -114,6 +114,11 @@ class MycellmSettings(BaseSettings):
     # When set, all API endpoints (except /health) require Authorization: Bearer <key>
     api_key: str = ""
 
+    # Telemetry — opt-in anonymous usage stats sent to bootstrap node
+    # Includes: request/token counts, TPS, model names, uptime, credits earned
+    # Does NOT include: prompts, IPs, user data, API keys
+    telemetry: bool = False
+
     # Credit
     initial_credits: float = 100.0
 

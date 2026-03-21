@@ -3030,6 +3030,38 @@ function SettingsTab() {
         </div>
       </div>
 
+      {/* Telemetry */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Activity size={16} className="text-spore" />
+            <h3 className="text-white font-medium text-sm">Telemetry</h3>
+          </div>
+          <button onClick={async () => {
+            const next = !config?.telemetry
+            try {
+              await api('/v1/node/settings/telemetry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: next }),
+              })
+              setConfig(c => ({...c, telemetry: next}))
+            } catch {}
+          }}
+            className={`relative w-10 h-5 rounded-full transition-colors ${config?.telemetry ? 'bg-spore' : 'bg-white/10'}`}>
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${config?.telemetry ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Share anonymous usage stats (request counts, TPS, model names, uptime) with the network bootstrap.
+          No prompts, IPs, or user data. Helps the public stats page show real network-wide activity.
+        </p>
+        <p className="text-xs text-gray-600 mt-1">
+          Status: <span className={config?.telemetry ? 'text-spore' : 'text-gray-500'}>{config?.telemetry ? 'Enabled' : 'Disabled'}</span>
+          {config?.telemetry && ' — stats included in bootstrap announce every 60s'}
+        </p>
+      </div>
+
       {/* Integration Links */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
         <div className="flex items-center space-x-2 mb-4">

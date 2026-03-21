@@ -43,6 +43,7 @@ async def debug_config(request: Request):
         "hf_token_set": bool(node._settings.hf_token),
         "db_backend": db_backend,
         "log_level": node._settings.log_level,
+        "telemetry": node._settings.telemetry,
         "announce_task_alive": node._announce_task is not None and not node._announce_task.done() if hasattr(node, '_announce_task') else False,
     }
 
@@ -605,7 +606,7 @@ async def fleet_hardware(request: Request):
             "ram_gb": mem.get("total_gb", 0),
             "ram_used_pct": mem.get("used_pct", 0),
             "models": [m.get("name", m) if isinstance(m, dict) else m for m in models],
-            "tps": 0,  # would need per-node activity polling
+            "tps": entry.get("telemetry", {}).get("tps", 0),
             "online": entry.get("online", False),
             "uptime_seconds": 0,
         })
@@ -628,6 +629,41 @@ async def fleet_hardware(request: Request):
             "total_models": total_models,
         },
     }
+
+
+@router.get("/settings/telemetry")
+async def get_telemetry(request: Request):
+    """Get telemetry opt-in status."""
+    node = request.app.state.node
+    return {
+        "enabled": node._settings.telemetry,
+        "description": "Anonymous usage stats (request/token counts, TPS, model names, uptime). No prompts, IPs, or user data.",
+    }
+
+
+@router.post("/settings/telemetry")
+async def set_telemetry(request: Request):
+    """Toggle telemetry opt-in. Persists to .env file."""
+    node = request.app.state.node
+    body = await request.json()
+    enabled = bool(body.get("enabled", False))
+
+    # Update runtime setting
+    node._settings.telemetry = enabled
+
+    # Persist to .env
+    env_path = node._settings.config_dir / ".env"
+    env_lines = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, val = line.partition("=")
+                env_lines[key.strip()] = val.strip()
+    env_lines["MYCELLM_TELEMETRY"] = str(enabled).lower()
+    env_path.write_text("\n".join(f"{k}={v}" for k, v in env_lines.items()) + "\n")
+
+    return {"enabled": enabled}
 
 
 @router.get("/public/stats")
@@ -676,17 +712,30 @@ async def public_stats(request: Request):
             name = m.get("name", m) if isinstance(m, dict) else m
             model_names.add(name)
 
-    # Activity stats
-    stats = node.activity.stats() if hasattr(node, "activity") else {}
+    # Activity stats — combine local stats with telemetry from announcing nodes
+    local_stats = node.activity.stats() if hasattr(node, "activity") else {}
+    network_requests = local_stats.get("total_requests", 0)
+    network_tokens = local_stats.get("total_tokens", 0)
+    network_tps = total_tps  # already includes local tps
+
+    for entry in online_nodes:
+        t = entry.get("telemetry", {})
+        if t:
+            network_requests += t.get("requests_total", 0)
+            network_tokens += t.get("tokens_total", 0)
+            network_tps += t.get("tps", 0)
 
     # Top contributors (by node name only — no IPs or peer IDs)
     contributors = []
     for entry in online_nodes:
+        t = entry.get("telemetry", {})
         contributors.append({
             "name": entry.get("node_name", "anonymous"),
-            "models": len(entry.get("capabilities", {}).get("models", [])),
+            "tps": t.get("tps", 0),
+            "models": len(t.get("models_loaded", entry.get("capabilities", {}).get("models", []))),
+            "requests": t.get("requests_total", 0),
         })
-    contributors.sort(key=lambda c: c["models"], reverse=True)
+    contributors.sort(key=lambda c: c["tps"], reverse=True)
 
     # Growth data if available
     growth = {}
@@ -701,7 +750,7 @@ async def public_stats(request: Request):
             "seeding": 1 + len(seeding_nodes),
         },
         "compute": {
-            "total_tps": round(total_tps, 1),
+            "total_tps": round(network_tps, 1),
             "total_vram_gb": round(total_vram_gb, 1),
             "total_ram_gb": round(total_ram_gb, 1),
         },
@@ -713,9 +762,9 @@ async def public_stats(request: Request):
             "names": sorted(model_names),
         },
         "activity": {
-            "total_requests": stats.get("total_requests", 0),
-            "total_tokens": stats.get("total_tokens", 0),
-            "requests_per_min": stats.get("requests_per_min", 0),
+            "total_requests": network_requests,
+            "total_tokens": network_tokens,
+            "requests_per_min": local_stats.get("requests_per_min", 0),
         },
         "top_contributors": contributors[:10],
         "growth": growth,

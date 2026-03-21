@@ -134,6 +134,21 @@ def init(
     if bootstrap_addr and not create_network:
         env_lines["MYCELLM_BOOTSTRAP_PEERS"] = bootstrap_addr
 
+    # Ask about telemetry (only on first init, not if .env already has it)
+    if "MYCELLM_TELEMETRY" not in env_lines and not no_serve:
+        console.print()
+        console.print(f"  [{SPORE_GREEN}]Telemetry[/{SPORE_GREEN}]")
+        console.print(f"  [dim]Share anonymous usage stats (request counts, TPS, model names)[/dim]")
+        console.print(f"  [dim]with the network? No prompts, IPs, or user data. Helps the[/dim]")
+        console.print(f"  [dim]stats page show real network activity.[/dim]")
+        try:
+            opt_in = typer.confirm("  Enable telemetry?", default=True)
+        except (EOFError, KeyboardInterrupt):
+            opt_in = False
+        env_lines["MYCELLM_TELEMETRY"] = "true" if opt_in else "false"
+        console.print(f"  {styled_tag('BOOT')} Telemetry {'enabled' if opt_in else 'disabled'}")
+        console.print()
+
     if env_lines:
         env_content = "\n".join(f"{k}={v}" for k, v in env_lines.items()) + "\n"
         env_path.write_text(env_content)

@@ -88,6 +88,12 @@ async def announce_node(request: Request):
         "first_seen": existing.get("first_seen", time.time()),
         "ip": client_ip,
     }
+
+    # Store telemetry if provided (opt-in by announcing node)
+    telemetry = body.get("telemetry")
+    if telemetry and isinstance(telemetry, dict):
+        entry["telemetry"] = telemetry
+
     node.node_registry[peer_id] = entry
     await _save_to_db(node, peer_id, entry)
 

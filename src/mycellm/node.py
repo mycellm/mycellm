@@ -767,6 +767,17 @@ class MycellmNode:
 
         async def _do_announce():
             payload["capabilities"] = self.capabilities.to_dict()
+            # Include telemetry if opted in
+            if self._settings.telemetry:
+                stats = self.activity.stats() if hasattr(self, "activity") else {}
+                payload["telemetry"] = {
+                    "requests_total": stats.get("total_requests", 0),
+                    "tokens_total": stats.get("total_tokens", 0),
+                    "tps": self.activity.tps if hasattr(self, "activity") else 0,
+                    "models_loaded": [m.name for m in self.inference.loaded_models],
+                    "uptime_seconds": round(self.uptime),
+                    "credits_earned": stats.get("credits_earned", 0),
+                }
             for host, port in peers:
                 api_port = port - 1
                 url = f"http://{host}:{api_port}/v1/admin/nodes/announce"

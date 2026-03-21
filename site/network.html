@@ -205,7 +205,7 @@
                 contribEl.innerHTML = data.top_contributors.map((c, i) => `
                     <div class="flex justify-between items-center py-1 ${i < 3 ? 'text-mycelium-glow' : 'text-gray-400'}">
                         <span>${i + 1}. ${c.name}</span>
-                        <span class="text-xs">${c.models} model${c.models !== 1 ? 's' : ''}</span>
+                        <span class="text-xs">${c.tps ? c.tps.toFixed(1) + ' T/s' : c.models + ' model' + (c.models !== 1 ? 's' : '')}</span>
                     </div>
                 `).join('');
             } else {
