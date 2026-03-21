@@ -271,16 +271,25 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
 
     base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=180.0)) as client:
-            resp = await client.post(f"{base}/v1/chat/completions", json={
-                "model": model_name,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": False,
-            })
-            resp.raise_for_status()
-            data = resp.json()
+        data = None
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=180.0)) as client:
+                    resp = await client.post(f"{base}/v1/chat/completions", json={
+                        "model": model_name,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "stream": False,
+                    })
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+            except (httpx.RemoteProtocolError, httpx.ReadError) as retry_err:
+                if attempt == 0:
+                    logger.info(f"Fleet proxy retry after: {retry_err}")
+                    continue
+                raise
 
         latency_ms = round((time.time() - start_time) * 1000)
         choice = data.get("choices", [{}])[0]

@@ -2920,8 +2920,10 @@ function ChatTab() {
         ))}
         {sending && (
           <div className="flex justify-start">
-            <div className="bg-black border border-white/10 rounded-xl px-4 py-3">
-              <Loader2 size={16} className="animate-spin text-spore" />
+            <div className="bg-black border border-white/10 rounded-xl px-4 py-3 flex items-center space-x-1.5">
+              <span className="w-2 h-2 rounded-full bg-spore animate-pulse" />
+              <span className="w-2 h-2 rounded-full bg-spore animate-pulse" style={{animationDelay: '0.2s'}} />
+              <span className="w-2 h-2 rounded-full bg-spore animate-pulse" style={{animationDelay: '0.4s'}} />
             </div>
           </div>
         )}

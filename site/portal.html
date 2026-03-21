@@ -349,13 +349,18 @@
             const div = document.createElement('div');
             const isUser = role === 'user';
             div.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+            const showDots = !isUser && !content;
             div.innerHTML = `
                 <div class="max-w-[90%] sm:max-w-[80%]">
                     <div class="msg-bubble ${isUser
                         ? 'glass-green text-white'
                         : 'glass text-gray-200'
                     } rounded-2xl ${isUser ? 'rounded-br-md' : 'rounded-bl-md'} px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed">
-                        <div class="msg-content ${isUser ? '' : 'msg-md'}">${isUser ? escapeHtml(content) : renderMd(content)}</div>
+                        <div class="msg-content ${isUser ? '' : 'msg-md'}">${
+                            showDots
+                                ? '<span class="inline-flex items-center space-x-1 msg-dots"><span class="typing-dot w-1.5 h-1.5 rounded-full bg-spore"></span><span class="typing-dot w-1.5 h-1.5 rounded-full bg-spore"></span><span class="typing-dot w-1.5 h-1.5 rounded-full bg-spore"></span></span>'
+                                : (isUser ? escapeHtml(content) : renderMd(content))
+                        }</div>
                     </div>
                     ${isUser ? '' : '<div class="msg-attr text-[10px] text-gray-600 mt-1 ml-1 font-mono"></div>'}
                 </div>`;
@@ -491,7 +496,8 @@
             if (input === heroInput) showChatMode();
 
             addMessage('user', text);
-            addTypingIndicator();
+            // Create assistant bubble immediately with animated dots
+            const { contentEl, attrEl } = addMessage('assistant', '');
             isStreaming = true;
             abortController = new AbortController();
             updateSendButton(true);
@@ -503,7 +509,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        messages: messages.map(m => ({ role: m.role, content: m.content })),
+                        messages: messages.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
                         stream: true,
                     }),
                     signal: abortController.signal,
@@ -511,8 +517,10 @@
 
                 if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}));
-                    removeTypingIndicator();
-                    messages.pop(); // remove the failed user message from context
+                    // Remove the dots bubble and the failed user message
+                    contentEl.closest('.flex')?.remove();
+                    messages.pop(); // assistant (empty)
+                    messages.pop(); // user
                     const errMsg = err.error?.message || '';
                     if (resp.status === 503 || errMsg.includes('No models')) {
                         addErrorMessage('no-models');
@@ -521,14 +529,11 @@
                     } else {
                         addErrorMessage('generic', errMsg || `Server returned ${resp.status}`);
                     }
-                    // Restore input for retry
                     document.getElementById('chatInput').value = text;
                     isStreaming = false;
                     return;
                 }
 
-                removeTypingIndicator();
-                const { contentEl, attrEl } = addMessage('assistant', '');
                 let fullText = '';
                 let model = '';
                 let nodeId = '';
@@ -585,16 +590,19 @@
                 }
 
             } catch (e) {
-                removeTypingIndicator();
                 if (e.name === 'AbortError') {
-                    // User cancelled — keep partial response if any
+                    // User cancelled — keep partial response if any, remove dots if empty
                     if (messages.length && messages[messages.length-1].role === 'assistant' && !messages[messages.length-1].content) {
-                        messages.pop(); // remove empty assistant message
+                        contentEl.closest('.flex')?.remove();
+                        messages.pop();
                     }
                 } else {
-                    messages.pop(); // remove failed user message from context
+                    // Remove dots bubble
+                    contentEl.closest('.flex')?.remove();
+                    messages.pop(); // assistant
+                    messages.pop(); // user
                     addErrorMessage('connection', e.message);
-                    document.getElementById('chatInput').value = text; // restore for retry
+                    document.getElementById('chatInput').value = text;
                 }
             }
 
