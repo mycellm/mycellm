@@ -6,7 +6,7 @@ const { title = 'mycellm_', description = 'Distributed LLM inference.' } = Astro
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="description" content={description}>
   <meta name="theme-color" content="#0a0a0a">
   <meta name="author" content="Michael Gifford-Santos">
@@ -17,7 +17,7 @@ const { title = 'mycellm_', description = 'Distributed LLM inference.' } = Astro
   <title>{title}</title>
   <script defer src="https://analytics.zetaix.com/script.js" data-website-id="e70ee1fc-d684-497f-9f64-aa0dc624d74a"></script>
 </head>
-<body class="min-h-screen font-sans antialiased selection:bg-spore selection:text-black">
+<body class="min-h-screen font-sans antialiased selection:bg-spore selection:text-black overflow-x-hidden">
   <slot />
 </body>
 </html>

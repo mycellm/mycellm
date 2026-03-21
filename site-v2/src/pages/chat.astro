@@ -5,10 +5,10 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
 ---
 <Base title="mycellm_ — Chat" description="Chat with the mycellm distributed network.">
   <ParticleCanvas />
-  <div class="relative z-10 min-h-screen min-h-[100dvh] flex flex-col">
+  <div class="relative z-10 min-h-screen min-h-[100dvh] flex flex-col overflow-x-hidden">
     <Header currentPath="/chat" />
 
-    <div class="flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-6">
+    <div class="flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-6 overflow-x-hidden">
       <!-- Privacy notice -->
       <div id="privacyNotice" class="glass rounded-lg px-3 py-2 mt-2 flex items-center justify-between text-[11px] text-gray-500">
         <div class="flex items-center space-x-2">
@@ -23,7 +23,7 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
       <div class="border-t border-white/5 py-3">
         <div class="relative flex items-stretch">
           <textarea id="chatInput" rows="1" placeholder="Type a message..."
-            class="w-full glass rounded-xl rounded-r-none px-4 py-3 text-white text-sm resize-none transition-all focus:outline-none focus:border-spore/40"
+            class="w-full glass rounded-xl rounded-r-none px-4 py-3 text-white text-base resize-none transition-all focus:outline-none focus:border-spore/40"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
           <button id="sendBtn" onclick="sendMessage()"
@@ -91,7 +91,8 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
 
   <style>
     .msg-md p { margin: 0.4em 0 } .msg-md p:first-child { margin-top:0 } .msg-md p:last-child { margin-bottom:0 }
-    .msg-md pre { margin:0.5em 0; border-radius:0.5rem; overflow-x:auto; padding:0.75rem; background:rgba(0,0,0,0.5)!important; font-size:0.8rem }
+    .msg-md pre { margin:0.5em 0; border-radius:0.5rem; overflow-x:auto; padding:0.75rem; background:rgba(0,0,0,0.5)!important; font-size:0.8rem; max-width:100% }
+    .msg-bubble { word-break:break-word; overflow-wrap:anywhere; max-width:100% }
     .msg-md code { font-family:'JetBrains Mono',monospace; font-size:0.85em }
     .msg-md :not(pre)>code { background:rgba(255,255,255,0.08); padding:0.15em 0.35em; border-radius:0.25rem }
     .msg-md strong { color:#fff }
