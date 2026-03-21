@@ -126,14 +126,21 @@ def create_app(node: MycellmNode) -> FastAPI:
             if os.path.isdir(assets_dir):
                 app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-            # SPA catch-all: any non-API path serves index.html
-            @app.get("/{path:path}")
-            async def spa_fallback(path: str):
-                # Serve actual files if they exist (favicon, etc.)
-                file_path = os.path.join(web_path, path)
-                if path and os.path.isfile(file_path):
-                    return FileResponse(file_path)
-                return FileResponse(index_html)
+            # SPA fallback: serve index.html for non-API GET requests
+            # Uses exception handler instead of catch-all route to avoid
+            # 405 conflicts with API POST/DELETE endpoints
+            from starlette.exceptions import HTTPException as StarletteHTTPException
+
+            @app.exception_handler(404)
+            async def spa_fallback(request, exc):
+                path = request.url.path.lstrip("/")
+                # Only serve SPA for GET requests to non-API paths
+                if request.method == "GET" and not path.startswith("v1/"):
+                    file_path = os.path.join(web_path, path)
+                    if path and os.path.isfile(file_path):
+                        return FileResponse(file_path)
+                    return FileResponse(index_html)
+                return JSONResponse(status_code=404, content={"error": "not found"})
 
     except Exception:
         pass
