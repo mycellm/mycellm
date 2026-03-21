@@ -133,20 +133,39 @@
                 </div>
 
                 <!-- Chat Input -->
-                <div class="relative">
-                    <textarea id="heroInput" rows="2"
-                        placeholder="Ask anything..."
-                        class="chat-input w-full glass-green rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 pr-14 text-white text-base sm:text-lg resize-none transition-all"
-                        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
-                    <button id="heroSendBtn" onclick="sendMessage()"
-                        class="send-btn absolute right-3 bottom-3 w-9 h-9 sm:w-10 sm:h-10 bg-spore text-black rounded-xl flex items-center justify-center shadow-lg shadow-spore/20">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                    </button>
+                <div id="heroInputWrap">
+                    <div class="relative">
+                        <textarea id="heroInput" rows="2"
+                            placeholder="Ask anything..."
+                            class="chat-input w-full glass-green rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 pr-14 text-white text-base sm:text-lg resize-none transition-all"
+                            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+                        <button id="heroSendBtn" onclick="sendMessage()"
+                            class="send-btn absolute right-3 bottom-3 w-9 h-9 sm:w-10 sm:h-10 bg-spore text-black rounded-xl flex items-center justify-center shadow-lg shadow-spore/20">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        </button>
+                    </div>
+                    <p class="text-[11px] sm:text-xs text-gray-600 mt-3">
+                        Free tier &middot; 5,000 tokens/day &middot; No signup &middot; <span class="text-gray-700">Prompts processed by distributed nodes</span>
+                    </p>
                 </div>
 
-                <p class="text-[11px] sm:text-xs text-gray-600">
-                    Free tier &middot; 5,000 tokens/day &middot; No signup &middot; <span class="text-gray-700">Prompts processed by distributed nodes</span>
-                </p>
+                <!-- No models banner (shown when network has 0 models) -->
+                <div id="noModelsBanner" class="hidden">
+                    <div class="glass rounded-2xl p-5 sm:p-6 text-center" style="border-color: rgba(250,204,21,0.15);">
+                        <div class="text-ledger text-lg mb-1">The network needs your help</div>
+                        <p class="text-gray-400 text-sm mb-4">
+                            No GPU nodes are online right now. Be one of the first to power free AI for everyone.
+                        </p>
+                        <div class="font-mono text-xs sm:text-sm glass rounded-xl p-3 max-w-xs mx-auto text-left space-y-1 mb-4">
+                            <div><span class="text-gray-600">$</span> <span class="text-spore-glow">pip install mycellm</span></div>
+                            <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm init && mycellm serve</span></div>
+                        </div>
+                        <a href="/join.html" class="inline-block bg-spore text-black font-semibold text-sm px-5 py-2 rounded-xl hover:bg-spore-glow transition-colors shadow-lg shadow-spore/20">
+                            Join as a seeder &rarr;
+                        </a>
+                        <p class="text-[10px] text-gray-600 mt-3">Your node will appear on the network within 60 seconds.</p>
+                    </div>
+                </div>
 
                 <!-- Suggested prompts -->
                 <div class="flex flex-wrap justify-center gap-2 pt-1">
@@ -369,6 +388,66 @@
             document.getElementById('typing')?.remove();
         }
 
+        function addErrorMessage(type, detail) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'flex justify-start';
+
+            const errors = {
+                'no-models': {
+                    icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ledger shrink-0"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>`,
+                    title: 'No models online right now',
+                    body: 'The network needs more GPU contributors to serve requests. You can help!',
+                    cta: `<div class="flex flex-wrap gap-2 mt-2.5">
+                        <a href="/join.html" class="inline-flex items-center space-x-1.5 bg-spore text-black text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-spore-glow transition-colors">
+                            <span>Contribute your GPU</span><span>&rarr;</span>
+                        </a>
+                        <a href="/network.html" class="inline-flex items-center space-x-1.5 glass text-gray-300 text-xs px-3 py-1.5 rounded-lg hover:text-white hover:border-white/20 transition-colors">
+                            <span>View network status</span>
+                        </a>
+                    </div>
+                    <p class="text-[10px] text-gray-600 mt-2">Three commands to join: pip install mycellm && mycellm init && mycellm serve</p>`,
+                },
+                'rate-limit': {
+                    icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-compute shrink-0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+                    title: 'Rate limit reached',
+                    body: detail || 'You\'ve used your free token budget for today.',
+                    cta: `<p class="text-xs text-gray-400 mt-2">Want unlimited access? <a href="/join.html" class="text-spore hover:underline">Start seeding</a> to earn contributor-tier access with 50,000 tokens/day.</p>`,
+                },
+                'connection': {
+                    icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-compute shrink-0"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>`,
+                    title: 'Can\'t reach the network',
+                    body: detail ? `Connection error: ${detail}` : 'The network may be temporarily unavailable.',
+                    cta: `<p class="text-xs text-gray-400 mt-2">Try again in a moment. Check <a href="/network.html" class="text-spore hover:underline">network status</a> for live info.</p>`,
+                },
+                'generic': {
+                    icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-compute shrink-0"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>`,
+                    title: 'Something went wrong',
+                    body: detail || 'The request could not be completed.',
+                    cta: `<p class="text-xs text-gray-400 mt-2">Try again or check <a href="/network.html" class="text-spore hover:underline">network status</a>.</p>`,
+                },
+            };
+
+            const e = errors[type] || errors['generic'];
+            div.innerHTML = `
+                <div class="max-w-[90%] sm:max-w-[80%]">
+                    <div class="glass rounded-2xl rounded-bl-md px-3.5 sm:px-4 py-3 sm:py-4 text-sm border-compute/20" style="border-color: rgba(239,68,68,0.15);">
+                        <div class="flex items-start space-x-2.5">
+                            ${e.icon}
+                            <div>
+                                <div class="font-medium text-white text-sm">${e.title}</div>
+                                <p class="text-gray-400 text-xs mt-1 leading-relaxed">${e.body}</p>
+                                ${e.cta}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+
+            // Don't add to messages array — errors aren't part of conversation context
+        }
+
         // ── Send message ──
         async function sendMessage() {
             if (isStreaming) return;
@@ -402,7 +481,14 @@
                 if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}));
                     removeTypingIndicator();
-                    addMessage('assistant', err.error?.message || `Error: ${resp.status}`);
+                    const errMsg = err.error?.message || '';
+                    if (resp.status === 503 || errMsg.includes('No models')) {
+                        addErrorMessage('no-models');
+                    } else if (resp.status === 429) {
+                        addErrorMessage('rate-limit', errMsg);
+                    } else {
+                        addErrorMessage('generic', errMsg || `Server returned ${resp.status}`);
+                    }
                     isStreaming = false;
                     return;
                 }
@@ -466,7 +552,7 @@
 
             } catch (e) {
                 removeTypingIndicator();
-                addMessage('assistant', `Connection error: ${e.message}. Is the network online?`);
+                addErrorMessage('connection', e.message);
             }
 
             isStreaming = false;
@@ -481,10 +567,24 @@
                 if (!r.ok) return;
                 const d = await r.json();
 
+                const modelsAvailable = (d.models?.unique || 0) > 0;
                 document.getElementById('statNodes').textContent = d.nodes?.online || '-';
                 document.getElementById('statModels').textContent = d.models?.unique || '-';
                 document.getElementById('statTPS').textContent = d.compute?.total_tps?.toFixed(1) || '-';
                 document.getElementById('statVRAM').textContent = d.compute?.total_vram_gb?.toFixed(0) || '-';
+
+                // Toggle hero input vs no-models banner
+                const inputWrap = document.getElementById('heroInputWrap');
+                const banner = document.getElementById('noModelsBanner');
+                if (inputWrap && banner) {
+                    if (modelsAvailable) {
+                        inputWrap.classList.remove('hidden');
+                        banner.classList.add('hidden');
+                    } else {
+                        inputWrap.classList.add('hidden');
+                        banner.classList.remove('hidden');
+                    }
+                }
 
                 // Model directory
                 const dir = document.getElementById('modelDirectory');
