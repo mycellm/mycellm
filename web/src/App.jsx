@@ -2232,7 +2232,7 @@ function ModelsTab({ status, onRefresh }) {
               )}
 
               {/* Suggested models — list view with inline expand */}
-              {!hasSearched && !repoFiles && suggestions && suggestions.length > 0 && (
+              {!hasSearched && suggestions && suggestions.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-xs text-gray-500 font-mono uppercase tracking-wider">Suggested for this node</h3>
