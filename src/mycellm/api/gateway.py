@@ -223,7 +223,13 @@ async def public_chat(request: Request):
         })
 
 
-def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, completion_tokens, latency_ms):
+def _node_hash(addr: str) -> str:
+    """Generate an anonymized 8-char hash of a node address for attribution."""
+    import hashlib
+    return hashlib.sha256(addr.encode()).hexdigest()[:8]
+
+
+def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, completion_tokens, latency_ms, node_id=""):
     """Build a clean, metadata-stripped OpenAI-compatible response."""
     return {
         "id": request_id,
@@ -242,6 +248,7 @@ def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, 
         },
         "mycellm": {
             "latency_ms": latency_ms,
+            "node": node_id or "local",
             "served_by": "mycellm-public",
         },
     }
@@ -284,6 +291,7 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0),
             latency_ms,
+            node_id=_node_hash(fleet_addr),
         )
 
     except Exception as e:
@@ -300,8 +308,11 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
     from fastapi.responses import StreamingResponse
     from mycellm.activity import EventType
 
+    node_id = _node_hash(fleet_addr)
+
     async def generate():
         total_tokens = 0
+        first_chunk = True
         base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=120.0)) as client:
@@ -328,7 +339,6 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
                             if content:
                                 total_tokens += len(content.split())
 
-                            # Re-wrap with our request_id (strip internal IDs)
                             out = {
                                 "id": request_id,
                                 "object": "chat.completion.chunk",
@@ -336,15 +346,27 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
                                 "model": model_name,
                                 "choices": [{"index": 0, "delta": {"content": content} if content else {}, "finish_reason": finish}],
                             }
+                            # First chunk: include node attribution
+                            if first_chunk:
+                                out["mycellm"] = {"node": node_id, "served_by": "mycellm-public"}
+                                first_chunk = False
                             yield f"data: {json.dumps(out)}\n\n"
                             if finish:
                                 break
                         except json.JSONDecodeError:
                             continue
 
+            # Final metadata chunk with latency
+            latency_ms = round((time.time() - start_time) * 1000)
+            meta_chunk = {
+                "id": request_id, "object": "chat.completion.chunk",
+                "model": model_name,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+                "mycellm": {"node": node_id, "latency_ms": latency_ms, "served_by": "mycellm-public"},
+            }
+            yield f"data: {json.dumps(meta_chunk)}\n\n"
             yield "data: [DONE]\n\n"
 
-            latency_ms = round((time.time() - start_time) * 1000)
             _record_usage(client_ip, total_tokens)
             node.activity.record(
                 EventType.INFERENCE_COMPLETE,
@@ -375,8 +397,11 @@ async def _stream_public(node, request_id, model_name, messages, temperature, ma
     from mycellm.activity import EventType
     from mycellm.inference.base import InferenceRequest
 
+    local_node_id = _node_hash(node.peer_id) if hasattr(node, 'peer_id') else "local"
+
     async def generate():
         total_tokens = 0
+        first_chunk = True
         try:
             inf_req = InferenceRequest(
                 model=model_name,
@@ -408,13 +433,23 @@ async def _stream_public(node, request_id, model_name, messages, temperature, ma
                         "finish_reason": chunk.finish_reason,
                     }],
                 }
+                if first_chunk:
+                    data["mycellm"] = {"node": local_node_id, "served_by": "mycellm-public"}
+                    first_chunk = False
                 yield f"data: {json.dumps(data)}\n\n"
                 if chunk.finish_reason:
                     break
 
+            latency_ms = round((time.time() - start_time) * 1000)
+            meta_chunk = {
+                "id": request_id, "object": "chat.completion.chunk",
+                "model": model_name,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+                "mycellm": {"node": local_node_id, "latency_ms": latency_ms, "served_by": "mycellm-public"},
+            }
+            yield f"data: {json.dumps(meta_chunk)}\n\n"
             yield "data: [DONE]\n\n"
 
-            latency_ms = round((time.time() - start_time) * 1000)
             _record_usage(client_ip, total_tokens)
             node.activity.record(
                 EventType.INFERENCE_COMPLETE,

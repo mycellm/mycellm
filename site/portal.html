@@ -127,7 +127,7 @@
                 </div>
 
                 <p class="text-[11px] sm:text-xs text-gray-600">
-                    Free tier &middot; 5,000 tokens/day &middot; Tier 1 models &middot; No signup required
+                    Free tier &middot; 5,000 tokens/day &middot; No signup &middot; <span class="text-gray-700">Prompts processed by distributed nodes</span>
                 </p>
 
                 <!-- Suggested prompts -->
@@ -150,16 +150,17 @@
 
         <!-- ── Chat Area (replaces hero after first message) ── -->
         <div id="chatArea" class="hidden flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-6">
+            <!-- Privacy notice (dismissible) -->
+            <div id="privacyNotice" class="glass rounded-lg px-3 py-2 mt-2 flex items-center justify-between text-[11px] text-gray-500">
+                <div class="flex items-center space-x-2">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ledger shrink-0"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                    <span>Prompts are processed by distributed GPU nodes. Don't share passwords, API keys, or personal data.</span>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-gray-600 hover:text-gray-400 ml-2 shrink-0">&times;</button>
+            </div>
+
             <!-- Messages -->
             <div id="chatMessages" class="flex-1 overflow-y-auto space-y-3 sm:space-y-4 py-3 sm:py-4 min-h-0"></div>
-
-            <!-- Attribution -->
-            <div id="attribution" class="hidden text-center text-[11px] sm:text-xs text-gray-600 py-1.5">
-                <span id="attrText"></span>
-                <span class="hidden sm:inline"> &middot;
-                    <a href="/join.html" class="text-spore hover:underline">Want bigger models? Start seeding &rarr;</a>
-                </span>
-            </div>
 
             <!-- Input bar -->
             <div class="border-t border-white/5 py-3 sm:py-4">
@@ -174,9 +175,9 @@
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     </button>
                 </div>
-                <!-- Mobile CTA -->
-                <div class="sm:hidden text-center mt-2">
-                    <a href="/join.html" class="text-[11px] text-spore hover:underline">Contribute your GPU &rarr;</a>
+                <div class="flex items-center justify-between mt-1.5 px-1">
+                    <span class="text-[10px] text-gray-700 hidden sm:block">Shift+Enter for new line</span>
+                    <a href="/join.html" class="text-[10px] sm:text-[11px] text-spore hover:underline">Contribute your GPU &rarr;</a>
                 </div>
             </div>
         </div>
@@ -294,15 +295,21 @@
             const isUser = role === 'user';
             div.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
             div.innerHTML = `
-                <div class="msg-bubble max-w-[90%] sm:max-w-[80%] ${isUser
-                    ? 'glass-green text-white'
-                    : 'glass text-gray-200'
-                } rounded-2xl ${isUser ? 'rounded-br-md' : 'rounded-bl-md'} px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed">
-                    <span class="msg-content">${escapeHtml(content)}</span>
+                <div class="max-w-[90%] sm:max-w-[80%]">
+                    <div class="msg-bubble ${isUser
+                        ? 'glass-green text-white'
+                        : 'glass text-gray-200'
+                    } rounded-2xl ${isUser ? 'rounded-br-md' : 'rounded-bl-md'} px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed">
+                        <span class="msg-content">${escapeHtml(content)}</span>
+                    </div>
+                    ${isUser ? '' : '<div class="msg-attr text-[10px] text-gray-600 mt-1 ml-1 font-mono"></div>'}
                 </div>`;
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
-            return div.querySelector('.msg-content');
+            return {
+                contentEl: div.querySelector('.msg-content'),
+                attrEl: div.querySelector('.msg-attr'),
+            };
         }
 
         function addTypingIndicator() {
@@ -311,10 +318,13 @@
             div.id = 'typing';
             div.className = 'flex justify-start';
             div.innerHTML = `
-                <div class="glass rounded-2xl rounded-bl-md px-4 py-3 flex items-center space-x-1.5">
-                    <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
-                    <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
-                    <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
+                <div class="max-w-[90%]">
+                    <div class="glass rounded-2xl rounded-bl-md px-4 py-3 flex items-center space-x-1.5">
+                        <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
+                        <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
+                        <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
+                    </div>
+                    <div class="text-[10px] text-gray-700 mt-1 ml-1 font-mono">Routing to network...</div>
                 </div>`;
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
@@ -363,9 +373,11 @@
                 }
 
                 removeTypingIndicator();
-                const contentEl = addMessage('assistant', '');
+                const { contentEl, attrEl } = addMessage('assistant', '');
                 let fullText = '';
                 let model = '';
+                let nodeId = '';
+                let serverLatency = 0;
 
                 const reader = resp.body.getReader();
                 const decoder = new TextDecoder();
@@ -387,6 +399,17 @@
                         try {
                             const chunk = JSON.parse(payload);
                             model = chunk.model || model;
+
+                            // Extract node attribution from mycellm metadata
+                            if (chunk.mycellm) {
+                                nodeId = chunk.mycellm.node || nodeId;
+                                if (chunk.mycellm.latency_ms) serverLatency = chunk.mycellm.latency_ms;
+                                // Show attribution immediately on first chunk
+                                if (attrEl && nodeId && !attrEl.textContent) {
+                                    attrEl.textContent = `${model} via node ${nodeId}`;
+                                }
+                            }
+
                             const delta = chunk.choices?.[0]?.delta?.content || '';
                             if (delta) {
                                 fullText += delta;
@@ -399,11 +422,12 @@
 
                 messages[messages.length - 1].content = fullText;
 
-                const latency = Date.now() - startTime;
-                const attr = document.getElementById('attribution');
-                document.getElementById('attrText').textContent =
-                    `Served by ${model || 'mycellm'} in ${latency}ms on the distributed network`;
-                attr.classList.remove('hidden');
+                // Final attribution with latency
+                const clientLatency = Date.now() - startTime;
+                const latency = serverLatency || clientLatency;
+                if (attrEl) {
+                    attrEl.innerHTML = `<span class="text-gray-500">${model}</span> via <span class="text-spore/60">node ${nodeId || 'local'}</span> &middot; ${latency}ms`;
+                }
 
             } catch (e) {
                 removeTypingIndicator();
