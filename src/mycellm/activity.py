@@ -91,13 +91,22 @@ class ActivityTracker:
             tokens = data.get("tokens", 0)
             self._token_count += tokens
             self._current_bucket["tokens"] += tokens
+            # Prometheus
+            _prom_inference_complete(data)
         elif event_type == EventType.INFERENCE_FAILED:
             self._error_count += 1
             self._current_bucket["errors"] += 1
+            _prom_inference_failed(data)
         elif event_type == EventType.CREDIT_EARNED:
             self._current_bucket["credits_earned"] += data.get("amount", 0)
+            _prom_credit_earned(data)
         elif event_type == EventType.CREDIT_SPENT:
             self._current_bucket["credits_spent"] += data.get("amount", 0)
+            _prom_credit_spent(data)
+        elif event_type == EventType.ANNOUNCE_OK:
+            _prom_announce("ok")
+        elif event_type == EventType.ANNOUNCE_FAILED:
+            _prom_announce("failed")
 
         # Broadcast to SSE subscribers
         for q in self._subscribers:
@@ -174,3 +183,58 @@ class ActivityTracker:
             self._subscribers.remove(q)
         except ValueError:
             pass
+
+
+# --- Prometheus push helpers (no-op if prometheus_client not installed) ---
+
+def _prom_inference_complete(data: dict) -> None:
+    try:
+        from mycellm.metrics import inference_requests_total, inference_tokens_total, inference_latency_seconds
+        model = data.get("model", "unknown")
+        backend = data.get("backend", "unknown")
+        inference_requests_total.labels(model=model, backend=backend, status="ok").inc()
+        prompt_tokens = data.get("prompt_tokens", 0)
+        completion_tokens = data.get("completion_tokens", data.get("tokens", 0))
+        if prompt_tokens:
+            inference_tokens_total.labels(model=model, direction="prompt").inc(prompt_tokens)
+        if completion_tokens:
+            inference_tokens_total.labels(model=model, direction="completion").inc(completion_tokens)
+        latency = data.get("latency_ms", 0)
+        if latency:
+            inference_latency_seconds.labels(model=model).observe(latency / 1000.0)
+    except ImportError:
+        pass
+
+
+def _prom_inference_failed(data: dict) -> None:
+    try:
+        from mycellm.metrics import inference_requests_total
+        model = data.get("model", "unknown")
+        backend = data.get("backend", "unknown")
+        inference_requests_total.labels(model=model, backend=backend, status="error").inc()
+    except ImportError:
+        pass
+
+
+def _prom_credit_earned(data: dict) -> None:
+    try:
+        from mycellm.metrics import credits_earned_total
+        credits_earned_total.inc(data.get("amount", 0))
+    except ImportError:
+        pass
+
+
+def _prom_credit_spent(data: dict) -> None:
+    try:
+        from mycellm.metrics import credits_spent_total
+        credits_spent_total.inc(data.get("amount", 0))
+    except ImportError:
+        pass
+
+
+def _prom_announce(result: str) -> None:
+    try:
+        from mycellm.metrics import announce_total
+        announce_total.labels(result=result).inc()
+    except ImportError:
+        pass

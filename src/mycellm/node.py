@@ -726,6 +726,13 @@ class MycellmNode:
         self._growth_task = asyncio.create_task(self._growth_snapshot_loop())
         self._growth_snapshots: dict = {}
 
+        # Initialize Prometheus metrics
+        try:
+            from mycellm.metrics import set_node_info
+            set_node_info(self.peer_id, self._settings.node_name, "0.1.0")
+        except ImportError:
+            pass
+
         logger.info(f"{styled_tag('NODE')} Swarm connected. Awaiting inference tasks.")
 
         # Start API server (blocks)

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 # Paths that never require auth
-_PUBLIC_PATHS = {"/health", "/docs", "/openapi.json"}
+_PUBLIC_PATHS = {"/health", "/metrics", "/docs", "/openapi.json"}
 _PUBLIC_PREFIXES = ("/health",)  # dashboard static files served at /
 
 
@@ -98,6 +98,17 @@ def create_app(node: MycellmNode) -> FastAPI:
             "peer_id": node.peer_id,
             "auth_required": bool(settings.api_key),
         }
+
+    # Prometheus metrics endpoint (always public)
+    @app.get("/metrics")
+    async def metrics():
+        from fastapi.responses import Response
+        from mycellm.metrics import collect_from_node, render_metrics
+        collect_from_node(node)
+        return Response(
+            content=render_metrics(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     # Serve web dashboard with SPA fallback
     try:
