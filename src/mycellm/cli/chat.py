@@ -287,6 +287,21 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                     console.print(f"[dim]Unknown command: /{cmd_name}. Type /help for available commands.[/dim]")
                 continue
 
+            # Sensitive content scan
+            from mycellm.privacy import scan_sensitive
+            matches = scan_sensitive(stripped)
+            if matches:
+                from mycellm.cli.banner import COMPUTE_RED, LEDGER_GOLD
+                for m in matches:
+                    icon = f"[{COMPUTE_RED}]!!![/{COMPUTE_RED}]" if m.severity == "high" else f"[{LEDGER_GOLD}]![/{LEDGER_GOLD}]"
+                    console.print(f"  {icon} {m.label}: [dim]{m.pattern}[/dim]")
+                console.print(f"  [dim]Prompts are processed by distributed nodes.[/dim]")
+                try:
+                    if not typer.confirm("  Send anyway?", default=False):
+                        continue
+                except (EOFError, KeyboardInterrupt):
+                    continue
+
             # Chat message
             messages.append({"role": "user", "content": stripped})
 

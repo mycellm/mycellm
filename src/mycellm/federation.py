@@ -22,6 +22,7 @@ class NetworkIdentity:
     bootstrap_addrs: list[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     public: bool = False  # Whether this network allows anonymous joining
+    trust_level: str = "untrusted"  # untrusted, trusted, full, local
     min_model_tier: str = ""  # Minimum model tier to participate (empty = any)
 
     def to_dict(self) -> dict:
@@ -31,6 +32,7 @@ class NetworkIdentity:
             "bootstrap_addrs": self.bootstrap_addrs,
             "created_at": self.created_at,
             "public": self.public,
+            "trust_level": self.trust_level,
             "min_model_tier": self.min_model_tier,
         }
 
@@ -42,6 +44,7 @@ class NetworkIdentity:
             bootstrap_addrs=d.get("bootstrap_addrs", []),
             created_at=d.get("created_at", 0),
             public=d.get("public", False),
+            trust_level=d.get("trust_level", "untrusted"),
             min_model_tier=d.get("min_model_tier", ""),
         )
 

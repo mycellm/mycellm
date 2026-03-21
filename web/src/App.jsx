@@ -2765,6 +2765,22 @@ function ChatTab() {
       }
     }
 
+    // Sensitive content scan
+    const sensitivePatterns = [
+      { type: 'API key', re: /sk-[a-zA-Z0-9]{20,}|sk-or-v1-[a-zA-Z0-9]{40,}|gh[ps]_[a-zA-Z0-9]{36,}|AKIA[A-Z0-9]{16}|sk-ant-[a-zA-Z0-9-]{20,}|hf_[a-zA-Z0-9]{20,}/i },
+      { type: 'Private key', re: /-----BEGIN\s+(?:RSA|EC|ED25519|OPENSSH|PGP)\s+PRIVATE\s+KEY-----/i },
+      { type: 'Password', re: /(?:password|passwd|pwd)\s*[=:]\s*['"]?[^\s'"]{4,}/i },
+      { type: 'Credit card', re: /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/ },
+      { type: 'Connection string', re: /(?:postgresql|mysql|mongodb|redis):\/\/[^\s]{10,}/i },
+    ]
+    const detected = sensitivePatterns.filter(p => p.re.test(text)).map(p => p.type)
+    if (detected.length > 0) {
+      if (!window.confirm(`Sensitive content detected: ${detected.join(', ')}\n\nPrompts may be processed by remote peers. Send anyway?`)) {
+        setInput(text)
+        return
+      }
+    }
+
     const userMsg = { role: 'user', content: text }
     const history = [...messages.filter(m => !m.isCommand), userMsg]
     setMessages(prev => [...prev, userMsg])

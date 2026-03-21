@@ -72,6 +72,7 @@ async def debug_config(request: Request):
         "hf_token_set": bool(node._settings.hf_token),
         "db_backend": db_backend,
         "log_level": node._settings.log_level,
+        "no_log_inference": node._settings.no_log_inference,
         "telemetry": node._settings.telemetry,
         "announce_task_alive": node._announce_task is not None and not node._announce_task.done() if hasattr(node, '_announce_task') else False,
     }

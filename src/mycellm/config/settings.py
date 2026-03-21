@@ -122,6 +122,10 @@ class MycellmSettings(BaseSettings):
     # Credit
     initial_credits: float = 100.0
 
+    # Privacy — no-log policy for inference content
+    # When true, prompt/response content is never written to disk or logs
+    no_log_inference: bool = True
+
     # Quality floor
     min_model_tier: str = ""  # Minimum model tier for this network
 
