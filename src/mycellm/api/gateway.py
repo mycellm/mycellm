@@ -101,8 +101,9 @@ def _select_tier1_model(node) -> tuple[str | None, str | None]:
     if node.inference.loaded_models:
         return node.inference.loaded_models[0].name, None
 
-    # Check fleet nodes for Tier 1 models
+    # Check fleet nodes — prefer Tier 1, fall back to any model
     import time as _time
+    best_fleet = None  # (name, addr, tier)
     for entry in node.node_registry.values():
         if entry.get("status") != "approved":
             continue
@@ -110,12 +111,21 @@ def _select_tier1_model(node) -> tuple[str | None, str | None]:
             continue  # offline
         for m in entry.get("capabilities", {}).get("models", []):
             if isinstance(m, dict):
+                name = m.get("name", "")
                 param_b = m.get("param_count_b", 0)
                 tier = classify_tier(param_b)
-                if tier <= 1:  # Tier 1 or unknown
-                    return m.get("name", ""), entry.get("api_addr", "")
-            elif isinstance(m, str):
-                return m, entry.get("api_addr", "")
+            else:
+                name = m
+                tier = 1  # unknown defaults to Tier 1
+            addr = entry.get("api_addr", "")
+            if tier <= 1:
+                return name, addr  # Tier 1 — use immediately
+            if best_fleet is None or tier < best_fleet[2]:
+                best_fleet = (name, addr, tier)
+
+    # No Tier 1 found — fall back to best available (better than nothing)
+    if best_fleet:
+        return best_fleet[0], best_fleet[1]
 
     return None, None
 

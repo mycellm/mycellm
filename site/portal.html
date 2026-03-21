@@ -99,14 +99,14 @@
                         <span class="w-1.5 h-1.5 rounded-full bg-spore animate-pulse"></span>
                         <span><span id="statNodes" class="text-gray-300">-</span> nodes</span>
                     </div>
-                    <div class="hidden sm:flex items-center space-x-1" title="Unique models">
-                        <span id="statModels" class="text-gray-300">-</span> models
+                    <div class="hidden sm:flex items-center" title="Unique models">
+                        <span><span id="statModels" class="text-gray-300">-</span>&nbsp;models</span>
                     </div>
-                    <div class="hidden md:flex items-center space-x-1" title="Network throughput">
-                        <span id="statTPS" class="text-gray-300">-</span> T/s
+                    <div class="hidden md:flex items-center" title="Network throughput">
+                        <span><span id="statTPS" class="text-gray-300">-</span>&nbsp;T/s</span>
                     </div>
-                    <div class="hidden lg:flex items-center space-x-1" title="Total VRAM">
-                        <span id="statVRAM" class="text-gray-300">-</span> GB
+                    <div class="hidden lg:flex items-center" title="Total VRAM">
+                        <span><span id="statVRAM" class="text-gray-300">-</span>&nbsp;GB</span>
                     </div>
                 </div>
             </div>
@@ -481,6 +481,7 @@
                 if (!resp.ok) {
                     const err = await resp.json().catch(() => ({}));
                     removeTypingIndicator();
+                    messages.pop(); // remove the failed user message from context
                     const errMsg = err.error?.message || '';
                     if (resp.status === 503 || errMsg.includes('No models')) {
                         addErrorMessage('no-models');
@@ -489,6 +490,8 @@
                     } else {
                         addErrorMessage('generic', errMsg || `Server returned ${resp.status}`);
                     }
+                    // Restore input for retry
+                    document.getElementById('chatInput').value = text;
                     isStreaming = false;
                     return;
                 }
@@ -552,7 +555,9 @@
 
             } catch (e) {
                 removeTypingIndicator();
+                messages.pop(); // remove failed user message from context
                 addErrorMessage('connection', e.message);
+                document.getElementById('chatInput').value = text; // restore for retry
             }
 
             isStreaming = false;

@@ -2685,12 +2685,78 @@ function ChatTab() {
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
+  // Slash command handlers
+  const slashCommands = {
+    help: { help: 'Show available commands', fn: async () => {
+      const lines = Object.entries(slashCommands).map(([k,v]) => `**/${k}** — ${v.help}`).join('\n')
+      return `### Commands\n${lines}\n\nType normally to chat.`
+    }},
+    status: { help: 'Show node status', fn: async () => {
+      const d = await api('/v1/node/status')
+      const hw = d.hardware || {}
+      return `**${d.node_name}** (${d.mode})\n- Peer: \`${(d.peer_id||'').slice(0,20)}...\`\n- Uptime: ${_fmtUp(d.uptime_seconds)}\n- Models: ${(d.models||[]).length}\n- Peers: ${(d.peers||[]).length}\n- Hardware: ${hw.gpu || 'CPU'} (${hw.vram_gb || 0}GB ${hw.backend || 'cpu'})`
+    }},
+    models: { help: 'List loaded models', fn: async () => {
+      const d = await api('/v1/models')
+      const m = d.data || []
+      if (!m.length) return '*No models loaded.*'
+      return `**${m.length} model(s):**\n` + m.map(x => `- \`${x.id}\` (${x.owned_by || 'local'})`).join('\n')
+    }},
+    credits: { help: 'Show credit balance', fn: async () => {
+      const d = await api('/v1/node/credits')
+      return `**Credits**\n- Balance: **${(d.balance||0).toFixed(2)}**\n- Earned: +${(d.earned||0).toFixed(2)}\n- Spent: -${(d.spent||0).toFixed(2)}`
+    }},
+    fleet: { help: 'Show fleet nodes', fn: async () => {
+      const d = await api('/v1/admin/nodes')
+      const nodes = d.nodes || []
+      if (!nodes.length) return '*No fleet nodes registered.*'
+      return `**${nodes.length} fleet node(s):**\n` + nodes.map(n => {
+        const st = n.online ? '🟢' : n.status === 'pending' ? '🟡' : '🔴'
+        const mods = (n.capabilities?.models || []).map(m => m.name || m).join(', ')
+        return `- ${st} **${n.node_name}** \`${n.api_addr}\` ${mods ? '— ' + mods : ''}`
+      }).join('\n')
+    }},
+    config: { help: 'Show node configuration', fn: async () => {
+      const d = await api('/v1/node/debug/config')
+      return `**Configuration**\n` + Object.entries(d).map(([k,v]) => `- ${k}: \`${v}\``).join('\n')
+    }},
+    clear: { help: 'Clear conversation', fn: async () => '__clear__' },
+  }
+
+  function _fmtUp(s) { const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60); return d>0?`${d}d ${h}h ${m}m`:h>0?`${h}h ${m}m`:`${m}m`; }
+
   const send = async () => {
     if (!input.trim() || sending) return
-    const userMsg = { role: 'user', content: input.trim() }
-    const history = [...messages, userMsg]
-    setMessages(history)
+    const text = input.trim()
     setInput('')
+
+    // Slash command dispatch
+    if (text.startsWith('/')) {
+      const [cmdName, ...rest] = text.slice(1).split(/\s+/)
+      const cmd = slashCommands[cmdName?.toLowerCase()]
+      if (cmd) {
+        const userMsg = { role: 'user', content: text, isCommand: true }
+        setMessages(prev => [...prev, userMsg])
+        setSending(true)
+        try {
+          const result = await cmd.fn(rest.join(' '))
+          if (result === '__clear__') {
+            setMessages([])
+            setSending(false)
+            return
+          }
+          setMessages(prev => [...prev, { role: 'assistant', content: result, isCommand: true }])
+        } catch (e) {
+          setMessages(prev => [...prev, { role: 'assistant', content: `*Error: ${e.message}*`, isCommand: true }])
+        }
+        setSending(false)
+        return
+      }
+    }
+
+    const userMsg = { role: 'user', content: text }
+    const history = [...messages.filter(m => !m.isCommand), userMsg]
+    setMessages(prev => [...prev, userMsg])
     setSending(true)
 
     try {
@@ -2698,7 +2764,7 @@ function ChatTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: model === 'auto' ? '' : model,  // empty = auto-route
+          model: model === 'auto' ? '' : model,
           messages: history.map(m => ({ role: m.role, content: m.content })),
           max_tokens: 2048,
           ...(model === 'auto' && (routingOpts.min_tier || routingOpts.required_tags.length > 0) ? {
@@ -2711,15 +2777,16 @@ function ChatTab() {
           } : {}),
         }),
       })
-      const text = resp.choices?.[0]?.message?.content || '[no response]'
+      const respText = resp.choices?.[0]?.message?.content || '[no response]'
       const usage = resp.usage || {}
       const routedTo = resp.model || 'unknown'
-      setMessages([...history, {
-        role: 'assistant', content: text, model: routedTo,
+      setMessages(prev => [...prev, {
+        role: 'assistant', content: respText, model: routedTo,
         tokens: `${usage.prompt_tokens || 0}+${usage.completion_tokens || 0}`,
       }])
     } catch (e) {
-      setMessages([...history, { role: 'assistant', content: `[Error: ${e.message}]` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `*Error: ${e.message}*` }])
+      setInput(text)  // restore input for retry
     }
     setSending(false)
   }
@@ -2859,7 +2926,7 @@ function ChatTab() {
         <div className="flex space-x-2">
           <input value={input} onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-            placeholder="Type a message..."
+            placeholder="Type a message or /help for commands..."
             className="flex-grow bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-spore/50 focus:outline-none" />
           <button onClick={send} disabled={sending || !input.trim()}
             className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 transition-all">
