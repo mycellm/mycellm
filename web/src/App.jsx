@@ -3379,6 +3379,7 @@ export default function App() {
   useEffect(() => {
     if (appState !== 'checking') return
     fetch('/health').then(r => r.json()).then(d => {
+      if (d.version) setVersionInfo(v => ({ ...v, current: d.version }))
       if (d.auth_required) {
         // Try stored key
         const stored = getApiKey()
