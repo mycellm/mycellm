@@ -271,7 +271,7 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
 
     base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=180.0)) as client:
             resp = await client.post(f"{base}/v1/chat/completions", json={
                 "model": model_name,
                 "messages": messages,
@@ -325,7 +325,7 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
         first_chunk = True
         base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=120.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=180.0)) as client:
                 async with client.stream("POST", f"{base}/v1/chat/completions", json={
                     "model": model_name,
                     "messages": messages,
