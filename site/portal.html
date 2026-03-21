@@ -305,6 +305,7 @@
 
         let messages = [];
         let isStreaming = false;
+        let abortController = null;
 
         // ── Prompt suggestions ──
         function fillPrompt(text) {
@@ -448,6 +449,33 @@
             // Don't add to messages array — errors aren't part of conversation context
         }
 
+        function stopStreaming() {
+            if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+            isStreaming = false;
+            removeTypingIndicator();
+            updateSendButton(false);
+        }
+
+        function updateSendButton(streaming) {
+            // Toggle send/stop icon on the chat input button
+            const btn = document.querySelector('#chatArea .send-btn');
+            if (!btn) return;
+            if (streaming) {
+                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+                btn.onclick = stopStreaming;
+                btn.classList.remove('bg-spore');
+                btn.classList.add('bg-compute');
+            } else {
+                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+                btn.onclick = sendMessage;
+                btn.classList.remove('bg-compute');
+                btn.classList.add('bg-spore');
+            }
+        }
+
         // ── Send message ──
         async function sendMessage() {
             if (isStreaming) return;
@@ -465,6 +493,8 @@
             addMessage('user', text);
             addTypingIndicator();
             isStreaming = true;
+            abortController = new AbortController();
+            updateSendButton(true);
 
             const startTime = Date.now();
 
@@ -476,6 +506,7 @@
                         messages: messages.map(m => ({ role: m.role, content: m.content })),
                         stream: true,
                     }),
+                    signal: abortController.signal,
                 });
 
                 if (!resp.ok) {
@@ -555,12 +586,21 @@
 
             } catch (e) {
                 removeTypingIndicator();
-                messages.pop(); // remove failed user message from context
-                addErrorMessage('connection', e.message);
-                document.getElementById('chatInput').value = text; // restore for retry
+                if (e.name === 'AbortError') {
+                    // User cancelled — keep partial response if any
+                    if (messages.length && messages[messages.length-1].role === 'assistant' && !messages[messages.length-1].content) {
+                        messages.pop(); // remove empty assistant message
+                    }
+                } else {
+                    messages.pop(); // remove failed user message from context
+                    addErrorMessage('connection', e.message);
+                    document.getElementById('chatInput').value = text; // restore for retry
+                }
             }
 
             isStreaming = false;
+            abortController = null;
+            updateSendButton(false);
         }
 
         function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

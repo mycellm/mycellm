@@ -324,6 +324,7 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
         total_tokens = 0
         first_chunk = True
         base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
+        upstream_resp = None
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=180.0)) as client:
                 async with client.stream("POST", f"{base}/v1/chat/completions", json={
@@ -333,6 +334,7 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
                     "max_tokens": max_tokens,
                     "stream": True,
                 }) as resp:
+                    upstream_resp = resp
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if not line.startswith("data: "):
@@ -384,6 +386,9 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
                 tokens=total_tokens, latency_ms=latency_ms,
             )
 
+        except asyncio.CancelledError:
+            logger.info(f"Client disconnected during fleet stream to {fleet_addr}")
+            return
         except Exception as e:
             logger.warning(f"Fleet stream to {fleet_addr} failed: {e}")
             error_chunk = {
@@ -393,6 +398,13 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
             }
             yield f"data: {json.dumps(error_chunk)}\n\n"
             yield "data: [DONE]\n\n"
+        finally:
+            # Close upstream connection if client disconnected mid-stream
+            if upstream_resp and not upstream_resp.is_stream_consumed:
+                try:
+                    await upstream_resp.aclose()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         generate(),
@@ -467,6 +479,9 @@ async def _stream_public(node, request_id, model_name, messages, temperature, ma
                 tokens=total_tokens, latency_ms=latency_ms,
             )
 
+        except asyncio.CancelledError:
+            logger.info("Client disconnected during local stream")
+            return
         except Exception as e:
             logger.warning(f"Public gateway stream failed: {e}")
             error_chunk = {

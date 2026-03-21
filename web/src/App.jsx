@@ -2668,6 +2668,7 @@ function ChatTab() {
   const [models, setModels] = useState([])
   const [sending, setSending] = useState(false)
   const [showRouting, setShowRouting] = useState(false)
+  const abortRef = useRef(null)
   const [routingOpts, setRoutingOpts] = useState({
     min_tier: '', required_tags: [], routing: 'best', fallback: 'downgrade'
   })
@@ -2758,6 +2759,8 @@ function ChatTab() {
     const history = [...messages.filter(m => !m.isCommand), userMsg]
     setMessages(prev => [...prev, userMsg])
     setSending(true)
+    const controller = new AbortController()
+    abortRef.current = controller
 
     try {
       const resp = await api('/v1/chat/completions', {
@@ -2776,6 +2779,7 @@ function ChatTab() {
             }
           } : {}),
         }),
+        signal: controller.signal,
       })
       const respText = resp.choices?.[0]?.message?.content || '[no response]'
       const usage = resp.usage || {}
@@ -2785,9 +2789,12 @@ function ChatTab() {
         tokens: `${usage.prompt_tokens || 0}+${usage.completion_tokens || 0}`,
       }])
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `*Error: ${e.message}*` }])
-      setInput(text)  // restore input for retry
+      if (e.name !== 'AbortError') {
+        setMessages(prev => [...prev, { role: 'assistant', content: `*Error: ${e.message}*` }])
+        setInput(text)
+      }
     }
+    abortRef.current = null
     setSending(false)
   }
 
@@ -2928,10 +2935,18 @@ function ChatTab() {
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
             placeholder="Type a message or /help for commands..."
             className="flex-grow bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-spore/50 focus:outline-none" />
-          <button onClick={send} disabled={sending || !input.trim()}
-            className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 transition-all">
-            <Send size={14} />
-          </button>
+          {sending ? (
+            <button onClick={() => { abortRef.current?.abort(); setSending(false) }}
+              className="bg-compute text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-compute/80 transition-all"
+              title="Stop generation">
+              <X size={14} />
+            </button>
+          ) : (
+            <button onClick={send} disabled={!input.trim()}
+              className="bg-spore text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-spore/90 disabled:opacity-40 transition-all">
+              <Send size={14} />
+            </button>
+          )}
         </div>
       </div>
     </div>
