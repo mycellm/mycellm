@@ -184,24 +184,55 @@ import Page from '../layouts/Page.astro';
     }
 
     // ── Randomized sample prompts ──
-    const allPrompts = [
-      'Explain distributed computing',
-      'Write a Python sort function',
-      'Why are P2P networks resilient?',
-      'Compare TCP and UDP',
-      'Write a haiku about code',
-      'How does BitTorrent work?',
-      'Explain public key crypto',
-      'What is the CAP theorem?',
-      'How do neural networks learn?',
-      'SQL vs NoSQL databases',
-      'Explain WebSockets',
-      'What is edge computing?',
-      'Write a Docker compose file',
-      'Explain MapReduce simply',
-      'What is consensus?',
-    ];
-    const shuffled = allPrompts.sort(() => Math.random() - 0.5).slice(0, 3);
+    const promptBanks = {
+      tech: [
+        'Explain distributed computing',
+        'How does BitTorrent work?',
+        'Compare TCP and UDP',
+        'What is the CAP theorem?',
+        'How do neural networks learn?',
+        'What is edge computing?',
+        'Explain public key crypto',
+        'SQL vs NoSQL databases',
+      ],
+      science: [
+        'How do black holes form?',
+        'Why is the sky blue?',
+        'How does CRISPR work?',
+        'Explain quantum entanglement',
+        'What causes tides?',
+        'How do vaccines work?',
+        'What is dark matter?',
+        'How do plants make energy?',
+      ],
+      creative: [
+        'Write a haiku about the sea',
+        'Tell a two-sentence horror story',
+        'Describe a color to someone blind',
+        'Write a limerick about AI',
+        'Invent a word and define it',
+        'Write a tiny fairy tale',
+        'Describe rain poetically',
+        'Name a fictional planet',
+      ],
+      life: [
+        'Best productivity tip?',
+        'How to learn a new language',
+        'Explain stoicism simply',
+        'What makes a good leader?',
+        'How to start meditating',
+        'Why is sleep important?',
+        'Tips for public speaking',
+        'How to read more books',
+      ],
+    };
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const shuffled = [
+      pick(promptBanks.tech),
+      pick(promptBanks.science),
+      pick(promptBanks.creative),
+      pick(promptBanks.life),
+    ].sort(() => Math.random() - 0.5).slice(0, 3);
     const chips = document.getElementById('promptChips');
     if (chips) {
       chips.innerHTML = shuffled.map(p =>
