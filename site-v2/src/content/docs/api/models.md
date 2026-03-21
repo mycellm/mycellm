@@ -59,4 +59,12 @@ Models are classified by parameter count:
 | Tier 2 | up to 70B | Mistral Small 24B, Llama 70B |
 | Tier 3 | 70B+ | Qwen 72B, Llama 405B |
 
-The public gateway restricts anonymous users to the best available model. Contributors and power seeders get access to higher tiers.
+Access is governed by credit balance — earned by contributing GPU time to the network:
+
+| Tier | Credit balance | Access |
+|------|---------------|--------|
+| Free | Anonymous / < 10 | Tier 1 models, 5K tokens/day |
+| Contributor | 10+ credits | Tier 1 + 2 models, 50K tokens/day |
+| Power Seeder | 50+ credits | All tiers, highest daily limits |
+
+Credits are earned by serving inference and spent by consuming it. The system is designed to be fair — contribute compute, get compute back.
