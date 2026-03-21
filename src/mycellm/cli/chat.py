@@ -25,13 +25,15 @@ def chat(
     model: str = typer.Option("", "--model", "-m", help="Model to use (default: auto)"),
     endpoint: str = typer.Option("http://localhost:8420", "--endpoint", "-e", help="API endpoint"),
     api_key: str = typer.Option("", "--api-key", "-k", help="API key (or set MYCELLM_API_KEY)"),
+    private: bool = typer.Option(False, "--private", "-p", help="Route only to local/trusted nodes (for sensitive data)"),
 ) -> None:
     """Interactive chat REPL with streaming and slash commands."""
     import asyncio
     import os
 
     key = api_key or os.environ.get("MYCELLM_API_KEY", "")
-    asyncio.run(_chat_loop(model, endpoint, key))
+    trust = "local" if private else ""
+    asyncio.run(_chat_loop(model, endpoint, key, trust))
 
 
 # ── Slash commands ──
@@ -212,7 +214,7 @@ async def _discover_endpoint(endpoint: str, headers: dict, console: Console) -> 
 
 # ── Chat loop ──
 
-async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
+async def _chat_loop(model: str, endpoint: str, api_key: str, trust: str = "") -> None:
     import httpx
     from rich.markdown import Markdown
     from rich.live import Live
@@ -235,6 +237,9 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
     else:
         console.print(f"  Model: [yellow]auto[/yellow] (routes to best available on network)")
     console.print(f"  Node:  [dim]{endpoint}[/dim]")
+    if trust:
+        trust_labels = {"local": "local only (no network)", "trusted": "trusted peers only"}
+        console.print(f"  Trust: [bold yellow]{trust_labels.get(trust, trust)}[/bold yellow]")
     console.print(f"  Type [green]/help[/green] for commands, [green]/q[/green] to exit")
     console.print(f"  [dim]Tip: run 'mycellm init' to configure your node[/dim]\n")
 
@@ -324,6 +329,7 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                         "model": current_model or "auto",
                         "messages": messages,
                         "stream": True,
+                        **({"mycellm": {"trust": trust}} if trust else {}),
                     },
                     headers={**headers, "Content-Type": "application/json"},
                 ) as resp:

@@ -70,6 +70,7 @@ class QualityConstraints:
     min_context: int = 0
     required_tags: list[str] = field(default_factory=list)
     max_cost: float = 0
+    trust: str = ""  # "local", "trusted", "any" — route to peers at this trust or higher
 
 
 @dataclass
@@ -190,6 +191,10 @@ class ModelResolver:
         if consumer_balance >= 0:
             candidates = self._apply_balance_filter(candidates, consumer_balance)
 
+        # Apply trust-based routing (for sensitive/private data)
+        if constraints and constraints.trust:
+            candidates = self._apply_trust_filter(candidates, constraints.trust)
+
         # Sort by score (best first)
         candidates.sort(key=lambda c: c.score, reverse=True)
         return candidates
@@ -252,6 +257,27 @@ class ModelResolver:
             filtered.append(c)
 
         return filtered
+
+    def _apply_trust_filter(
+        self, candidates: list[ResolvedModel], trust: str
+    ) -> list[ResolvedModel]:
+        """Filter candidates by trust/privacy requirements.
+
+        Trust levels control where sensitive prompts can be routed:
+          "local"   — only models on this node (no network exposure)
+          "trusted" — local + QUIC peers from trusted/org networks
+          "any"     — no restriction (default behavior)
+
+        This is the mechanism for routing private data to designated
+        peers only, even within a multi-network topology.
+        """
+        if trust == "local":
+            return [c for c in candidates if c.source == "local"] or candidates[:0]
+        elif trust == "trusted":
+            # Local + QUIC peers only (not fleet HTTP, which is less controlled)
+            return [c for c in candidates if c.source in ("local", "quic")]
+        # "any" or empty — no filtering
+        return candidates
 
     def _apply_balance_filter(
         self, candidates: list[ResolvedModel], balance: float

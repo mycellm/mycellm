@@ -29,6 +29,7 @@ class MycellmRouting(BaseModel):
     max_cost: float = 0         # max credits per request (0 = unlimited)
     routing: str = "best"       # "best", "fastest", "ensemble"
     fallback: str = "downgrade" # "reject" or "downgrade"
+    trust: str = ""             # "local", "trusted", "any" — route only to peers at this trust level or higher
 
 
 class ChatCompletionRequest(BaseModel):
@@ -96,6 +97,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             min_context=body.mycellm.min_context,
             required_tags=body.mycellm.required_tags,
             max_cost=body.mycellm.max_cost,
+            trust=body.mycellm.trust,
         )
 
     if not model_name and node.model_resolver:
