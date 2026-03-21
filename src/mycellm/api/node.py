@@ -644,24 +644,33 @@ async def get_telemetry(request: Request):
 @router.post("/settings/telemetry")
 async def set_telemetry(request: Request):
     """Toggle telemetry opt-in. Persists to .env file."""
+    import logging
     node = request.app.state.node
     body = await request.json()
     enabled = bool(body.get("enabled", False))
 
-    # Update runtime setting
-    node._settings.telemetry = enabled
+    # Update runtime setting (Pydantic v2 supports attribute assignment)
+    try:
+        object.__setattr__(node._settings, "telemetry", enabled)
+    except Exception as e:
+        logging.getLogger("mycellm.api").warning(f"Failed to set telemetry: {e}")
+        return {"error": str(e)}
 
     # Persist to .env
-    env_path = node._settings.config_dir / ".env"
-    env_lines = {}
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, val = line.partition("=")
-                env_lines[key.strip()] = val.strip()
-    env_lines["MYCELLM_TELEMETRY"] = str(enabled).lower()
-    env_path.write_text("\n".join(f"{k}={v}" for k, v in env_lines.items()) + "\n")
+    try:
+        env_path = node._settings.config_dir / ".env"
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_lines = {}
+        if env_path.exists():
+            for line in env_path.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, val = line.partition("=")
+                    env_lines[key.strip()] = val.strip()
+        env_lines["MYCELLM_TELEMETRY"] = str(enabled).lower()
+        env_path.write_text("\n".join(f"{k}={v}" for k, v in env_lines.items()) + "\n")
+    except Exception as e:
+        logging.getLogger("mycellm.api").warning(f"Failed to persist telemetry to .env: {e}")
 
     return {"enabled": enabled}
 

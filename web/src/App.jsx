@@ -1145,6 +1145,67 @@ function OverviewTab({ status, credits, fleetNodes }) {
         </div>
       </div>
 
+      {/* API Endpoint — drop-in LLM integration */}
+      {models.length > 0 && (() => {
+        const baseUrl = `${window.location.protocol}//${window.location.host}`
+        const apiKey = getApiKey()
+        return (
+          <div className="border border-white/10 bg-[#111] rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <Zap size={14} className="text-ledger" />
+                <h3 className="text-sm font-medium text-white">API Endpoint</h3>
+                <span className="text-xs px-1.5 py-0.5 rounded bg-spore/10 text-spore">OpenAI-compatible</span>
+              </div>
+              <button onClick={() => navigator.clipboard.writeText(`${baseUrl}/v1`)}
+                className="text-xs text-gray-500 hover:text-gray-300 flex items-center space-x-1">
+                <Copy size={11} />
+                <span>Copy</span>
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm font-mono">
+              <div className="bg-black/50 rounded-lg p-3 space-y-1.5">
+                <div className="text-xs text-gray-500">Base URL</div>
+                <div className="text-spore break-all">{baseUrl}/v1</div>
+              </div>
+              <div className="bg-black/50 rounded-lg p-3 space-y-1.5">
+                <div className="text-xs text-gray-500">Endpoint</div>
+                <div className="text-white break-all">/v1/chat/completions</div>
+              </div>
+            </div>
+            <details className="mt-3 text-xs">
+              <summary className="text-gray-500 cursor-pointer hover:text-gray-300">Usage examples</summary>
+              <div className="mt-2 space-y-3">
+                <div className="bg-black/50 rounded-lg p-3">
+                  <div className="text-gray-500 mb-1">Python (OpenAI SDK)</div>
+                  <pre className="text-gray-300 whitespace-pre-wrap font-mono">{`from openai import OpenAI
+
+client = OpenAI(
+    base_url="${baseUrl}/v1",${apiKey ? `\n    api_key="${apiKey}",` : ''}
+)
+response = client.chat.completions.create(
+    model="${models[0]?.name || 'auto'}",
+    messages=[{"role": "user", "content": "Hello"}],
+)`}</pre>
+                </div>
+                <div className="bg-black/50 rounded-lg p-3">
+                  <div className="text-gray-500 mb-1">curl</div>
+                  <pre className="text-gray-300 whitespace-pre-wrap font-mono">{`curl ${baseUrl}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\${apiKey ? `\n  -H "Authorization: Bearer ${apiKey}" \\` : ''}
+  -d '{"model": "${models[0]?.name || 'auto'}", "messages": [{"role": "user", "content": "Hello"}]}'`}</pre>
+                </div>
+                <div className="bg-black/50 rounded-lg p-3">
+                  <div className="text-gray-500 mb-1">Environment variables (works with most tools)</div>
+                  <pre className="text-gray-300 whitespace-pre-wrap font-mono">{`OPENAI_BASE_URL=${baseUrl}/v1
+OPENAI_API_KEY=${apiKey || 'your-api-key'}
+OPENAI_MODEL=${models[0]?.name || 'auto'}`}</pre>
+                </div>
+              </div>
+            </details>
+          </div>
+        )
+      })()}
+
       {/* Aggregate Fleet Banner (root mode) */}
       {fleetHardware && fleetHardware.aggregate && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -3040,13 +3101,19 @@ function SettingsTab() {
           <button onClick={async () => {
             const next = !config?.telemetry
             try {
-              await api('/v1/node/settings/telemetry', {
+              const resp = await api('/v1/node/settings/telemetry', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled: next }),
               })
-              setConfig(c => ({...c, telemetry: next}))
-            } catch {}
+              if (!resp.error) {
+                setConfig(c => ({...c, telemetry: next}))
+              } else {
+                setResult({ error: resp.error })
+              }
+            } catch (e) {
+              setResult({ error: `Toggle failed: ${e.message}` })
+            }
           }}
             className={`relative w-10 h-5 rounded-full transition-colors ${config?.telemetry ? 'bg-spore' : 'bg-white/10'}`}>
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${config?.telemetry ? 'translate-x-5' : 'translate-x-0.5'}`} />
