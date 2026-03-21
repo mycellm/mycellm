@@ -99,6 +99,94 @@ import Page from '../layouts/Page.astro';
       </div>
     </div>
 
+    <!-- Scale -->
+    <div class="mb-12">
+      <h2 class="text-xl font-bold text-white mb-4">The math of distributed compute</h2>
+      <div class="glass rounded-xl p-6 sm:p-8 mb-4">
+        <div class="space-y-4 text-sm text-gray-400 leading-relaxed">
+          <p>
+            A single NVIDIA RTX 4090 generates ~100 tokens/sec on a 7B model. Ten nodes = 1,000 T/s. A hundred nodes = 10,000 T/s — comparable to a small cloud inference cluster, with zero infrastructure cost.
+          </p>
+
+          <!-- Scale chart -->
+          <div class="mt-4 mb-2">
+            <div class="flex items-end justify-between gap-2 h-32">
+              <div class="flex flex-col items-center flex-1">
+                <div class="w-full bg-spore/20 rounded-t" style="height: 10%"></div>
+                <span class="text-[10px] text-gray-500 mt-1">3 nodes</span>
+                <span class="text-[10px] text-spore font-mono">300 T/s</span>
+              </div>
+              <div class="flex flex-col items-center flex-1">
+                <div class="w-full bg-spore/30 rounded-t" style="height: 25%"></div>
+                <span class="text-[10px] text-gray-500 mt-1">10 nodes</span>
+                <span class="text-[10px] text-spore font-mono">1K T/s</span>
+              </div>
+              <div class="flex flex-col items-center flex-1">
+                <div class="w-full bg-spore/40 rounded-t" style="height: 50%"></div>
+                <span class="text-[10px] text-gray-500 mt-1">50 nodes</span>
+                <span class="text-[10px] text-spore font-mono">5K T/s</span>
+              </div>
+              <div class="flex flex-col items-center flex-1">
+                <div class="w-full bg-spore/60 rounded-t" style="height: 75%"></div>
+                <span class="text-[10px] text-gray-500 mt-1">100 nodes</span>
+                <span class="text-[10px] text-relay font-mono">10K T/s</span>
+              </div>
+              <div class="flex flex-col items-center flex-1">
+                <div class="w-full bg-spore rounded-t" style="height: 100%"></div>
+                <span class="text-[10px] text-gray-500 mt-1">1K nodes</span>
+                <span class="text-[10px] text-ledger font-mono">100K T/s</span>
+              </div>
+            </div>
+            <div class="border-t border-white/10 mt-1 pt-1 text-[10px] text-gray-600 text-center">
+              Projected throughput (Tier 1 models, consumer GPUs)
+            </div>
+          </div>
+
+          <p>
+            As GPU hardware improves — every new generation of consumer GPUs is faster, cheaper, more efficient — the distributed network automatically gets better. No procurement, no datacenter buildout. The community IS the infrastructure.
+          </p>
+          <p>
+            This is how compute gets democratized: not by asking permission from hyperscalers, but by pooling what we already have.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Roadmap: private compute -->
+    <div class="mb-12">
+      <h2 class="text-xl font-bold text-white mb-4">Roadmap: private compute on untrusted hardware</h2>
+      <div class="space-y-3">
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-1">
+            <span class="w-2 h-2 rounded-full bg-spore shrink-0"></span>
+            <span class="text-white text-sm font-medium">Today: trust boundaries</span>
+          </div>
+          <p class="text-xs text-gray-400 ml-4">Private/org networks with full trust. Public network with client-side sensitive content detection. <code class="text-gray-300">--private</code> flag routes to local-only models.</p>
+        </div>
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-1">
+            <span class="w-2 h-2 rounded-full bg-relay shrink-0"></span>
+            <span class="text-white text-sm font-medium">Next: encrypted relay</span>
+          </div>
+          <p class="text-xs text-gray-400 ml-4">Client encrypts prompt metadata with the final-layer peer's public key. Intermediate peers process computational tensors without seeing the original context.</p>
+        </div>
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-1">
+            <span class="w-2 h-2 rounded-full bg-ledger shrink-0"></span>
+            <span class="text-white text-sm font-medium">Future: confidential compute</span>
+          </div>
+          <p class="text-xs text-gray-400 ml-4">Trusted Execution Environments (TEEs), secure enclaves, and homomorphic encryption techniques for running inference on untrusted hardware without exposing plaintext data.</p>
+        </div>
+        <div class="glass rounded-lg p-4">
+          <div class="flex items-center space-x-2 mb-1">
+            <span class="w-2 h-2 rounded-full bg-poison shrink-0"></span>
+            <span class="text-white text-sm font-medium">Research: fully private inference</span>
+          </div>
+          <p class="text-xs text-gray-400 ml-4">Multi-party computation (MPC) and functional encryption for transformer architectures. No single peer sees the full prompt or the full response. Computationally expensive today — but improving.</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Creator -->
     <div class="glass rounded-xl p-6 sm:p-8 mb-8">
       <h2 class="text-xl font-bold text-white mb-4">Created by</h2>
@@ -115,9 +203,9 @@ import Page from '../layouts/Page.astro';
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
               <span>michael@mycellm.ai</span>
             </a>
-            <a href="https://linkedin.com/in/michaelgsantos" target="_blank" rel="noopener" class="text-gray-500 hover:text-white transition-colors flex items-center space-x-1">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-              <span>LinkedIn</span>
+            <a href="https://michaelgifford.com" target="_blank" rel="noopener" class="text-gray-500 hover:text-white transition-colors flex items-center space-x-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              <span>michaelgifford.com</span>
             </a>
           </div>
         </div>
