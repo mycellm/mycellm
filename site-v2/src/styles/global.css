@@ -14,8 +14,10 @@ body {
 
 ::selection { background: #22C55E; color: black; }
 
-/* Kill ALL underlines on marketing pages */
+/* Kill ALL underlines, ensure readable link colors */
 a { text-decoration: none !important; }
+a:not([class]) { color: #22C55E; }
+a:not([class]):hover { color: #4ADE80; }
 
 /* ── Brand utilities ── */
 .text-glow { text-shadow: 0 0 10px rgba(74, 222, 128, 0.5), 0 0 20px rgba(74, 222, 128, 0.3); }

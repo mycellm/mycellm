@@ -47,16 +47,24 @@ a {
   text-decoration: none !important;
 }
 
-/* ── Link colors ── */
+/* ── Link colors — spore green for readability on dark ── */
 .sl-markdown-content a,
-starlight-file-tree a,
-.sidebar-content a {
+starlight-file-tree a {
   color: #22C55E !important;
   text-decoration: none !important;
 }
 
 .sl-markdown-content a:hover {
   color: #4ADE80 !important;
+}
+
+/* All other links in Starlight UI */
+a:not(.site-title):not([class*="sl-badge"]) {
+  color: inherit;
+}
+
+.sl-markdown-content a {
+  color: #22C55E !important;
 }
 
 /* Sidebar active item — white text on subtle green background for contrast */
