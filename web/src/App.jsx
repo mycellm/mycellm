@@ -426,7 +426,7 @@ function BootScreen({ onDone }) {
     <div className="min-h-screen bg-void text-console font-mono flex items-center justify-center p-6">
       <div className="max-w-2xl w-full border border-spore/20 bg-black/50 p-6 rounded-lg shadow-[0_0_30px_rgba(34,197,94,0.05)]">
         <div className="flex items-center space-x-4 mb-8">
-          <pre className="text-[6px] leading-none text-compute drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
+          <img src="/brand/mycellm-red-logo-sans.svg" alt="" className="h-12 drop-shadow-[0_0_8px_rgba(239,68,68,0.3)]" />
           <div>
             <h1 className="text-2xl font-bold tracking-tighter text-white">mycellm<span className="text-spore">_</span></h1>
             <p className="text-xs text-gray-500 uppercase tracking-widest">Boot Sequence</p>
@@ -2792,11 +2792,8 @@ export default function App() {
         <header className="border-b border-white/10 bg-void/80 backdrop-blur-md sticky top-0 z-50 relative">
           <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <pre className="text-[4px] leading-none text-compute drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]">{ASCII_SHROOM}</pre>
-              <span className="font-mono text-xl font-bold tracking-tighter text-white">
-                mycellm<span className="text-spore">.</span>
-              </span>
-              <div className="h-4 w-px bg-white/20 mx-2" />
+              <img src="/brand/mycellm-h-R.svg" alt="mycellm" className="h-6" />
+              <div className="h-4 w-px bg-white/20 mx-1" />
               <span className="font-mono text-xs bg-white/10 text-gray-300 px-2 py-1 rounded">{nodeName}</span>
               {peerId && <span className="font-mono text-xs text-gray-600 hidden md:inline">{peerId.slice(0, 12)}...</span>}
             </div>
