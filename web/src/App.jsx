@@ -1615,6 +1615,7 @@ function VariantTable({ repoFiles, filterCompatible, downloadStatus, localFiles,
           <tr className="text-gray-600 font-mono uppercase">
             <th className="text-left py-1 pr-2 w-20">Quant</th>
             <th className="text-left py-1 pr-2">Quality</th>
+            <th className="text-left py-1 pr-2 w-24 hidden sm:table-cell">Rating</th>
             <th className="text-right py-1 pr-2">Size</th>
             <th className="text-right py-1 pr-2">RAM</th>
             <th className="text-right py-1 w-24"></th>
@@ -1638,9 +1639,13 @@ function VariantTable({ repoFiles, filterCompatible, downloadStatus, localFiles,
                 <td className="py-1.5 pr-2">
                   <span className={`font-mono px-1.5 py-0.5 rounded ${quantColor}`}>{f.quant || '?'}</span>
                 </td>
-                <td className="py-1.5 pr-2 text-gray-500" title={qi.desc}>
-                  <span className="text-gray-400">{qi.quality}</span>
-                  <span className="text-gray-700 ml-1 hidden sm:inline">{'★'.repeat(qi.stars)}{'☆'.repeat(5 - qi.stars)}</span>
+                <td className="py-1.5 pr-2 text-gray-400" title={qi.desc}>
+                  {qi.quality}
+                </td>
+                <td className="py-1.5 pr-2 hidden sm:table-cell">
+                  <span className={`${qi.stars >= 4 ? 'text-spore' : qi.stars >= 3 ? 'text-ledger' : 'text-gray-600'}`}>
+                    {'★'.repeat(qi.stars)}{'☆'.repeat(5 - qi.stars)}
+                  </span>
                 </td>
                 <td className="py-1.5 pr-2 text-right text-gray-400 font-mono">{f.size_gb}GB</td>
                 <td className="py-1.5 pr-2 text-right text-gray-600">{f.est_ram_gb ? `~${f.est_ram_gb}` : '?'}GB</td>
