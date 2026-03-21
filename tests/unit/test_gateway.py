@@ -81,37 +81,60 @@ def test_select_tier1_model():
     from mycellm.api.gateway import _select_tier1_model
 
     class FakeNode:
+        node_registry = {}
         class inference:
             loaded_models = [
                 ModelCapability(name="llama-70b", param_count_b=70.0),
                 ModelCapability(name="qwen-7b", param_count_b=7.0),
                 ModelCapability(name="phi-3b", param_count_b=3.0),
             ]
-    node = FakeNode()
-    selected = _select_tier1_model(node)
-    # Should pick largest Tier 1 model
-    assert selected == "qwen-7b"
+    name, addr = _select_tier1_model(FakeNode())
+    assert name == "qwen-7b"
+    assert addr is None  # local model
 
 
 def test_select_tier1_no_models():
     from mycellm.api.gateway import _select_tier1_model
 
     class FakeNode:
+        node_registry = {}
         class inference:
             loaded_models = []
-    assert _select_tier1_model(FakeNode()) is None
+    name, addr = _select_tier1_model(FakeNode())
+    assert name is None
 
 
 def test_select_tier1_fallback_unknown_params():
     from mycellm.api.gateway import _select_tier1_model
 
     class FakeNode:
+        node_registry = {}
         class inference:
             loaded_models = [
                 ModelCapability(name="mystery-model", param_count_b=0),
             ]
-    # param_count_b=0 classifies as Tier 1
-    assert _select_tier1_model(FakeNode()) == "mystery-model"
+    name, addr = _select_tier1_model(FakeNode())
+    assert name == "mystery-model"
+
+
+def test_select_tier1_from_fleet():
+    """Falls back to fleet node when no local models."""
+    from mycellm.api.gateway import _select_tier1_model
+
+    class FakeNode:
+        node_registry = {
+            "peer1": {
+                "status": "approved",
+                "last_seen": time.time(),
+                "api_addr": "10.0.0.5:8420",
+                "capabilities": {"models": [{"name": "qwen-3b", "param_count_b": 3.0}]},
+            }
+        }
+        class inference:
+            loaded_models = []
+    name, addr = _select_tier1_model(FakeNode())
+    assert name == "qwen-3b"
+    assert addr == "10.0.0.5:8420"
 
 
 # --- Gateway endpoint ---
