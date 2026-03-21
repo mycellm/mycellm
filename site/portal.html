@@ -2,171 +2,265 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="icon" type="image/svg+xml" href="/brand/mycellm-red-logo-sans.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+    <meta name="description" content="Free AI chat powered by a distributed GPU network. No signup required.">
+    <meta name="theme-color" content="#0a0a0a">
     <title>mycellm — Free AI, powered by the crowd</title>
     <script defer src="https://analytics.zetaix.com/script.js" data-website-id="e70ee1fc-d684-497f-9f64-aa0dc624d74a"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+                    },
                     colors: {
-                        mycelium: { 500: '#22c55e', glow: '#4ade80', bg: '#0a0a0a' },
+                        void: '#0A0A0A',
+                        spore: '#22C55E',
+                        'spore-glow': '#4ADE80',
                         compute: '#EF4444',
                         relay: '#3B82F6',
                         ledger: '#FACC15',
-                    }
+                        poison: '#A855F7',
+                        console: '#E5E5E5',
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    },
                 }
             }
         }
     </script>
     <style>
-        body { background-color: #0a0a0a; color: #e5e5e5; }
-        .text-glow { text-shadow: 0 0 10px rgba(74, 222, 128, 0.5); }
-        .glass-panel { background: rgba(10,10,10,0.6); backdrop-filter: blur(12px); border: 1px solid rgba(34,197,94,0.1); }
-        .chat-input:focus { box-shadow: 0 0 0 2px rgba(34,197,94,0.3); }
-        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-        .typing-dot { animation: pulse-dot 1.2s infinite; }
-        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
-        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        body { background: #0a0a0a; color: #e5e5e5; overflow-x: hidden; }
+        .text-glow { text-shadow: 0 0 10px rgba(74, 222, 128, 0.5), 0 0 20px rgba(74, 222, 128, 0.3); }
+        .glass { background: rgba(17,17,17,0.7); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.06); }
+        .glass-green { background: rgba(34,197,94,0.04); border: 1px solid rgba(34,197,94,0.12); }
+        .chat-input:focus { outline: none; border-color: rgba(34,197,94,0.4); box-shadow: 0 0 0 3px rgba(34,197,94,0.08); }
+        @keyframes dot-pulse { 0%,80%,100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+        .typing-dot { animation: dot-pulse 1.4s ease-in-out infinite; }
+        .typing-dot:nth-child(2) { animation-delay: 0.16s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.32s; }
+        #chatMessages { scrollbar-width: thin; scrollbar-color: rgba(34,197,94,0.15) transparent; }
         #chatMessages::-webkit-scrollbar { width: 4px; }
-        #chatMessages::-webkit-scrollbar-thumb { background: rgba(34,197,94,0.2); border-radius: 4px; }
+        #chatMessages::-webkit-scrollbar-track { background: transparent; }
+        #chatMessages::-webkit-scrollbar-thumb { background: rgba(34,197,94,0.15); border-radius: 4px; }
+        .msg-bubble { word-break: break-word; overflow-wrap: anywhere; }
+        .send-btn { transition: all 0.15s; }
+        .send-btn:hover { transform: scale(1.05); }
+        .send-btn:active { transform: scale(0.95); }
+        @media (max-height: 600px) { .hero-title { font-size: 1.5rem; } }
     </style>
 </head>
-<body class="min-h-screen antialiased selection:bg-mycelium-500 selection:text-black">
+<body class="min-h-screen min-h-[100dvh] font-sans antialiased selection:bg-spore selection:text-black">
 
     <!-- Particle Background -->
-    <canvas id="networkCanvas" class="fixed inset-0 z-0 opacity-20"></canvas>
+    <canvas id="networkCanvas" class="fixed inset-0 z-0 opacity-25 pointer-events-none"></canvas>
 
-    <div class="relative z-10 min-h-screen flex flex-col">
+    <div class="relative z-10 min-h-screen min-h-[100dvh] flex flex-col">
 
-        <!-- Header -->
-        <header class="border-b border-white/5 bg-[#0a0a0a]/80 backdrop-blur-xl">
-            <div class="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                    <img src="/brand/mycellm-red-logo-sans.svg" alt="mycellm" class="w-8 h-8"
-                         style="filter: drop-shadow(0px 0px 6px rgba(239, 68, 68, 0.5));">
-                    <span class="text-lg font-bold text-white">mycellm<span class="text-mycelium-500">.</span></span>
-                </div>
-                <!-- Live Stats Bar -->
-                <div class="flex items-center space-x-4 text-xs font-mono text-gray-500">
-                    <div class="flex items-center space-x-1.5">
-                        <span class="w-1.5 h-1.5 rounded-full bg-mycelium-500 animate-pulse"></span>
-                        <span id="statNodes">-</span> nodes
+        <!-- ── Header ── -->
+        <header class="sticky top-0 z-30 border-b border-white/5 bg-void/80 backdrop-blur-xl">
+            <div class="max-w-4xl mx-auto px-4 sm:px-6 h-12 sm:h-14 flex items-center justify-between">
+                <a href="/" class="flex items-center space-x-2.5 group">
+                    <img src="/brand/mycellm-red-logo-sans.svg" alt="" class="w-7 h-7 sm:w-8 sm:h-8 group-hover:scale-110 transition-transform"
+                         style="filter: drop-shadow(0px 0px 8px rgba(239, 68, 68, 0.6));">
+                    <img src="/brand/mycellm-h-R.svg" alt="mycellm" class="h-4 sm:h-5 hidden sm:block opacity-90">
+                    <span class="sm:hidden text-base font-bold text-white">mycellm<span class="text-spore">.</span></span>
+                </a>
+                <!-- Live Stats -->
+                <div class="flex items-center space-x-3 sm:space-x-4 text-[11px] sm:text-xs font-mono text-gray-500">
+                    <div class="flex items-center space-x-1.5" title="Nodes online">
+                        <span class="w-1.5 h-1.5 rounded-full bg-spore animate-pulse"></span>
+                        <span><span id="statNodes" class="text-gray-300">-</span> nodes</span>
                     </div>
-                    <div class="hidden sm:flex items-center space-x-1"><span id="statModels">-</span> models</div>
-                    <div class="hidden md:flex items-center space-x-1"><span id="statTPS">-</span> T/s</div>
-                    <a href="https://stats.mycellm.dev" class="text-mycelium-500 hover:text-mycelium-glow">stats</a>
+                    <div class="hidden sm:flex items-center space-x-1" title="Unique models">
+                        <span id="statModels" class="text-gray-300">-</span> models
+                    </div>
+                    <div class="hidden md:flex items-center space-x-1" title="Network throughput">
+                        <span id="statTPS" class="text-gray-300">-</span> T/s
+                    </div>
+                    <div class="hidden lg:flex items-center space-x-1" title="Total VRAM">
+                        <span id="statVRAM" class="text-gray-300">-</span> GB
+                    </div>
                 </div>
             </div>
         </header>
 
-        <!-- Hero / Chat -->
-        <main class="flex-1 flex flex-col max-w-3xl w-full mx-auto px-6">
-
-            <!-- Tagline (shown when no messages) -->
-            <div id="hero" class="flex-1 flex flex-col items-center justify-center text-center py-12">
-                <h1 class="text-3xl md:text-4xl font-bold text-white mb-3">
-                    Free AI, <span class="text-mycelium-glow text-glow">powered by the crowd</span>
-                </h1>
-                <p class="text-gray-400 text-lg mb-8 max-w-md">
-                    Ask anything — served by GPUs worldwide on the mycellm distributed network.
-                </p>
-                <div class="w-full max-w-xl">
-                    <div class="relative">
-                        <textarea id="heroInput" rows="2"
-                            placeholder="Ask anything..."
-                            class="chat-input w-full bg-[#111] border border-white/10 rounded-2xl px-5 py-4 pr-14 text-white text-lg resize-none focus:outline-none focus:border-mycelium-500/50 transition-colors"
-                            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
-                        <button onclick="sendMessage()"
-                            class="absolute right-3 bottom-3 w-10 h-10 bg-mycelium-500 text-black rounded-xl flex items-center justify-center hover:bg-mycelium-glow transition-colors">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                        </button>
-                    </div>
-                    <p class="text-xs text-gray-600 mt-3">Free tier: <span id="tokenBudget">5,000</span> tokens/day &middot; Tier 1 models &middot; No signup required</p>
-                </div>
-            </div>
-
-            <!-- Chat Messages (hidden initially) -->
-            <div id="chatArea" class="hidden flex-1 flex flex-col py-4">
-                <div id="chatMessages" class="flex-1 overflow-y-auto space-y-4 pb-4 min-h-0">
-                    <!-- Messages injected here -->
+        <!-- ── Hero (shown before first message) ── -->
+        <div id="hero" class="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 py-8 sm:py-12">
+            <div class="w-full max-w-xl text-center space-y-6">
+                <!-- Logo mark -->
+                <div class="flex justify-center mb-2">
+                    <img src="/brand/mycellm-red-logo-sans.svg" alt=""
+                         class="w-14 h-14 sm:w-16 sm:h-16 animate-pulse-slow"
+                         style="filter: drop-shadow(0px 0px 16px rgba(239, 68, 68, 0.5));">
                 </div>
 
-                <!-- Attribution (shown after response) -->
-                <div id="attribution" class="hidden text-center text-xs text-gray-600 py-2">
-                    <span id="attrText"></span>
-                    &middot;
-                    <a href="https://mycellm.dev/join" class="text-mycelium-500 hover:underline">Want faster responses and bigger models? Start seeding &rarr;</a>
-                </div>
-
-                <!-- Input -->
-                <div class="border-t border-white/5 pt-4">
-                    <div class="relative">
-                        <textarea id="chatInput" rows="1"
-                            placeholder="Continue the conversation..."
-                            class="chat-input w-full bg-[#111] border border-white/10 rounded-xl px-4 py-3 pr-12 text-white text-sm resize-none focus:outline-none focus:border-mycelium-500/50"
-                            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
-                            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
-                        <button onclick="sendMessage()"
-                            class="absolute right-2 bottom-2 w-8 h-8 bg-mycelium-500 text-black rounded-lg flex items-center justify-center hover:bg-mycelium-glow transition-colors">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-        </main>
-
-        <!-- Below the fold -->
-        <section id="belowFold" class="border-t border-white/5 bg-[#050505]">
-            <div class="max-w-4xl mx-auto px-6 py-16 grid md:grid-cols-3 gap-8">
-
+                <!-- Tagline -->
                 <div>
-                    <h3 class="text-white font-semibold mb-2">What is mycellm?</h3>
-                    <p class="text-sm text-gray-400">
-                        A peer-to-peer network where anyone can contribute GPU power and earn credits.
-                        Models run across distributed nodes — no single server, no single owner.
-                        Like BitTorrent for AI inference.
+                    <h1 class="hero-title text-2xl sm:text-3xl md:text-4xl font-extrabold text-white leading-tight">
+                        Free AI, <span class="text-spore-glow text-glow">powered by the crowd</span>
+                    </h1>
+                    <p class="text-gray-400 text-sm sm:text-base mt-3 max-w-md mx-auto leading-relaxed">
+                        Ask anything — served by GPUs worldwide on the mycellm distributed network. No signup.
                     </p>
                 </div>
 
-                <div>
-                    <h3 class="text-white font-semibold mb-2">Quick Start</h3>
-                    <div class="font-mono text-sm bg-black/50 rounded-lg p-3 space-y-1">
-                        <div class="text-mycelium-glow">pip install mycellm</div>
-                        <div class="text-mycelium-glow">mycellm init</div>
-                        <div class="text-mycelium-glow">mycellm serve</div>
-                    </div>
-                    <p class="text-xs text-gray-600 mt-2">Three commands. Start earning credits.</p>
+                <!-- Chat Input -->
+                <div class="relative">
+                    <textarea id="heroInput" rows="2"
+                        placeholder="Ask anything..."
+                        class="chat-input w-full glass-green rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 pr-14 text-white text-base sm:text-lg resize-none transition-all"
+                        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+                    <button id="heroSendBtn" onclick="sendMessage()"
+                        class="send-btn absolute right-3 bottom-3 w-9 h-9 sm:w-10 sm:h-10 bg-spore text-black rounded-xl flex items-center justify-center shadow-lg shadow-spore/20">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
                 </div>
 
-                <div>
-                    <h3 class="text-white font-semibold mb-2">Available Models</h3>
-                    <div id="modelDirectory" class="space-y-1 text-sm">
-                        <div class="text-gray-600">Loading...</div>
-                    </div>
-                </div>
+                <p class="text-[11px] sm:text-xs text-gray-600">
+                    Free tier &middot; 5,000 tokens/day &middot; Tier 1 models &middot; No signup required
+                </p>
 
+                <!-- Suggested prompts -->
+                <div class="flex flex-wrap justify-center gap-2 pt-1">
+                    <button onclick="fillPrompt('Explain distributed computing in simple terms')"
+                        class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors">
+                        Explain distributed computing
+                    </button>
+                    <button onclick="fillPrompt('Write a Python function to find prime numbers')"
+                        class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors">
+                        Write a Python function
+                    </button>
+                    <button onclick="fillPrompt('What makes peer-to-peer networks resilient?')"
+                        class="text-xs glass rounded-full px-3 py-1.5 text-gray-400 hover:text-white hover:border-white/20 transition-colors">
+                        P2P network resilience
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Chat Area (replaces hero after first message) ── -->
+        <div id="chatArea" class="hidden flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-6">
+            <!-- Messages -->
+            <div id="chatMessages" class="flex-1 overflow-y-auto space-y-3 sm:space-y-4 py-3 sm:py-4 min-h-0"></div>
+
+            <!-- Attribution -->
+            <div id="attribution" class="hidden text-center text-[11px] sm:text-xs text-gray-600 py-1.5">
+                <span id="attrText"></span>
+                <span class="hidden sm:inline"> &middot;
+                    <a href="/join.html" class="text-spore hover:underline">Want bigger models? Start seeding &rarr;</a>
+                </span>
             </div>
 
-            <div class="max-w-4xl mx-auto px-6 pb-8 flex items-center justify-center space-x-6 text-xs text-gray-600">
-                <a href="https://mycellm.ai" class="hover:text-gray-400">mycellm.ai</a>
-                <a href="https://docs.mycellm.dev" class="hover:text-gray-400">Docs</a>
-                <a href="https://stats.mycellm.dev" class="hover:text-gray-400">Network Stats</a>
-                <a href="https://mycellm.dev/join" class="hover:text-gray-400">Join</a>
-                <span>Apache 2.0</span>
+            <!-- Input bar -->
+            <div class="border-t border-white/5 py-3 sm:py-4">
+                <div class="relative">
+                    <textarea id="chatInput" rows="1"
+                        placeholder="Continue the conversation..."
+                        class="chat-input w-full glass rounded-xl px-4 py-3 pr-12 text-white text-sm resize-none transition-all"
+                        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
+                        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+                    <button onclick="sendMessage()"
+                        class="send-btn absolute right-2.5 bottom-2.5 w-8 h-8 bg-spore text-black rounded-lg flex items-center justify-center">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+                <!-- Mobile CTA -->
+                <div class="sm:hidden text-center mt-2">
+                    <a href="/join.html" class="text-[11px] text-spore hover:underline">Contribute your GPU &rarr;</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Below the fold ── -->
+        <section id="belowFold" class="border-t border-white/5 bg-[#050505]">
+            <div class="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
+
+                <!-- 3-column grid (stacks on mobile) -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+
+                    <div class="space-y-3">
+                        <div class="flex items-center space-x-2">
+                            <div class="w-8 h-8 rounded-lg bg-spore/10 flex items-center justify-center">
+                                <img src="/brand/mycellm-red-logo-sans.svg" alt="" class="w-5 h-5" style="filter: drop-shadow(0 0 4px rgba(239,68,68,0.4));">
+                            </div>
+                            <h3 class="text-white font-semibold">What is mycellm?</h3>
+                        </div>
+                        <p class="text-sm text-gray-400 leading-relaxed">
+                            A peer-to-peer network where anyone contributes GPU power and earns credits.
+                            Models run across distributed nodes — no single server, no single owner.
+                            Like BitTorrent for AI inference.
+                        </p>
+                    </div>
+
+                    <div class="space-y-3">
+                        <div class="flex items-center space-x-2">
+                            <div class="w-8 h-8 rounded-lg bg-spore/10 flex items-center justify-center text-spore text-sm font-mono font-bold">$</div>
+                            <h3 class="text-white font-semibold">Quick Start</h3>
+                        </div>
+                        <div class="font-mono text-sm glass rounded-xl p-4 space-y-1.5">
+                            <div><span class="text-gray-600">$</span> <span class="text-spore-glow">pip install mycellm</span></div>
+                            <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm init</span></div>
+                            <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm serve</span></div>
+                        </div>
+                        <p class="text-xs text-gray-600">Three commands. Start earning credits.</p>
+                    </div>
+
+                    <div class="space-y-3 sm:col-span-2 lg:col-span-1">
+                        <div class="flex items-center space-x-2">
+                            <div class="w-8 h-8 rounded-lg bg-relay/10 flex items-center justify-center text-relay text-sm">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+                            </div>
+                            <h3 class="text-white font-semibold">Available Models</h3>
+                        </div>
+                        <div id="modelDirectory" class="glass rounded-xl p-4 space-y-1 text-sm min-h-[80px]">
+                            <div class="text-gray-600 text-xs">Loading...</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- CTA banner -->
+                <div class="mt-10 sm:mt-12 glass-green rounded-2xl p-5 sm:p-6 text-center">
+                    <h3 class="text-white font-semibold text-lg mb-2">Join the network</h3>
+                    <p class="text-gray-400 text-sm mb-4 max-w-md mx-auto">
+                        Contribute your GPU and earn credits. The more seeders, the faster and more capable the network becomes.
+                    </p>
+                    <a href="/join.html"
+                        class="inline-block bg-spore text-black font-semibold text-sm px-6 py-2.5 rounded-xl hover:bg-spore-glow transition-colors shadow-lg shadow-spore/20">
+                        Get Started &rarr;
+                    </a>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="border-t border-white/5">
+                <div class="max-w-4xl mx-auto px-4 sm:px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+                    <div class="flex items-center space-x-2">
+                        <img src="/brand/mycellm-red-logo-sans.svg" alt="" class="w-4 h-4 opacity-40">
+                        <span>mycellm &middot; Apache 2.0</span>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="/" class="hover:text-gray-400 transition-colors">Home</a>
+                        <a href="/network.html" class="hover:text-gray-400 transition-colors">Stats</a>
+                        <a href="/join.html" class="hover:text-gray-400 transition-colors">Join</a>
+                    </div>
+                </div>
             </div>
         </section>
     </div>
 
     <script>
         // ── Configuration ──
-        // For internal testing, use the node's address directly.
-        // For production, use api.mycellm.dev.
         const API_BASE = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.lan')
             ? `${window.location.protocol}//${window.location.hostname}:8420`
             : 'https://api.mycellm.dev';
@@ -174,27 +268,36 @@
         let messages = [];
         let isStreaming = false;
 
-        // ── Chat ──
-
-        function showChatMode() {
-            document.getElementById('hero').classList.add('hidden');
-            document.getElementById('chatArea').classList.remove('hidden');
-            document.getElementById('chatArea').classList.add('flex');
-            document.getElementById('chatInput').focus();
+        // ── Prompt suggestions ──
+        function fillPrompt(text) {
+            const input = document.getElementById('heroInput');
+            input.value = text;
+            input.focus();
         }
 
+        // ── Chat mode transition ──
+        function showChatMode() {
+            document.getElementById('hero').classList.add('hidden');
+            const chat = document.getElementById('chatArea');
+            chat.classList.remove('hidden');
+            chat.classList.add('flex');
+            // On mobile, ensure below-fold doesn't steal space
+            document.getElementById('belowFold').classList.add('hidden');
+            setTimeout(() => document.getElementById('chatInput').focus(), 100);
+        }
+
+        // ── Messages ──
         function addMessage(role, content) {
             messages.push({ role, content });
             const container = document.getElementById('chatMessages');
             const div = document.createElement('div');
-            div.className = role === 'user'
-                ? 'flex justify-end'
-                : 'flex justify-start';
+            const isUser = role === 'user';
+            div.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
             div.innerHTML = `
-                <div class="max-w-[85%] ${role === 'user'
-                    ? 'bg-mycelium-500/10 border border-mycelium-500/20 text-white'
-                    : 'bg-white/5 border border-white/10 text-gray-200'
-                } rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap">
+                <div class="msg-bubble max-w-[90%] sm:max-w-[80%] ${isUser
+                    ? 'glass-green text-white'
+                    : 'glass text-gray-200'
+                } rounded-2xl ${isUser ? 'rounded-br-md' : 'rounded-bl-md'} px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed">
                     <span class="msg-content">${escapeHtml(content)}</span>
                 </div>`;
             container.appendChild(div);
@@ -208,20 +311,20 @@
             div.id = 'typing';
             div.className = 'flex justify-start';
             div.innerHTML = `
-                <div class="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 flex items-center space-x-1">
-                    <span class="typing-dot w-1.5 h-1.5 rounded-full bg-mycelium-500"></span>
-                    <span class="typing-dot w-1.5 h-1.5 rounded-full bg-mycelium-500"></span>
-                    <span class="typing-dot w-1.5 h-1.5 rounded-full bg-mycelium-500"></span>
+                <div class="glass rounded-2xl rounded-bl-md px-4 py-3 flex items-center space-x-1.5">
+                    <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
+                    <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
+                    <span class="typing-dot w-2 h-2 rounded-full bg-spore"></span>
                 </div>`;
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
         }
 
         function removeTypingIndicator() {
-            const el = document.getElementById('typing');
-            if (el) el.remove();
+            document.getElementById('typing')?.remove();
         }
 
+        // ── Send message ──
         async function sendMessage() {
             if (isStreaming) return;
 
@@ -232,6 +335,7 @@
             if (!text) return;
 
             input.value = '';
+            input.style.height = 'auto';
             if (input === heroInput) showChatMode();
 
             addMessage('user', text);
@@ -293,15 +397,13 @@
                     }
                 }
 
-                // Update messages array with actual content
                 messages[messages.length - 1].content = fullText;
 
-                // Show attribution
                 const latency = Date.now() - startTime;
-                const attrEl = document.getElementById('attribution');
+                const attr = document.getElementById('attribution');
                 document.getElementById('attrText').textContent =
                     `Served by ${model || 'mycellm'} in ${latency}ms on the distributed network`;
-                attrEl.classList.remove('hidden');
+                attr.classList.remove('hidden');
 
             } catch (e) {
                 removeTypingIndicator();
@@ -311,69 +413,98 @@
             isStreaming = false;
         }
 
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        }
+        function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-        // ── Stats ──
-
+        // ── Stats polling ──
         async function fetchStats() {
             try {
-                const resp = await fetch(`${API_BASE}/v1/node/public/stats`);
-                if (!resp.ok) return;
-                const data = await resp.json();
+                const r = await fetch(`${API_BASE}/v1/node/public/stats`);
+                if (!r.ok) return;
+                const d = await r.json();
 
-                document.getElementById('statNodes').textContent = data.nodes?.online || '-';
-                document.getElementById('statModels').textContent = data.models?.unique || '-';
-                document.getElementById('statTPS').textContent = data.compute?.total_tps?.toFixed(1) || '-';
+                document.getElementById('statNodes').textContent = d.nodes?.online || '-';
+                document.getElementById('statModels').textContent = d.models?.unique || '-';
+                document.getElementById('statTPS').textContent = d.compute?.total_tps?.toFixed(1) || '-';
+                document.getElementById('statVRAM').textContent = d.compute?.total_vram_gb?.toFixed(0) || '-';
 
                 // Model directory
                 const dir = document.getElementById('modelDirectory');
-                const tiers = data.models?.by_tier || {};
+                const tiers = d.models?.by_tier || {};
                 let html = '';
                 if (tiers.tier1?.length) {
-                    html += `<div class="text-mycelium-glow text-xs mb-1">Tier 1 (free)</div>`;
-                    html += tiers.tier1.map(n => `<div class="text-gray-400 font-mono text-xs pl-2">${n}</div>`).join('');
+                    html += `<div class="text-spore text-xs font-medium mb-1">Tier 1 &mdash; Free</div>`;
+                    html += tiers.tier1.map(n => `<div class="text-gray-400 font-mono text-xs pl-3">${n}</div>`).join('');
                 }
                 if (tiers.tier2?.length) {
-                    html += `<div class="text-relay text-xs mb-1 mt-2">Tier 2 (contributors)</div>`;
-                    html += tiers.tier2.map(n => `<div class="text-gray-400 font-mono text-xs pl-2">${n}</div>`).join('');
+                    html += `<div class="text-relay text-xs font-medium mb-1 mt-2">Tier 2 &mdash; Contributors</div>`;
+                    html += tiers.tier2.map(n => `<div class="text-gray-400 font-mono text-xs pl-3">${n}</div>`).join('');
                 }
                 if (tiers.tier3?.length) {
-                    html += `<div class="text-ledger text-xs mb-1 mt-2">Tier 3 (power seeders)</div>`;
-                    html += tiers.tier3.map(n => `<div class="text-gray-400 font-mono text-xs pl-2">${n}</div>`).join('');
+                    html += `<div class="text-ledger text-xs font-medium mb-1 mt-2">Tier 3 &mdash; Power Seeders</div>`;
+                    html += tiers.tier3.map(n => `<div class="text-gray-400 font-mono text-xs pl-3">${n}</div>`).join('');
                 }
-                if (!html) html = '<div class="text-gray-600">No models online</div>';
-                dir.innerHTML = html;
+                dir.innerHTML = html || '<div class="text-gray-600 text-xs">No models online</div>';
             } catch {}
         }
-
         fetchStats();
         setInterval(fetchStats, 15000);
 
         // ── Particle Background ──
         const canvas = document.getElementById('networkCanvas');
         const ctx = canvas.getContext('2d');
-        let width, height, particles = [];
-        function resizeCanvas() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
-        class P {
-            constructor() { this.x = Math.random()*width; this.y = Math.random()*height; this.vx = (Math.random()-0.5)*0.3; this.vy = (Math.random()-0.5)*0.3; this.r = Math.random()*1.5+0.5; this.p = Math.random()*Math.PI*2; }
-            update() { this.x+=this.vx; this.y+=this.vy; if(this.x<0||this.x>width)this.vx*=-1; if(this.y<0||this.y>height)this.vy*=-1; this.p+=0.02; }
-            draw() { ctx.beginPath(); ctx.arc(this.x,this.y,Math.max(0.1,this.r+Math.sin(this.p)*0.5),0,Math.PI*2); ctx.fillStyle=`rgba(34,197,94,${0.4+Math.sin(this.p)*0.2})`; ctx.fill(); }
+        let W, H, pts = [];
+        const N = Math.min(Math.floor(window.innerWidth / 18), 80);
+        const DIST = 140;
+
+        function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+
+        class Pt {
+            constructor() {
+                this.x = Math.random()*W; this.y = Math.random()*H;
+                this.vx = (Math.random()-0.5)*0.4; this.vy = (Math.random()-0.5)*0.4;
+                this.r = Math.random()*1.5+0.5; this.ph = Math.random()*Math.PI*2;
+            }
+            step() {
+                this.x += this.vx; this.y += this.vy;
+                if (this.x < 0 || this.x > W) this.vx *= -1;
+                if (this.y < 0 || this.y > H) this.vy *= -1;
+                this.ph += 0.015;
+            }
+            draw() {
+                const a = 0.4 + Math.sin(this.ph) * 0.25;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, Math.max(0.1, this.r + Math.sin(this.ph)*0.5), 0, Math.PI*2);
+                ctx.fillStyle = `rgba(34,197,94,${a})`;
+                ctx.fill();
+            }
         }
-        function initP() { particles=[]; for(let i=0;i<40;i++) particles.push(new P()); }
-        function animate() {
-            ctx.clearRect(0,0,width,height);
-            for(let i=0;i<particles.length;i++) { particles[i].update(); particles[i].draw();
-                for(let j=i+1;j<particles.length;j++) { const dx=particles[i].x-particles[j].x,dy=particles[i].y-particles[j].y,d=Math.sqrt(dx*dx+dy*dy);
-                    if(d<130){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle=`rgba(74,222,128,${(1-d/130)*0.15})`;ctx.lineWidth=1;ctx.stroke();}
+
+        function init() { pts = []; for (let i = 0; i < N; i++) pts.push(new Pt()); }
+
+        function loop() {
+            ctx.clearRect(0, 0, W, H);
+            for (let i = 0; i < pts.length; i++) {
+                pts[i].step(); pts[i].draw();
+                for (let j = i+1; j < pts.length; j++) {
+                    const dx = pts[i].x-pts[j].x, dy = pts[i].y-pts[j].y;
+                    const d = Math.sqrt(dx*dx+dy*dy);
+                    if (d < DIST) {
+                        ctx.beginPath();
+                        ctx.moveTo(pts[i].x, pts[i].y);
+                        ctx.lineTo(pts[j].x, pts[j].y);
+                        ctx.strokeStyle = `rgba(74,222,128,${(1-d/DIST)*0.18})`;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
                 }
             }
-            requestAnimationFrame(animate);
+            requestAnimationFrame(loop);
         }
-        window.addEventListener('resize', resizeCanvas); resizeCanvas(); initP(); animate();
+        window.addEventListener('resize', resize);
+        resize(); init(); loop();
+
+        // Focus input on load (desktop only)
+        if (window.innerWidth > 768) document.getElementById('heroInput').focus();
     </script>
 </body>
 </html>
