@@ -1579,6 +1579,182 @@ function SortHeader({ label, field, sortBy, sortDir, onSort }) {
   )
 }
 
+// ── Model Table with inline edit ──
+
+function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doApi, refreshAll, nodeApi }) {
+  const [editingModel, setEditingModel] = useState(null) // model name being edited
+  const [editForm, setEditForm] = useState({})
+  const [editLoading, setEditLoading] = useState(false)
+  const [editError, setEditError] = useState('')
+
+  const startEdit = async (modelName) => {
+    if (editingModel === modelName) { setEditingModel(null); return }
+    try {
+      const config = await nodeApi(`/v1/node/models/${encodeURIComponent(modelName)}/config`)
+      setEditForm({
+        name: config.name || modelName,
+        api_base: config.api_base || '',
+        api_model: config.api_model || '',
+        api_key: '',  // don't pre-fill — show hint
+        api_key_hint: config.api_key_hint || '',
+        ctx_len: config.ctx_len || 4096,
+        backend: config.backend || 'openai',
+      })
+      setEditError('')
+      setEditingModel(modelName)
+    } catch { setEditingModel(null) }
+  }
+
+  const saveEdit = async () => {
+    setEditLoading(true)
+    setEditError('')
+    try {
+      const body = { model: editingModel }
+      if (editForm.api_base) body.api_base = editForm.api_base
+      if (editForm.api_model) body.api_model = editForm.api_model
+      if (editForm.api_key) body.api_key = editForm.api_key
+      if (editForm.ctx_len) body.ctx_len = editForm.ctx_len
+      const result = await doApi('/v1/node/models/update', body)
+      if (result.error) {
+        setEditError(result.error)
+      } else {
+        setEditingModel(null)
+        refreshAll()
+      }
+    } catch (e) {
+      setEditError(e.message)
+    }
+    setEditLoading(false)
+  }
+
+  return (
+    <table className="w-full text-sm">
+      <thead className="bg-black/30">
+        <tr className="text-xs text-gray-500 font-mono uppercase">
+          <th className="text-left py-2 px-4 w-7"></th>
+          <th className="text-left py-2 px-4">Name</th>
+          <th className="text-left py-2 px-4 hidden md:table-cell">Backend</th>
+          <th className="text-left py-2 px-4 hidden md:table-cell">Quant</th>
+          <th className="text-left py-2 px-4 hidden md:table-cell">Size</th>
+          <th className="text-left py-2 px-4 hidden lg:table-cell">Status</th>
+          <th className="text-right py-2 px-4">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {allModels.map((m) => (
+          <React.Fragment key={m.name}>
+            <tr className={`border-t border-white/5 transition-all duration-300 ${
+              editingModel === m.name ? 'bg-white/[0.05]' :
+              m.state === 'loading' ? 'bg-ledger/[0.03]' :
+              m.state === 'failed' ? 'bg-compute/[0.03]' :
+              m.state === 'active' ? 'hover:bg-white/[0.02]' :
+              'hover:bg-white/[0.02] opacity-70'
+            }`}>
+              <td className="py-2.5 px-4" title={m.state}>{stateIndicator[m.state]}</td>
+              <td className={`py-2.5 px-4 font-mono ${stateNameColor[m.state]}`}>
+                {m.name}
+                {m.state === 'loading' && m.phase && (
+                  <div className="text-xs text-ledger/70 font-sans mt-0.5">{m.phase}{m.elapsed ? ` · ${m.elapsed}s` : ''}</div>
+                )}
+                {m.state === 'failed' && m.error && (
+                  <div className="text-xs text-compute/70 font-sans mt-0.5 truncate max-w-[250px]" title={m.error}>{m.error}</div>
+                )}
+              </td>
+              <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.backend}</td>
+              <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell font-mono">{m.quant || '-'}</td>
+              <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.size || '-'}</td>
+              <td className="py-2.5 px-4 hidden lg:table-cell">{stateBadge[m.state]}</td>
+              <td className="py-2.5 px-4 text-right space-x-2 whitespace-nowrap">
+                {m.state === 'active' && (
+                  <>
+                    {m.backend !== 'llama.cpp' && (
+                      <button onClick={() => startEdit(m.name)}
+                        className={`text-xs transition-colors ${editingModel === m.name ? 'text-spore' : 'text-gray-500 hover:text-relay'}`}>edit</button>
+                    )}
+                    <button onClick={async () => { await doApi('/v1/node/models/unload', { model: m.name }); refreshAll() }}
+                      className="text-xs text-gray-500 hover:text-ledger transition-colors">unload</button>
+                    {m.hasFile && (
+                      <button onClick={async () => {
+                        if (confirm(`Delete ${m.filename}? This will unload and remove the file.`)) {
+                          await doApi('/v1/node/models/delete-file', { filename: m.filename }); refreshAll()
+                        }
+                      }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
+                    )}
+                  </>
+                )}
+                {m.state === 'on-disk' && (
+                  <>
+                    <button onClick={async () => {
+                      await doApi('/v1/node/models/load', { model_path: m.filePath, name: m.name, backend: 'llama.cpp', ctx_len: m.ctx || 4096 })
+                      refreshAll()
+                    }} className="text-xs text-spore hover:text-spore/80 transition-colors">load</button>
+                    <button onClick={async () => {
+                      if (confirm(`Delete ${m.filename}?`)) { await doApi('/v1/node/models/delete-file', { filename: m.filename }); refreshAll() }
+                    }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
+                  </>
+                )}
+                {m.state === 'disabled' && (
+                  <>
+                    {m.backend !== 'llama.cpp' && (
+                      <button onClick={() => startEdit(m.name)}
+                        className="text-xs text-gray-500 hover:text-relay transition-colors">edit</button>
+                    )}
+                    <button onClick={async () => { await doApi('/v1/node/models/reload', { model: m.name }); refreshAll() }}
+                      className="text-xs text-spore hover:text-spore/80 transition-colors">enable</button>
+                    <button onClick={async () => {
+                      if (confirm(`Remove config for ${m.name}?`)) { await doApi('/v1/node/models/remove-config', { model: m.name }); refreshAll() }
+                    }} className="text-xs text-gray-600 hover:text-compute transition-colors">remove</button>
+                  </>
+                )}
+                {m.state === 'loading' && (
+                  <span className="text-xs text-gray-600 font-mono">{m.elapsed ? `${m.elapsed}s` : '...'}</span>
+                )}
+              </td>
+            </tr>
+            {/* Inline edit panel */}
+            {editingModel === m.name && (
+              <tr><td colSpan={7} className="px-4 py-3 border-t border-spore/10 bg-white/[0.02]">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="text-gray-500 block mb-0.5">API Base URL</label>
+                    <input value={editForm.api_base} onChange={e => setEditForm(f => ({...f, api_base: e.target.value}))}
+                      className="w-full bg-black border border-white/10 rounded px-2 py-1.5 font-mono text-white focus:border-spore/50 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block mb-0.5">Upstream Model</label>
+                    <input value={editForm.api_model} onChange={e => setEditForm(f => ({...f, api_model: e.target.value}))}
+                      className="w-full bg-black border border-white/10 rounded px-2 py-1.5 font-mono text-white focus:border-spore/50 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block mb-0.5">API Key {editForm.api_key_hint && <span className="text-gray-600">(current: {editForm.api_key_hint})</span>}</label>
+                    <input type="password" value={editForm.api_key} onChange={e => setEditForm(f => ({...f, api_key: e.target.value}))}
+                      placeholder="Leave empty to keep current key"
+                      className="w-full bg-black border border-white/10 rounded px-2 py-1.5 font-mono text-white focus:border-spore/50 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-gray-500 block mb-0.5">Context Length</label>
+                    <input type="number" value={editForm.ctx_len} onChange={e => setEditForm(f => ({...f, ctx_len: parseInt(e.target.value) || 4096}))}
+                      className="w-full bg-black border border-white/10 rounded px-2 py-1.5 font-mono text-white focus:border-spore/50 focus:outline-none" />
+                  </div>
+                </div>
+                {editError && <div className="text-compute text-xs mt-2">{editError}</div>}
+                <div className="flex items-center space-x-2 mt-3">
+                  <button onClick={saveEdit} disabled={editLoading}
+                    className="bg-spore text-black px-3 py-1 rounded text-xs font-medium hover:bg-spore/90 disabled:opacity-40">
+                    {editLoading ? 'Saving...' : 'Save & Reload'}
+                  </button>
+                  <button onClick={() => setEditingModel(null)}
+                    className="text-xs text-gray-500 hover:text-white px-3 py-1">Cancel</button>
+                </div>
+              </td></tr>
+            )}
+          </React.Fragment>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 // Quant quality descriptions
 const QUANT_INFO = {
   'Q2_K':   { quality: 'Low',         desc: 'Smallest, lowest quality. Testing only.', stars: 1 },
@@ -2085,93 +2261,8 @@ function ModelsTab({ status, onRefresh }) {
               </h2>
             </div>
             {allModels.length > 0 ? (
-              <table className="w-full text-sm">
-                <thead className="bg-black/30">
-                  <tr className="text-xs text-gray-500 font-mono uppercase">
-                    <th className="text-left py-2 px-4 w-7"></th>
-                    <th className="text-left py-2 px-4">Name</th>
-                    <th className="text-left py-2 px-4 hidden md:table-cell">Backend</th>
-                    <th className="text-left py-2 px-4 hidden md:table-cell">Quant</th>
-                    <th className="text-left py-2 px-4 hidden md:table-cell">Size</th>
-                    <th className="text-left py-2 px-4 hidden lg:table-cell">Features</th>
-                    <th className="text-left py-2 px-4 hidden lg:table-cell">Status</th>
-                    <th className="text-right py-2 px-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allModels.map((m) => (
-                    <tr key={m.name}
-                      className={`border-t border-white/5 transition-all duration-300 ${
-                        m.state === 'loading' ? 'bg-ledger/[0.03]' :
-                        m.state === 'failed' ? 'bg-compute/[0.03]' :
-                        m.state === 'active' ? 'hover:bg-white/[0.02]' :
-                        'hover:bg-white/[0.02] opacity-70'
-                      }`}>
-                      <td className="py-2.5 px-4" title={m.state}>{stateIndicator[m.state]}</td>
-                      <td className={`py-2.5 px-4 font-mono ${stateNameColor[m.state]}`}>
-                        {m.name}
-                        {m.state === 'loading' && m.phase && (
-                          <div className="text-xs text-ledger/70 font-sans mt-0.5">{m.phase}{m.elapsed ? ` · ${m.elapsed}s` : ''}</div>
-                        )}
-                        {m.state === 'failed' && m.error && (
-                          <div className="text-xs text-compute/70 font-sans mt-0.5 truncate max-w-[250px]" title={m.error}>{m.error}</div>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.backend}</td>
-                      <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell font-mono">{m.quant || '-'}</td>
-                      <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.size || '-'}</td>
-                      <td className="py-2.5 px-4 hidden lg:table-cell">
-                        {(m.features && m.features.length > 0) ? (
-                          <div className="flex flex-wrap gap-1">
-                            {m.features.map(f => (
-                              <span key={f} className="text-xs px-1 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5">{f}</span>
-                            ))}
-                          </div>
-                        ) : <span className="text-gray-600">-</span>}
-                      </td>
-                      <td className="py-2.5 px-4 hidden lg:table-cell">{stateBadge[m.state]}</td>
-                      <td className="py-2.5 px-4 text-right space-x-2 whitespace-nowrap">
-                        {m.state === 'active' && (
-                          <>
-                            <button onClick={async () => { await doApi('/v1/node/models/unload', { model: m.name }); refreshAll() }}
-                              className="text-xs text-gray-500 hover:text-ledger transition-colors">unload</button>
-                            {m.hasFile && (
-                              <button onClick={async () => {
-                                if (confirm(`Delete ${m.filename}? This will unload and remove the file.`)) {
-                                  await doApi('/v1/node/models/delete-file', { filename: m.filename }); refreshAll()
-                                }
-                              }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
-                            )}
-                          </>
-                        )}
-                        {m.state === 'on-disk' && (
-                          <>
-                            <button onClick={async () => {
-                              await doApi('/v1/node/models/load', { model_path: m.filePath, name: m.name, backend: 'llama.cpp', ctx_len: m.ctx || 4096 })
-                              refreshAll()
-                            }} className="text-xs text-spore hover:text-spore/80 transition-colors">load</button>
-                            <button onClick={async () => {
-                              if (confirm(`Delete ${m.filename}?`)) { await doApi('/v1/node/models/delete-file', { filename: m.filename }); refreshAll() }
-                            }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
-                          </>
-                        )}
-                        {m.state === 'disabled' && (
-                          <>
-                            <button onClick={async () => { await doApi('/v1/node/models/reload', { model: m.name }); refreshAll() }}
-                              className="text-xs text-spore hover:text-spore/80 transition-colors">enable</button>
-                            <button onClick={async () => {
-                              if (confirm(`Remove config for ${m.name}?`)) { await doApi('/v1/node/models/remove-config', { model: m.name }); refreshAll() }
-                            }} className="text-xs text-gray-600 hover:text-compute transition-colors">remove</button>
-                          </>
-                        )}
-                        {m.state === 'loading' && (
-                          <span className="text-xs text-gray-600 font-mono">{m.elapsed ? `${m.elapsed}s` : '...'}</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <ModelTable allModels={allModels} stateIndicator={stateIndicator} stateNameColor={stateNameColor}
+                stateBadge={stateBadge} doApi={doApi} refreshAll={refreshAll} nodeApi={nodeApi} />
             ) : (
               <div className="px-5 py-8 text-center text-sm text-gray-600">
                 No models on this node. Search HuggingFace below to get started.

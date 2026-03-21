@@ -183,6 +183,52 @@ async def list_saved_configs(request: Request):
     return {"configs": configs}
 
 
+@router.post("/models/update")
+async def update_model(request: Request):
+    """Update a model's config (unload + reload with new settings).
+
+    Merges provided fields with saved config. Omitted fields keep current values.
+    """
+    node = request.app.state.node
+    body = await request.json()
+    model_name = body.get("model", "")
+    if not model_name:
+        return {"error": "model name required"}
+
+    # Get existing config (from saved or running)
+    config = dict(node.inference._saved_configs.get(model_name, {}))
+    if not config:
+        return {"error": f"No config for '{model_name}'"}
+
+    # Merge overrides — only update fields that were provided
+    if body.get("api_base"): config["api_base"] = body["api_base"]
+    if body.get("api_model"): config["api_model"] = body["api_model"]
+    if body.get("api_key"): config["api_key"] = body["api_key"]
+    if body.get("ctx_len"): config["ctx_len"] = body["ctx_len"]
+
+    # Unload if currently loaded
+    if model_name in {m.name for m in node.inference.loaded_models}:
+        await node.inference.unload_model(model_name)
+
+    backend_type = config.get("backend", "openai")
+    try:
+        await node.inference.load_model(
+            config.get("model_path", ""),
+            name=model_name,
+            backend_type=backend_type,
+            api_base=config.get("api_base", ""),
+            api_key=config.get("api_key", ""),
+            api_model=config.get("api_model", ""),
+            ctx_len=config.get("ctx_len", 4096),
+        )
+        node.capabilities.models = node.inference.loaded_models
+        await node.announce_capabilities()
+        node.activity.record(EventType.MODEL_LOADED, model=model_name, backend=backend_type)
+        return {"status": "updated", "model": model_name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.post("/models/reload")
 async def reload_model(request: Request):
     """Re-load a previously saved (unloaded) model config."""
