@@ -8,7 +8,7 @@ Features:
   - Slash commands for node/fleet/model management
   - Auto-selects best available model (or specify with --model)
   - Multi-turn conversation context
-  - Branded UI with green-bordered panels
+  - Branded mushroom banner + green-bordered input
 """
 
 from __future__ import annotations
@@ -50,78 +50,75 @@ def cmd(name, help_text=""):
 @cmd("help", "Show available commands")
 async def _cmd_help(client, endpoint, headers, args):
     console.print()
-    from mycellm.cli.banner import SPORE_GREEN, COMPUTE_RED
-    console.print(f"  [{SPORE_GREEN}]Commands:[/{SPORE_GREEN}]")
+    console.print("[bold]Slash commands:[/bold]")
     for name, info in sorted(COMMANDS.items()):
-        console.print(f"    [{COMPUTE_RED}]/{name:<8s}[/{COMPUTE_RED}]  [dim]{info['help']}[/dim]")
-    console.print(f"    [{COMPUTE_RED}]/q       [/{COMPUTE_RED}]  [dim]Exit[/dim]")
+        console.print(f"  [green]/{name}[/green]  {info['help']}")
+    console.print(f"  [green]/q[/green]      Exit")
     console.print()
 
 
 @cmd("status", "Show node status")
 async def _cmd_status(client, endpoint, headers, args):
-    from mycellm.cli.banner import SPORE_GREEN, COMPUTE_RED, LEDGER_GOLD
     resp = await client.get(f"{endpoint}/v1/node/status", headers=headers)
     d = resp.json()
+    console.print(f"\n[bold]{d.get('node_name', '?')}[/bold] ({d.get('mode', '?')})")
+    console.print(f"  Peer ID:  [dim]{d.get('peer_id', '?')[:20]}...[/dim]")
+    console.print(f"  Uptime:   {_fmt_uptime(d.get('uptime_seconds', 0))}")
+    console.print(f"  Models:   {len(d.get('models', []))}")
+    console.print(f"  Peers:    {len(d.get('peers', []))}")
     hw = d.get('hardware', {})
-    console.print()
-    console.print(f"  [{COMPUTE_RED}]{d.get('node_name', '?')}[/{COMPUTE_RED}] [{SPORE_GREEN}]{d.get('mode', '?')}[/{SPORE_GREEN}]")
-    console.print(f"  [dim]Peer ID   {d.get('peer_id', '?')[:20]}...[/dim]")
-    console.print(f"  [dim]Uptime    {_fmt_uptime(d.get('uptime_seconds', 0))}[/dim]")
-    console.print(f"  [dim]Models    {len(d.get('models', []))}[/dim]")
-    console.print(f"  [dim]Peers     {len(d.get('peers', []))}[/dim]")
-    console.print(f"  [dim]Hardware  {hw.get('gpu', 'CPU')} ({hw.get('vram_gb', 0)}GB {hw.get('backend', 'cpu')})[/dim]")
+    console.print(f"  Hardware: {hw.get('gpu', 'CPU')} ({hw.get('vram_gb', 0)}GB, {hw.get('backend', 'cpu')})")
     console.print()
 
 
 @cmd("models", "List loaded models")
 async def _cmd_models(client, endpoint, headers, args):
-    from mycellm.cli.banner import SPORE_GREEN
     resp = await client.get(f"{endpoint}/v1/models", headers=headers)
     models = resp.json().get("data", [])
     if not models:
-        console.print("\n  [dim]No models loaded.[/dim]\n")
+        console.print("\n[dim]No models loaded.[/dim]\n")
         return
-    console.print(f"\n  [{SPORE_GREEN}]{len(models)} model(s):[/{SPORE_GREEN}]")
+    console.print(f"\n[bold]{len(models)} model(s):[/bold]")
     for m in models:
         owner = m.get("owned_by", "local")
-        console.print(f"    {m['id']} [dim]({owner})[/dim]")
+        console.print(f"  [green]{m['id']}[/green] [dim]({owner})[/dim]")
     console.print()
 
 
 @cmd("credits", "Show credit balance")
 async def _cmd_credits(client, endpoint, headers, args):
-    from mycellm.cli.banner import LEDGER_GOLD, SPORE_GREEN, COMPUTE_RED
     resp = await client.get(f"{endpoint}/v1/node/credits", headers=headers)
     d = resp.json()
-    console.print()
-    console.print(f"  [{LEDGER_GOLD}]Balance[/{LEDGER_GOLD}]  {d.get('balance', 0):.2f}")
-    console.print(f"  [{SPORE_GREEN}]Earned[/{SPORE_GREEN}]   +{d.get('earned', 0):.2f}")
-    console.print(f"  [{COMPUTE_RED}]Spent[/{COMPUTE_RED}]    -{d.get('spent', 0):.2f}")
-    console.print()
+    console.print(f"\n  Balance: [bold yellow]{d.get('balance', 0):.2f}[/bold yellow]")
+    console.print(f"  Earned:  [green]+{d.get('earned', 0):.2f}[/green]")
+    console.print(f"  Spent:   [red]-{d.get('spent', 0):.2f}[/red]\n")
 
 
 @cmd("fleet", "Show fleet nodes")
 async def _cmd_fleet(client, endpoint, headers, args):
-    from mycellm.cli.banner import SPORE_GREEN, COMPUTE_RED, LEDGER_GOLD
     resp = await client.get(f"{endpoint}/v1/admin/nodes", headers=headers)
     nodes = resp.json().get("nodes", [])
     if not nodes:
-        console.print("\n  [dim]No fleet nodes registered.[/dim]\n")
+        console.print("\n[dim]No fleet nodes registered.[/dim]\n")
         return
-    console.print(f"\n  [{SPORE_GREEN}]{len(nodes)} fleet node(s):[/{SPORE_GREEN}]")
+    console.print(f"\n[bold]{len(nodes)} fleet node(s):[/bold]")
     for n in nodes:
-        dot = f"[{SPORE_GREEN}]●[/{SPORE_GREEN}]" if n.get("online") else (f"[{LEDGER_GOLD}]●[/{LEDGER_GOLD}]" if n.get("status") == "pending" else f"[{COMPUTE_RED}]●[/{COMPUTE_RED}]")
+        status_color = "green" if n.get("online") else ("yellow" if n.get("status") == "pending" else "red")
         models = n.get("capabilities", {}).get("models", [])
         model_names = ", ".join(m.get("name", m) if isinstance(m, dict) else m for m in models[:3])
-        console.print(f"    {dot} {n.get('node_name', '?'):12s} [dim]{n.get('api_addr', '?')}[/dim]  {model_names}")
+        console.print(
+            f"  [{status_color}]●[/{status_color}] "
+            f"[bold]{n.get('node_name', '?')}[/bold] "
+            f"[dim]{n.get('api_addr', '?')}[/dim]"
+            f"{'  ' + model_names if model_names else ''}"
+        )
     console.print()
 
 
 @cmd("use", "Switch model: /use <model-name>")
 async def _cmd_use(client, endpoint, headers, args):
     if not args:
-        console.print("  [dim]Usage: /use <model-name>[/dim]")
+        console.print("[dim]Usage: /use <model-name>[/dim]")
         return
     return args.strip()
 
@@ -133,12 +130,11 @@ async def _cmd_clear(client, endpoint, headers, args):
 
 @cmd("config", "Show node configuration")
 async def _cmd_config(client, endpoint, headers, args):
-    from mycellm.cli.banner import SPORE_GREEN
     resp = await client.get(f"{endpoint}/v1/node/debug/config", headers=headers)
     d = resp.json()
     console.print()
     for k, v in d.items():
-        console.print(f"  [{SPORE_GREEN}]{k}[/{SPORE_GREEN}]  [dim]{v}[/dim]")
+        console.print(f"  [dim]{k}:[/dim] {v}")
     console.print()
 
 
@@ -150,9 +146,9 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
     from rich.live import Live
     from rich.panel import Panel
     from rich.text import Text
-    from mycellm.cli.banner import (
-        SPORE_GREEN, COMPUTE_RED, RELAY_BLUE, LEDGER_GOLD, CONSOLE_GRAY,
-    )
+    from mycellm.cli.banner import print_chat_header, SPORE_GREEN, COMPUTE_RED, CONSOLE_GRAY
+
+    print_chat_header(console)
 
     headers = {}
     if api_key:
@@ -169,35 +165,37 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
         except Exception:
             pass
 
-    # Header
-    console.print()
-    console.print(Panel(
-        f"[bold {COMPUTE_RED}]mycellm_[/bold {COMPUTE_RED}] [dim]chat[/dim]\n"
-        f"[dim]Model:[/dim] [{SPORE_GREEN}]{model or 'auto'}[/{SPORE_GREEN}]  "
-        f"[dim]Node:[/dim] {endpoint}  "
-        f"[dim]Type /help or /q[/dim]",
-        border_style=SPORE_GREEN,
-        padding=(0, 1),
-    ))
-    console.print()
+    if model:
+        console.print(f"  Model: [bold green]{model}[/bold green]")
+    else:
+        console.print(f"  Model: [yellow]auto[/yellow] (will use best available)")
+    console.print(f"  Node:  [dim]{endpoint}[/dim]")
+    console.print(f"  Type [green]/help[/green] for commands, [green]/q[/green] to exit\n")
 
     messages: list[dict] = []
     current_model = model
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=300.0)) as client:
         while True:
+            # Green-bordered input prompt
             try:
-                user_input = console.input(f"[bold {COMPUTE_RED}]❯[/bold {COMPUTE_RED}] ")
+                user_input = console.input(
+                    f"[{SPORE_GREEN}]╭──[/{SPORE_GREEN}]\n"
+                    f"[{SPORE_GREEN}]│[/{SPORE_GREEN}] "
+                )
             except (EOFError, KeyboardInterrupt):
                 console.print(f"\n[dim]Goodbye.[/dim]")
                 break
+
+            # Close the input border
+            console.print(f"[{SPORE_GREEN}]╰──[/{SPORE_GREEN}]")
 
             stripped = user_input.strip()
             if not stripped:
                 continue
 
             if stripped.lower() in ("exit", "quit", "/q"):
-                console.print(f"[dim]Goodbye.[/dim]")
+                console.print("[dim]Goodbye.[/dim]")
                 break
 
             # Slash command dispatch
@@ -211,16 +209,16 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                         result = await COMMANDS[cmd_name]["fn"](client, endpoint, headers, cmd_args)
                         if cmd_name == "use" and result:
                             current_model = result
-                            console.print(f"  [{SPORE_GREEN}]Switched to[/{SPORE_GREEN}] {current_model}\n")
+                            console.print(f"  Switched to [bold green]{current_model}[/bold green]\n")
                         elif result == "__clear__":
                             messages.clear()
-                            console.print(f"  [dim]Conversation cleared.[/dim]\n")
+                            console.print("  [dim]Conversation cleared.[/dim]\n")
                     except httpx.ConnectError:
-                        console.print(f"  [{COMPUTE_RED}]Cannot connect to {endpoint}[/{COMPUTE_RED}]")
+                        console.print(f"[red]Cannot connect to {endpoint}[/red]. Is the daemon running?")
                     except Exception as e:
-                        console.print(f"  [{COMPUTE_RED}]Error: {e}[/{COMPUTE_RED}]")
+                        console.print(f"[red]Command error: {e}[/red]")
                 else:
-                    console.print(f"  [dim]Unknown command: /{cmd_name}. Type /help[/dim]")
+                    console.print(f"[dim]Unknown command: /{cmd_name}. Type /help for available commands.[/dim]")
                 continue
 
             # Chat message
@@ -241,20 +239,17 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                     headers={**headers, "Content-Type": "application/json"},
                 ) as resp:
                     if resp.status_code == 401:
-                        console.print(f"  [{COMPUTE_RED}]Unauthorized.[/{COMPUTE_RED}] Set --api-key or MYCELLM_API_KEY.")
+                        console.print("[red]Unauthorized.[/red] Set --api-key or MYCELLM_API_KEY.")
                         messages.pop()
                         continue
                     if resp.status_code != 200:
                         body = await resp.aread()
-                        console.print(f"  [{COMPUTE_RED}]Error {resp.status_code}:[/{COMPUTE_RED}] {body.decode()[:200]}")
+                        console.print(f"[red]Error {resp.status_code}:[/red] {body.decode()[:200]}")
                         messages.pop()
                         continue
 
                     console.print()
-                    with Live(
-                        Text("  ● ● ●", style=f"bold {SPORE_GREEN}"),
-                        console=console, refresh_per_second=10, transient=True,
-                    ) as live:
+                    with Live(Text("  ● ● ●", style=f"bold {SPORE_GREEN}"), console=console, refresh_per_second=10, transient=True) as live:
                         async for line in resp.aiter_lines():
                             if not line.startswith("data: "):
                                 continue
@@ -274,29 +269,25 @@ async def _chat_loop(model: str, endpoint: str, api_key: str) -> None:
                             except Exception:
                                 pass
 
-                    # Final render in a panel
+                    # Final render (non-transient)
                     if full_text:
-                        console.print(Panel(
-                            Markdown(full_text),
-                            border_style="dim",
-                            padding=(0, 1),
-                        ))
+                        console.print(Markdown(full_text))
 
                 messages.append({"role": "assistant", "content": full_text})
 
-                # Attribution
+                # Attribution line
                 via = resp_model or current_model or "auto"
-                console.print(f"  [dim]via [{COMPUTE_RED}]{via}[/{COMPUTE_RED}][/dim]\n")
+                console.print(f"\n[dim]  via {via}[/dim]\n")
 
             except httpx.ConnectError:
-                console.print(f"\n  [{COMPUTE_RED}]Cannot connect to {endpoint}[/{COMPUTE_RED}]. Is 'mycellm serve' running?\n")
+                console.print(f"\n[red]Cannot connect to {endpoint}[/red]. Is 'mycellm serve' running?\n")
                 messages.pop()
             except KeyboardInterrupt:
-                console.print(f"\n  [dim]Interrupted.[/dim]\n")
+                console.print(f"\n[dim]Interrupted.[/dim]\n")
                 if messages and messages[-1]["role"] == "user":
                     messages.pop()
             except Exception as e:
-                console.print(f"\n  [{COMPUTE_RED}]Error: {e}[/{COMPUTE_RED}]\n")
+                console.print(f"\n[red]Error: {e}[/red]\n")
                 messages.pop()
 
 
