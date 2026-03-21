@@ -22,15 +22,15 @@ class SensitiveMatch:
 
 # Patterns: (type, label, regex, severity)
 _PATTERNS: list[tuple[str, str, str, str]] = [
-    # API keys
-    ("api_key", "OpenAI API key", r"sk-[a-zA-Z0-9]{20,}", "high"),
-    ("api_key", "OpenRouter API key", r"sk-or-v1-[a-zA-Z0-9]{40,}", "high"),
-    ("api_key", "GitHub token", r"gh[ps]_[a-zA-Z0-9]{36,}", "high"),
-    ("api_key", "AWS access key", r"AKIA[A-Z0-9]{16}", "high"),
+    # API keys (relaxed thresholds to catch shorter test keys too)
+    ("api_key", "OpenAI API key", r"sk-[a-zA-Z0-9]{16,}", "high"),
+    ("api_key", "OpenRouter API key", r"sk-or-v1-[a-zA-Z0-9]{10,}", "high"),
+    ("api_key", "GitHub token", r"gh[ps]_[a-zA-Z0-9]{20,}", "high"),
+    ("api_key", "AWS access key", r"AKIA[A-Z0-9]{12,}", "high"),
     ("api_key", "Slack token", r"xox[baprs]-[a-zA-Z0-9\-]{10,}", "high"),
-    ("api_key", "Anthropic API key", r"sk-ant-[a-zA-Z0-9\-]{20,}", "high"),
-    ("api_key", "HuggingFace token", r"hf_[a-zA-Z0-9]{20,}", "high"),
-    ("api_key", "Generic secret key", r"(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*[=:]\s*['\"]?[a-zA-Z0-9_\-]{20,}", "medium"),
+    ("api_key", "Anthropic API key", r"sk-ant-[a-zA-Z0-9\-]{16,}", "high"),
+    ("api_key", "HuggingFace token", r"hf_[a-zA-Z0-9]{10,}", "high"),
+    ("api_key", "Generic secret key", r"(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*[=:]\s*['\"]?[a-zA-Z0-9_\-]{8,}", "medium"),
 
     # Private keys
     ("private_key", "Private key block", r"-----BEGIN\s+(?:RSA|EC|ED25519|OPENSSH|PGP)\s+PRIVATE\s+KEY-----", "high"),

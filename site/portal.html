@@ -485,9 +485,11 @@
         // ── Send message ──
         // Sensitive content detection
         const _sensitivePatterns = [
-            { type: 'API key', re: /sk-[a-zA-Z0-9]{20,}|sk-or-v1-[a-zA-Z0-9]{40,}|gh[ps]_[a-zA-Z0-9]{36,}|AKIA[A-Z0-9]{16}|sk-ant-[a-zA-Z0-9-]{20,}|hf_[a-zA-Z0-9]{20,}/i },
+            { type: 'API key', re: /sk-[a-zA-Z0-9]{16,}|sk-or-v1-[a-zA-Z0-9]{10,}|gh[ps]_[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{12,}|sk-ant-[a-zA-Z0-9\-]{16,}|hf_[a-zA-Z0-9]{10,}|xox[baprs]-[a-zA-Z0-9\-]{10,}/i },
+            { type: 'Secret key', re: /(?:api[_\-]?key|secret[_\-]?key|access[_\-]?token)\s*[=:]\s*['"]?[a-zA-Z0-9_\-]{8,}/i },
             { type: 'Private key', re: /-----BEGIN\s+(?:RSA|EC|ED25519|OPENSSH|PGP)\s+PRIVATE\s+KEY-----/i },
             { type: 'Password', re: /(?:password|passwd|pwd)\s*[=:]\s*['"]?[^\s'"]{4,}/i },
+            { type: 'Credentials', re: /(?:my\s+password\s+is|login\s+credentials?|auth\s+token)\s+\S+/i },
             { type: 'Credit card', re: /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/ },
             { type: 'SSN', re: /\b\d{3}-\d{2}-\d{4}\b/ },
             { type: 'Connection string', re: /(?:postgresql|mysql|mongodb|redis):\/\/[^\s]{10,}/i },
