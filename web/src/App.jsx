@@ -1183,6 +1183,9 @@ function OverviewTab({ status, credits, fleetNodes }) {
           <div className="text-center">
             <div className="text-xl font-mono text-ledger">{credits.balance?.toFixed(1)}</div>
             <div className="text-gray-500">credits</div>
+            <div className={`text-[10px] mt-0.5 ${credits.balance >= 50 ? 'text-ledger' : credits.balance >= 10 ? 'text-spore' : 'text-gray-600'}`}>
+              {credits.balance >= 50 ? 'power' : credits.balance >= 10 ? 'contributor' : 'free'}
+            </div>
           </div>
         </div>
       </div>
@@ -2960,15 +2963,19 @@ function ChatTab() {
 
 function CreditsTab({ credits }) {
   const [history, setHistory] = useState([])
+  const [tier, setTier] = useState(null)
 
   useEffect(() => {
-    const fetch_ = () => api('/v1/node/credits/history?limit=100')
-      .then(d => setHistory(d.transactions || []))
-      .catch(() => {})
+    const fetch_ = () => {
+      api('/v1/node/credits/history?limit=100').then(d => setHistory(d.transactions || [])).catch(() => {})
+      api('/v1/node/credits/tier').then(setTier).catch(() => {})
+    }
     fetch_()
     const iv = setInterval(fetch_, 5000)
     return () => clearInterval(iv)
   }, [])
+
+  const tierColors = { power: 'text-ledger bg-ledger/10 border-ledger/20', contributor: 'text-spore bg-spore/10 border-spore/20', free: 'text-gray-400 bg-white/5 border-white/10' }
 
   return (
     <div className="space-y-6">
@@ -2977,6 +2984,62 @@ function CreditsTab({ credits }) {
         <StatCard label="Total Earned" value={`+${credits.earned?.toFixed(2) || '0.00'}`} icon={Zap} color="text-spore" />
         <StatCard label="Total Spent" value={`-${credits.spent?.toFixed(2) || '0.00'}`} icon={BarChart3} color="text-compute" />
       </div>
+
+      {/* Credit Tier + Receipts */}
+      {tier && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+            <h3 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3">Access Tier</h3>
+            <div className="flex items-center space-x-3 mb-2">
+              <span className={`text-sm font-medium px-2.5 py-1 rounded border ${tierColors[tier.tier] || tierColors.free}`}>
+                {tier.label}
+              </span>
+              <span className="text-xs text-gray-500">{tier.access}</span>
+            </div>
+            <div className="mt-3 text-xs text-gray-600 space-y-1">
+              <div className="flex justify-between"><span>Free (&lt;10 credits)</span><span>Tier 1 only</span></div>
+              <div className="flex justify-between"><span>Contributor (&ge;10)</span><span>Tier 1 + 2</span></div>
+              <div className="flex justify-between"><span>Power Seeder (&ge;50)</span><span>All tiers</span></div>
+            </div>
+            {/* Progress bar to next tier */}
+            {tier.tier !== 'power' && (() => {
+              const next = tier.tier === 'free' ? 10 : 50
+              const pct = Math.min(100, (tier.balance / next) * 100)
+              return (
+                <div className="mt-3">
+                  <div className="flex justify-between text-[10px] text-gray-600 mb-1">
+                    <span>{tier.balance} credits</span>
+                    <span>{next} for next tier</span>
+                  </div>
+                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-full bg-spore rounded-full transition-all" style={{width: `${pct}%`}} />
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+          <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+            <h3 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3">Receipts</h3>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div>
+                <div className="text-xl font-mono text-white">{tier.receipts?.total || 0}</div>
+                <div className="text-xs text-gray-500">Total</div>
+              </div>
+              <div>
+                <div className="text-xl font-mono text-spore">{tier.receipts?.verified || 0}</div>
+                <div className="text-xs text-gray-500">Verified</div>
+              </div>
+              <div>
+                <div className="text-xl font-mono text-relay">{tier.receipts?.fleet || 0}</div>
+                <div className="text-xs text-gray-500">Fleet</div>
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-600 mt-3">
+              Verified receipts are Ed25519-signed by seeder nodes. Fleet receipts are generated via HTTP proxy.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">
         <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4">Transaction History</h2>

@@ -129,6 +129,49 @@ async def node_credits(request: Request):
     return await node.get_credits()
 
 
+@router.get("/credits/tier")
+async def credit_tier(request: Request):
+    """Get the consumer's current credit tier and access level."""
+    node = request.app.state.node
+    balance = 0.0
+    if node.ledger:
+        balance = await node.ledger.balance(node.peer_id)
+
+    if balance >= 50:
+        tier = "power"
+        access = "All model tiers"
+        label = "Power Seeder"
+    elif balance >= 10:
+        tier = "contributor"
+        access = "Tier 1 + Tier 2 models"
+        label = "Contributor"
+    else:
+        tier = "free"
+        access = "Tier 1 models only"
+        label = "Free Tier"
+
+    # Receipt stats
+    receipts_received = 0
+    receipts_verified = 0
+    if node.ledger:
+        all_receipts = await node.ledger.get_receipts(node.peer_id, limit=1000)
+        receipts_received = len(all_receipts)
+        receipts_verified = sum(1 for r in all_receipts if r.get("signature") and r["signature"] != "fleet")
+
+    return {
+        "balance": round(balance, 2),
+        "tier": tier,
+        "label": label,
+        "access": access,
+        "thresholds": {"free": 0, "contributor": 10, "power": 50},
+        "receipts": {
+            "total": receipts_received,
+            "verified": receipts_verified,
+            "fleet": receipts_received - receipts_verified,
+        },
+    }
+
+
 @router.get("/credits/history")
 async def credit_history(request: Request, limit: int = 50):
     """Get credit transaction history."""

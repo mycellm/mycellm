@@ -116,6 +116,15 @@ hardware_ram_total_gb = Gauge(
 )
 
 # --- Uptime ---
+# --- Receipts ---
+receipts_received_total = Counter(
+    "mycellm_receipts_received_total",
+    "Total receipts received from peers",
+    ["status"],  # verified, rejected, fleet
+    registry=REGISTRY,
+)
+
+# --- Uptime ---
 uptime_seconds = Gauge(
     "mycellm_uptime_seconds",
     "Node uptime in seconds",

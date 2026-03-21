@@ -569,11 +569,21 @@ class MycellmNode:
         conn = self._peer_connections.get(msg.from_peer)
         if not conn:
             logger.warning(f"Receipt from unauthenticated peer {msg.from_peer[:16]}")
+            try:
+                from mycellm.metrics import receipts_received_total
+                receipts_received_total.labels(status="rejected").inc()
+            except ImportError:
+                pass
             return
 
         # Replay protection
         if not self.receipt_validator.check_replay(request_id):
             logger.warning(f"Replay receipt rejected from {msg.from_peer[:16]}")
+            try:
+                from mycellm.metrics import receipts_received_total
+                receipts_received_total.labels(status="rejected").inc()
+            except ImportError:
+                pass
             return
 
         # Verify Ed25519 signature
@@ -590,6 +600,11 @@ class MycellmNode:
             seeder_pubkey = conn.hello.cert.device_pubkey
             if not verify_receipt_signature(receipt_data, signature, seeder_pubkey):
                 logger.warning(f"Invalid receipt signature from {msg.from_peer[:16]}")
+                try:
+                    from mycellm.metrics import receipts_received_total
+                    receipts_received_total.labels(status="rejected").inc()
+                except ImportError:
+                    pass
                 return
 
         # Store verified receipt
@@ -605,6 +620,11 @@ class MycellmNode:
             )
         self.reputation.record_receipt(msg.from_peer)
         logger.debug(f"Verified receipt from {msg.from_peer[:8]}: {payload.get('tokens', 0)} tokens")
+        try:
+            from mycellm.metrics import receipts_received_total
+            receipts_received_total.labels(status="verified").inc()
+        except ImportError:
+            pass
 
     def _handle_peer_exchange(self, msg: MessageEnvelope) -> None:
         """Handle peer exchange -- learn about peers from connected peer."""
