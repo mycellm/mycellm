@@ -1,4 +1,46 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } from 'react'
+import { marked } from 'marked'
+import hljs from 'highlight.js/lib/core'
+import javascript from 'highlight.js/lib/languages/javascript'
+import python from 'highlight.js/lib/languages/python'
+import bash from 'highlight.js/lib/languages/bash'
+import json from 'highlight.js/lib/languages/json'
+import typescript from 'highlight.js/lib/languages/typescript'
+import sql from 'highlight.js/lib/languages/sql'
+import yaml from 'highlight.js/lib/languages/yaml'
+import css from 'highlight.js/lib/languages/css'
+import xml from 'highlight.js/lib/languages/xml'
+import rust from 'highlight.js/lib/languages/rust'
+import go from 'highlight.js/lib/languages/go'
+import 'highlight.js/styles/github-dark-dimmed.css'
+
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('js', javascript)
+hljs.registerLanguage('python', python)
+hljs.registerLanguage('py', python)
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('sh', bash)
+hljs.registerLanguage('shell', bash)
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('typescript', typescript)
+hljs.registerLanguage('ts', typescript)
+hljs.registerLanguage('sql', sql)
+hljs.registerLanguage('yaml', yaml)
+hljs.registerLanguage('yml', yaml)
+hljs.registerLanguage('css', css)
+hljs.registerLanguage('html', xml)
+hljs.registerLanguage('xml', xml)
+hljs.registerLanguage('rust', rust)
+hljs.registerLanguage('go', go)
+
+marked.setOptions({
+  highlight: (code, lang) => {
+    if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
+    return hljs.highlightAuto(code).value
+  },
+  breaks: true,
+  gfm: true,
+})
 import {
   Terminal, Activity, Server, Globe, Cpu, Database, Zap, Shield, Key,
   Send, Plus, Trash2, RefreshCw, MessageSquare, BarChart3, Network,
@@ -2788,7 +2830,10 @@ function ChatTab() {
                 ? 'bg-relay/20 text-white border border-relay/20'
                 : 'bg-black border border-white/10 text-gray-200'
             }`}>
-              <div className="whitespace-pre-wrap">{m.content}</div>
+              {m.role === 'user'
+                ? <div className="whitespace-pre-wrap">{m.content}</div>
+                : <div className="chat-md" dangerouslySetInnerHTML={{ __html: marked.parse(m.content || '') }} />
+              }
               {m.model && (
                 <div className="mt-2 pt-2 border-t border-white/5 text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
                   <span>via {m.model}</span>
