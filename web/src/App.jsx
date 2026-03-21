@@ -2237,45 +2237,63 @@ function ModelsTab({ status, onRefresh }) {
                 }
                 return (
                   <>
-                    <div className="space-y-1">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-600 font-mono uppercase">
+                          <th className="text-left py-1 pr-1 w-5"></th>
+                          <th className="text-left py-1 pr-2">Model</th>
+                          <th className="text-left py-1 pr-2 hidden sm:table-cell">Type</th>
+                          <th className="text-right py-1 pr-2 hidden sm:table-cell">Params</th>
+                          <th className="text-left py-1 pr-2 hidden md:table-cell">Arch</th>
+                          <th className="text-right py-1 pr-2 hidden md:table-cell">Context</th>
+                          <th className="text-right py-1 pr-2">Min size</th>
+                          <th className="text-right py-1 pr-2 hidden lg:table-cell">Downloads</th>
+                          <th className="text-right py-1 w-5"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
                       {filtered.map((m, i) => {
                         const compat = isCompat(m)
                         const isExpanded = repoFiles?.repo_id === m.repo_id
                         return (
-                          <div key={i}>
-                            <button onClick={() => isExpanded ? setRepoFiles(null) : handleBrowseRepo(m.repo_id)}
-                              className={`w-full text-left flex items-center justify-between py-2 px-3 rounded-lg transition-colors ${
-                                isExpanded ? 'bg-white/[0.05] border border-spore/20' :
-                                compat ? 'hover:bg-white/[0.03] border border-transparent' : 'opacity-50 border border-transparent'
+                          <React.Fragment key={i}>
+                            <tr onClick={() => isExpanded ? setRepoFiles(null) : handleBrowseRepo(m.repo_id)}
+                              className={`cursor-pointer border-t border-white/5 transition-colors ${
+                                isExpanded ? 'bg-white/[0.05]' :
+                                compat ? 'hover:bg-white/[0.03]' : 'opacity-50'
                               }`}>
-                              <div className="flex items-center space-x-3 min-w-0 flex-1">
-                                <ChevronRight size={12} className={`text-gray-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                                <span className="font-mono text-sm text-white truncate">{m.repo_id}</span>
-                                <div className="flex gap-1 shrink-0">
+                              <td className="py-2 pr-1">
+                                <ChevronRight size={12} className={`text-gray-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                              </td>
+                              <td className="py-2 pr-2">
+                                <div className="font-mono text-sm text-white truncate max-w-[250px]">{m.repo_id}</div>
+                              </td>
+                              <td className="py-2 pr-2 hidden sm:table-cell">
+                                <div className="flex gap-1">
                                   {capBadges(m).map((c, j) => (
-                                    <span key={j} className={`text-[10px] px-1 py-0 rounded ${c.color}`}>{c.label}</span>
+                                    <span key={j} className={`px-1 py-0 rounded ${c.color}`}>{c.label}</span>
                                   ))}
                                 </div>
-                              </div>
-                              <div className="flex items-center space-x-3 text-xs text-gray-500 shrink-0 ml-3">
-                                {m.param_b > 0 && <span className="text-gray-300 font-mono">{m.param_b}B</span>}
-                                {m.architecture && <span className="hidden sm:inline">{m.architecture}</span>}
-                                {m.context_length > 0 && <span className="hidden md:inline">{(m.context_length / 1000).toFixed(0)}k</span>}
-                                {m.est_min_size_gb > 0 && <span>~{m.est_min_size_gb}GB</span>}
-                                <span className="text-gray-600">{m.downloads?.toLocaleString()}&darr;</span>
-                                {!compat && <span className="text-compute" title="May exceed node resources">&#9888;</span>}
-                              </div>
-                            </button>
-                            {/* Inline expanded variant table */}
+                              </td>
+                              <td className="py-2 pr-2 text-right text-gray-300 font-mono hidden sm:table-cell">{m.param_b > 0 ? `${m.param_b}B` : '-'}</td>
+                              <td className="py-2 pr-2 text-gray-500 hidden md:table-cell">{m.architecture || '-'}</td>
+                              <td className="py-2 pr-2 text-right text-gray-500 hidden md:table-cell">{m.context_length > 0 ? `${(m.context_length / 1000).toFixed(0)}k` : '-'}</td>
+                              <td className="py-2 pr-2 text-right text-gray-400">{m.est_min_size_gb > 0 ? `~${m.est_min_size_gb}GB` : '-'}</td>
+                              <td className="py-2 pr-2 text-right text-gray-600 hidden lg:table-cell">{m.downloads?.toLocaleString()}</td>
+                              <td className="py-2 text-right">{!compat && <AlertTriangle size={12} className="text-compute" />}</td>
+                            </tr>
                             {isExpanded && repoFiles && (
-                              <VariantTable repoFiles={repoFiles} filterCompatible={filterCompatible}
-                                downloadStatus={downloadStatus} localFiles={localFiles} models={models}
-                                onDownload={(f) => handleDownload(repoFiles.repo_id, f.filename, f)} />
+                              <tr><td colSpan={9} className="p-0">
+                                <VariantTable repoFiles={repoFiles} filterCompatible={filterCompatible}
+                                  downloadStatus={downloadStatus} localFiles={localFiles} models={models}
+                                  onDownload={(f) => handleDownload(repoFiles.repo_id, f.filename, f)} />
+                              </td></tr>
                             )}
-                          </div>
+                          </React.Fragment>
                         )
                       })}
-                    </div>
+                      </tbody>
+                    </table>
                     {hiddenCount > 0 && (
                       <div className="text-xs text-gray-600 mt-2">
                         {hiddenCount} model(s) hidden (too large for {nodeResources.ram_gb}GB RAM).
@@ -2297,43 +2315,53 @@ function ModelsTab({ status, onRefresh }) {
                     <h3 className="text-xs text-gray-500 font-mono uppercase tracking-wider">Suggested for this node</h3>
                     {nodeResources.ram_gb > 0 && <span className="text-xs text-gray-600">{nodeResources.ram_gb}GB RAM &middot; {nodeResources.disk_free_gb}GB disk free</span>}
                   </div>
-                  <div className="space-y-1">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-600 font-mono uppercase">
+                        <th className="text-left py-1 pr-1 w-5"></th>
+                        <th className="text-left py-1 pr-2">Model</th>
+                        <th className="text-right py-1 pr-2">Params</th>
+                        <th className="text-right py-1 pr-2">Est. size</th>
+                        <th className="text-right py-1 pr-2 hidden sm:table-cell">Min RAM</th>
+                        <th className="text-right py-1 w-5"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
                     {suggestions.filter(s => !filterCompatible || s.compatible).map((s, i) => {
                       const isExpanded = repoFiles?.repo_id === s.repo_id
                       return (
-                        <div key={i}>
-                          <button onClick={() => isExpanded ? setRepoFiles(null) : handleBrowseRepo(s.repo_id)}
-                            className={`w-full text-left flex items-center justify-between py-2 px-3 rounded-lg transition-colors ${
-                              isExpanded ? 'bg-white/[0.05] border border-spore/20' :
-                              s.compatible ? 'hover:bg-white/[0.03] border border-spore/10' : 'opacity-50 border border-transparent'
+                        <React.Fragment key={i}>
+                          <tr onClick={() => isExpanded ? setRepoFiles(null) : handleBrowseRepo(s.repo_id)}
+                            className={`cursor-pointer border-t border-white/5 transition-colors ${
+                              isExpanded ? 'bg-white/[0.05]' :
+                              s.compatible ? 'hover:bg-white/[0.03]' : 'opacity-50'
                             }`}>
-                            <div className="flex items-center space-x-3 min-w-0 flex-1">
-                              <ChevronRight size={12} className={`text-gray-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                              <div className="min-w-0">
-                                <span className="font-mono text-sm text-white">{s.repo_id.split('/').pop()}</span>
-                                <div className="text-xs text-gray-500 truncate">{s.description}</div>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-3 text-xs text-gray-500 shrink-0 ml-3">
-                              <span className="text-gray-300 font-mono">{s.param_b}B</span>
-                              <span>~{s.est_size_gb}GB</span>
-                              <span className="text-gray-600">{s.min_ram_gb}GB+ RAM</span>
-                              {s.compatible
-                                ? <span className="text-spore">&#10003;</span>
-                                : <span className="text-compute">&#9888;</span>
-                              }
-                            </div>
-                          </button>
-                          {/* Inline expanded variant table */}
+                            <td className="py-2 pr-1">
+                              <ChevronRight size={12} className={`text-gray-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                            </td>
+                            <td className="py-2 pr-2">
+                              <div className="font-mono text-sm text-white">{s.repo_id.split('/').pop()}</div>
+                              <div className="text-gray-500 truncate max-w-[250px]">{s.description}</div>
+                            </td>
+                            <td className="py-2 pr-2 text-right text-gray-300 font-mono">{s.param_b}B</td>
+                            <td className="py-2 pr-2 text-right text-gray-400">~{s.est_size_gb}GB</td>
+                            <td className="py-2 pr-2 text-right text-gray-600 hidden sm:table-cell">{s.min_ram_gb}GB+</td>
+                            <td className="py-2 text-right">
+                              {s.compatible ? <CheckCircle size={12} className="text-spore" /> : <AlertTriangle size={12} className="text-compute" />}
+                            </td>
+                          </tr>
                           {isExpanded && repoFiles && (
-                            <VariantTable repoFiles={repoFiles} filterCompatible={filterCompatible}
-                              downloadStatus={downloadStatus} localFiles={localFiles} models={models}
-                              onDownload={(f) => handleDownload(repoFiles.repo_id, f.filename, f)} />
+                            <tr><td colSpan={6} className="p-0">
+                              <VariantTable repoFiles={repoFiles} filterCompatible={filterCompatible}
+                                downloadStatus={downloadStatus} localFiles={localFiles} models={models}
+                                onDownload={(f) => handleDownload(repoFiles.repo_id, f.filename, f)} />
+                            </td></tr>
                           )}
-                        </div>
+                        </React.Fragment>
                       )
                     })}
-                  </div>
+                    </tbody>
+                  </table>
                   {filterCompatible && suggestions.some(s => !s.compatible) && (
                     <div className="text-xs text-gray-600 mt-2">
                       {suggestions.filter(s => !s.compatible).length} model(s) hidden.
