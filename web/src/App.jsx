@@ -1545,6 +1545,7 @@ function NetworkTab({ status }) {
                     <span className="font-mono text-sm font-medium">{rn.node_name || 'unnamed'}</span>
                     <span className="font-mono text-xs text-gray-500">{rn.api_addr}</span>
                     <span className="font-mono text-xs text-gray-600">{rn.peer_id?.slice(0, 12)}...</span>
+                    {sys.mycellm_version && <span className="font-mono text-[10px] text-gray-700">v{sys.mycellm_version}</span>}
                   </div>
                   <div className="flex items-center space-x-2">
                     {isPending && (
@@ -3369,6 +3370,7 @@ export default function App() {
   const [refreshTick, setRefreshTick] = useState(0)
   const [fleetCount, setFleetCount] = useState(0)
   const [liveActivityEvents, setLiveActivityEvents] = useState([])
+  const [versionInfo, setVersionInfo] = useState({ current: null, latest: null, update_available: false })
   const nodeRegistry = useManagedNodes()
 
   const triggerRefresh = useCallback(() => setRefreshTick(t => t + 1), [])
@@ -3389,6 +3391,15 @@ export default function App() {
         setAppState('booting')
       }
     }).catch(() => setAppState('booting'))  // node offline, skip auth
+  }, [appState])
+
+  // Fetch version info (once on mount + every 6 hours)
+  useEffect(() => {
+    if (appState !== 'dashboard') return
+    const fetchVersion = () => api('/v1/node/version').then(setVersionInfo).catch(() => {})
+    fetchVersion()
+    const iv = setInterval(fetchVersion, 6 * 60 * 60 * 1000)
+    return () => clearInterval(iv)
   }, [appState])
 
   // Poll status + credits
@@ -3541,6 +3552,24 @@ export default function App() {
           {tab === 'logs' && <LogsTab logs={logs} />}
           {tab === 'settings' && <SettingsTab />}
         </main>
+
+        {/* Footer */}
+        <footer className="border-t border-white/5 bg-void/60 relative z-10">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between text-[11px] font-mono text-gray-600">
+            <div className="flex items-center space-x-2">
+              <span>mycellm v{versionInfo.current || '...'}</span>
+              {versionInfo.update_available && (
+                <span className="text-ledger bg-ledger/10 px-1.5 py-0.5 rounded text-[10px]">
+                  v{versionInfo.latest} available
+                </span>
+              )}
+            </div>
+            <div className="flex items-center space-x-3">
+              <a href="/metrics" target="_blank" className="hover:text-gray-400">metrics</a>
+              <a href="/docs" target="_blank" className="hover:text-gray-400">api</a>
+            </div>
+          </div>
+        </footer>
       </div>
     </NodeRegistryContext.Provider>
   )

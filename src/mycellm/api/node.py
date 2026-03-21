@@ -14,6 +14,25 @@ from mycellm.activity import EventType
 router = APIRouter()
 
 
+@router.get("/version")
+async def node_version(request: Request):
+    """Get current version and check for updates."""
+    from mycellm import __version__
+    result = {"current": __version__, "latest": None, "update_available": False}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get("https://pypi.org/pypi/mycellm/json")
+            if resp.status_code == 200:
+                latest = resp.json().get("info", {}).get("version", "")
+                if latest:
+                    result["latest"] = latest
+                    result["update_available"] = latest != __version__
+    except Exception:
+        pass  # offline or not published yet
+    return result
+
+
 @router.get("/status")
 async def node_status(request: Request):
     """Get comprehensive node status."""

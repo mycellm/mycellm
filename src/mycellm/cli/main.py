@@ -80,16 +80,19 @@ app.add_typer(device_app, name="device", help="Manage device certificates (creat
 app.add_typer(secret_app, name="secret", help="Manage encrypted API keys (set/list/get/remove)")
 
 
+def _version_callback(value: bool):
+    if value:
+        from mycellm import __version__
+        console.print(f"mycellm {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
-def main_callback():
+def main_callback(
+    version: bool = typer.Option(False, "--version", "-v", "-V", help="Show version and exit", callback=_version_callback, is_eager=True),
+):
     """mycellm — Distributed LLM inference across heterogeneous hardware."""
     pass
-
-
-@app.command(hidden=True)
-def version():
-    """Show mycellm version."""
-    console.print("mycellm 0.1.0")
 
 
 if __name__ == "__main__":

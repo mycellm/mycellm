@@ -95,8 +95,10 @@ def create_app(node: MycellmNode) -> FastAPI:
     # Health check (always public — includes auth_required flag for clients)
     @app.get("/health")
     async def health():
+        from mycellm import __version__
         return {
             "status": "ok",
+            "version": __version__,
             "peer_id": node.peer_id,
             "auth_required": bool(settings.api_key),
         }
