@@ -7,6 +7,27 @@ from dataclasses import dataclass, field
 import cbor2
 
 
+# Model tier boundaries (by parameter count in billions)
+TIER_THRESHOLDS = [
+    (8.0, 1),    # ≤8B = Tier 1
+    (70.0, 2),   # ≤70B = Tier 2
+    (float("inf"), 3),  # >70B = Tier 3
+]
+
+TIER_LABELS = {1: "tier1", 2: "tier2", 3: "tier3"}
+TIER_NAMES = {1: "Standard (≤8B)", 2: "Large (≤70B)", 3: "Frontier (>70B)"}
+
+
+def classify_tier(param_count_b: float) -> int:
+    """Classify a model into a tier based on parameter count."""
+    if param_count_b <= 0:
+        return 1  # Unknown size defaults to Tier 1
+    for threshold, tier in TIER_THRESHOLDS:
+        if param_count_b <= threshold:
+            return tier
+    return 3
+
+
 @dataclass
 class ModelCapability:
     """A model this node can serve."""
