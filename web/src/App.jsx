@@ -5,6 +5,7 @@ import {
   Boxes, ChevronRight, Loader2, AlertCircle, Check, X, Eye, EyeOff,
   Radio, MonitorSmartphone, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
   Wifi, WifiOff, Clock, TrendingUp, Heart, Gauge, LayoutGrid, List,
+  Download, CheckCircle, XCircle, AlertTriangle, HardDrive,
 } from 'lucide-react'
 
 // ── Constants ──
@@ -1578,6 +1579,105 @@ function SortHeader({ label, field, sortBy, sortDir, onSort }) {
   )
 }
 
+// Quant quality descriptions
+const QUANT_INFO = {
+  'Q2_K':   { quality: 'Low',         desc: 'Smallest, lowest quality. Testing only.', stars: 1 },
+  'Q3_K_S': { quality: 'Low-Med',     desc: 'Small but noticeable quality loss.',       stars: 2 },
+  'Q3_K_M': { quality: 'Medium-Low',  desc: 'Decent balance for very constrained RAM.', stars: 2 },
+  'Q3_K_L': { quality: 'Medium-Low',  desc: 'Better than Q3_K_M, still small.',        stars: 2 },
+  'Q4_K_S': { quality: 'Good',        desc: 'Good quality, smaller than Q4_K_M.',       stars: 3 },
+  'Q4_K_M': { quality: 'Recommended', desc: 'Best balance of quality and size.',        stars: 4 },
+  'Q4_0':   { quality: 'Good',        desc: 'Older quant format, decent quality.',       stars: 3 },
+  'Q5_K_S': { quality: 'High',        desc: 'High quality, moderate size increase.',     stars: 4 },
+  'Q5_K_M': { quality: 'High',        desc: 'Very good quality, recommended if RAM allows.', stars: 4 },
+  'Q6_K':   { quality: 'Very High',   desc: 'Near-original quality.',                    stars: 5 },
+  'Q8_0':   { quality: 'Excellent',   desc: 'Almost lossless. Large file.',              stars: 5 },
+  'F16':    { quality: 'Full',        desc: 'Full 16-bit precision. Very large.',        stars: 5 },
+  'F32':    { quality: 'Full',        desc: 'Full 32-bit precision. Maximum size.',      stars: 5 },
+  'IQ4_NL': { quality: 'Good',        desc: 'iQuant: good quality, small size.',         stars: 3 },
+  'IQ4_XS': { quality: 'Good',        desc: 'iQuant: slightly smaller than IQ4_NL.',     stars: 3 },
+}
+
+function VariantTable({ repoFiles, filterCompatible, downloadStatus, localFiles, models, onDownload }) {
+  const files = (repoFiles?.files || []).filter(f => !filterCompatible || !f.warnings || f.warnings.length === 0)
+  if (files.length === 0) return <div className="ml-6 py-2 text-xs text-gray-600">No compatible variants{filterCompatible ? ' (try Show all)' : ''}</div>
+
+  return (
+    <div className="ml-6 mr-2 mb-2 border-l border-spore/20 pl-3">
+      <div className="flex items-center space-x-3 mb-1.5 text-xs text-gray-500">
+        {repoFiles.param_b > 0 && <span>{repoFiles.param_b}B params</span>}
+        {repoFiles.architecture && <span>{repoFiles.architecture}</span>}
+        {repoFiles.context_length > 0 && <span>{repoFiles.context_length.toLocaleString()} ctx</span>}
+        {repoFiles.disk_free_gb > 0 && <span className="text-gray-600">{repoFiles.disk_free_gb}GB free</span>}
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-gray-600 font-mono uppercase">
+            <th className="text-left py-1 pr-2 w-20">Quant</th>
+            <th className="text-left py-1 pr-2">Quality</th>
+            <th className="text-right py-1 pr-2">Size</th>
+            <th className="text-right py-1 pr-2">RAM</th>
+            <th className="text-right py-1 w-24"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {files.map((f, i) => {
+            const dl = Object.values(downloadStatus).find(d => d.filename === f.filename && d.repo_id === repoFiles.repo_id)
+            const hasWarnings = f.warnings && f.warnings.length > 0
+            const isOnDisk = localFiles.some(lf => lf.filename === f.filename)
+            const isLoaded = models.some(md => f.filename.replace('.gguf', '') === md.name)
+            const qi = QUANT_INFO[f.quant] || { quality: '?', desc: '', stars: 0 }
+            const quantColor = f.quant?.startsWith('Q4') ? 'text-spore bg-spore/10' :
+              f.quant?.startsWith('Q5') || f.quant?.startsWith('Q6') ? 'text-relay bg-relay/10' :
+              f.quant?.startsWith('Q8') || f.quant === 'F16' ? 'text-poison bg-poison/10' :
+              f.quant?.startsWith('Q2') || f.quant?.startsWith('Q3') ? 'text-ledger bg-ledger/10' :
+              'text-gray-500 bg-white/5'
+
+            return (
+              <tr key={i} className={`border-t border-white/5 ${hasWarnings && !isOnDisk ? 'opacity-40' : 'hover:bg-white/[0.02]'}`}>
+                <td className="py-1.5 pr-2">
+                  <span className={`font-mono px-1.5 py-0.5 rounded ${quantColor}`}>{f.quant || '?'}</span>
+                </td>
+                <td className="py-1.5 pr-2 text-gray-500" title={qi.desc}>
+                  <span className="text-gray-400">{qi.quality}</span>
+                  <span className="text-gray-700 ml-1 hidden sm:inline">{'★'.repeat(qi.stars)}{'☆'.repeat(5 - qi.stars)}</span>
+                </td>
+                <td className="py-1.5 pr-2 text-right text-gray-400 font-mono">{f.size_gb}GB</td>
+                <td className="py-1.5 pr-2 text-right text-gray-600">{f.est_ram_gb ? `~${f.est_ram_gb}` : '?'}GB</td>
+                <td className="py-1.5 text-right">
+                  {dl && dl.status === 'downloading' ? (
+                    <div className="inline-flex items-center space-x-1">
+                      <div className="w-12 bg-void rounded-full h-1 overflow-hidden border border-white/5">
+                        <div className="h-full bg-ledger" style={{ width: `${dl.progress || 0}%` }} />
+                      </div>
+                      <span className="text-ledger font-mono w-8 text-right">{dl.progress?.toFixed(0)}%</span>
+                    </div>
+                  ) : isOnDisk || (dl && dl.status === 'complete') ? (
+                    <span className="inline-flex items-center space-x-1">
+                      {isLoaded ? <CheckCircle size={12} className="text-spore" /> : <HardDrive size={12} className="text-gray-500" />}
+                      <span className={isLoaded ? 'text-spore' : 'text-gray-500'}>{isLoaded ? 'loaded' : 'on disk'}</span>
+                    </span>
+                  ) : dl && dl.status === 'failed' ? (
+                    <span className="inline-flex items-center space-x-1 text-compute"><XCircle size={12} /><span>failed</span></span>
+                  ) : hasWarnings ? (
+                    <button onClick={() => onDownload(f)} className="inline-flex items-center space-x-1 text-ledger hover:text-ledger/80">
+                      <AlertTriangle size={12} /><span>download</span>
+                    </button>
+                  ) : (
+                    <button onClick={() => onDownload(f)} className="inline-flex items-center space-x-1 text-spore hover:text-spore/80">
+                      <Download size={12} /><span>download</span>
+                    </button>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function ModelsTab({ status, onRefresh }) {
   const [devices, setDevices] = useState([]) // merged local + fleet
   const [selected, _setSelected] = useState('local') // 'local' or api_addr
@@ -2161,57 +2261,11 @@ function ModelsTab({ status, onRefresh }) {
                                 {!compat && <span className="text-compute" title="May exceed node resources">&#9888;</span>}
                               </div>
                             </button>
-                            {/* Inline expanded variant list */}
+                            {/* Inline expanded variant table */}
                             {isExpanded && repoFiles && (
-                              <div className="ml-6 mr-2 mb-2 border-l border-spore/20 pl-3">
-                                <div className="flex items-center space-x-3 mb-1 text-xs text-gray-500">
-                                  {repoFiles.param_b > 0 && <span>{repoFiles.param_b}B params</span>}
-                                  {repoFiles.architecture && <span>{repoFiles.architecture}</span>}
-                                  {repoFiles.context_length > 0 && <span>{repoFiles.context_length.toLocaleString()} ctx</span>}
-                                  {repoFiles.disk_free_gb > 0 && <span className="text-gray-600">{repoFiles.disk_free_gb}GB free</span>}
-                                </div>
-                                <div className="space-y-0.5 max-h-[200px] overflow-y-auto custom-scrollbar">
-                                  {(repoFiles.files || []).filter(f => !filterCompatible || !f.warnings || f.warnings.length === 0).map((f, fi) => {
-                                    const dl = Object.values(downloadStatus).find(d => d.filename === f.filename && d.repo_id === repoFiles.repo_id)
-                                    const hasWarnings = f.warnings && f.warnings.length > 0
-                                    const isOnDisk = localFiles.some(lf => lf.filename === f.filename)
-                                    const isLoaded = models.some(md => f.filename.replace('.gguf', '') === md.name)
-                                    return (
-                                      <div key={fi} className={`flex items-center justify-between py-1 px-2 rounded text-xs ${hasWarnings && !isOnDisk ? 'opacity-50' : 'hover:bg-white/[0.02]'}`}>
-                                        <div className="flex items-center space-x-2 min-w-0">
-                                          <span className={`font-mono px-1 py-0 rounded ${
-                                            f.quant?.startsWith('Q4') ? 'bg-spore/10 text-spore' :
-                                            f.quant?.startsWith('Q5') || f.quant?.startsWith('Q6') ? 'bg-relay/10 text-relay' :
-                                            f.quant?.startsWith('Q8') || f.quant === 'F16' ? 'bg-poison/10 text-poison' :
-                                            'bg-white/5 text-gray-500'
-                                          }`}>{f.quant || '?'}</span>
-                                          <span className="text-gray-400">{f.size_gb}GB</span>
-                                          {f.est_ram_gb > 0 && <span className="text-gray-600">~{f.est_ram_gb}GB RAM</span>}
-                                        </div>
-                                        <div className="shrink-0 ml-2">
-                                          {dl && dl.status === 'downloading' ? (
-                                            <div className="flex items-center space-x-1">
-                                              <div className="w-16 bg-void rounded-full h-1 overflow-hidden border border-white/5">
-                                                <div className="h-full bg-ledger" style={{ width: `${dl.progress || 0}%` }} />
-                                              </div>
-                                              <span className="text-ledger font-mono">{dl.progress?.toFixed(0)}%</span>
-                                            </div>
-                                          ) : isOnDisk || (dl && dl.status === 'complete') ? (
-                                            <span className={isLoaded ? 'text-spore' : 'text-gray-500'}>{isLoaded ? 'loaded' : 'on disk'}</span>
-                                          ) : dl && dl.status === 'failed' ? (
-                                            <span className="text-compute">failed</span>
-                                          ) : (
-                                            <button onClick={() => handleDownload(repoFiles.repo_id, f.filename, f)}
-                                              className={hasWarnings ? 'text-ledger' : 'text-spore hover:text-spore/80'}>
-                                              {hasWarnings ? 'download anyway' : 'download'}
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              </div>
+                              <VariantTable repoFiles={repoFiles} filterCompatible={filterCompatible}
+                                downloadStatus={downloadStatus} localFiles={localFiles} models={models}
+                                onDownload={(f) => handleDownload(repoFiles.repo_id, f.filename, f)} />
                             )}
                           </div>
                         )
@@ -2265,38 +2319,11 @@ function ModelsTab({ status, onRefresh }) {
                               }
                             </div>
                           </button>
-                          {/* Inline expanded variant list — reuses repoFiles */}
+                          {/* Inline expanded variant table */}
                           {isExpanded && repoFiles && (
-                            <div className="ml-6 mr-2 mb-2 border-l border-spore/20 pl-3">
-                              <div className="space-y-0.5 max-h-[200px] overflow-y-auto custom-scrollbar">
-                                {(repoFiles.files || []).filter(f => !filterCompatible || !f.warnings || f.warnings.length === 0).map((f, fi) => {
-                                  const dl = Object.values(downloadStatus).find(d => d.filename === f.filename && d.repo_id === repoFiles.repo_id)
-                                  const isOnDisk = localFiles.some(lf => lf.filename === f.filename)
-                                  return (
-                                    <div key={fi} className="flex items-center justify-between py-1 px-2 rounded text-xs hover:bg-white/[0.02]">
-                                      <div className="flex items-center space-x-2">
-                                        <span className={`font-mono px-1 rounded ${
-                                          f.quant?.startsWith('Q4') ? 'bg-spore/10 text-spore' :
-                                          f.quant?.startsWith('Q5') || f.quant?.startsWith('Q6') ? 'bg-relay/10 text-relay' :
-                                          'bg-white/5 text-gray-500'
-                                        }`}>{f.quant || '?'}</span>
-                                        <span className="text-gray-400">{f.size_gb}GB</span>
-                                      </div>
-                                      <div className="shrink-0">
-                                        {dl && dl.status === 'downloading' ? (
-                                          <span className="text-ledger font-mono">{dl.progress?.toFixed(0)}%</span>
-                                        ) : isOnDisk || (dl && dl.status === 'complete') ? (
-                                          <span className="text-spore">on disk</span>
-                                        ) : (
-                                          <button onClick={() => handleDownload(repoFiles.repo_id, f.filename, f)}
-                                            className="text-spore hover:text-spore/80">download</button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            </div>
+                            <VariantTable repoFiles={repoFiles} filterCompatible={filterCompatible}
+                              downloadStatus={downloadStatus} localFiles={localFiles} models={models}
+                              onDownload={(f) => handleDownload(repoFiles.repo_id, f.filename, f)} />
                           )}
                         </div>
                       )
