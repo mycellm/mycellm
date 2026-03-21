@@ -32,60 +32,75 @@ import Page from '../layouts/Page.astro';
         </button>
       </div>
 
-      <p class="text-[10px] sm:text-[11px] text-gray-700 flex items-center justify-center space-x-1">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ledger shrink-0"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-        <span>Prompts processed by distributed GPU nodes. Don't share passwords or API keys.</span>
+      <p class="text-[10px] sm:text-[11px] text-gray-600 flex items-center justify-center space-x-1 text-balance">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-600 shrink-0"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        <span>Prompts are processed by distributed GPU nodes. Don't share passwords or API keys.</span>
       </p>
 
-      <div id="promptChips" class="flex flex-wrap justify-center gap-2 pt-1">
-        <!-- Populated by JS -->
-      </div>
+      <div id="promptChips" class="flex flex-wrap justify-center gap-2 pt-1"></div>
     </div>
   </div>
 
   <!-- Why distributed -->
   <section class="border-t border-white/5 bg-[#050505]">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-
       <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-10">
         Why <span class="text-compute">distributed</span> inference?
       </h2>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         <div class="glass rounded-xl p-5 space-y-2">
-          <div class="text-spore text-lg">No single point of failure</div>
+          <div class="flex items-center space-x-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-spore shrink-0"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span class="text-spore font-semibold">No single point of failure</span>
+          </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Models run across multiple peers. If one node goes down, requests route to another. No datacenter outage takes the whole network offline.
+            Models run across multiple peers. If one node goes down, requests route to another automatically.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2">
-          <div class="text-relay text-lg">Your GPU, your credits</div>
+          <div class="flex items-center space-x-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-relay shrink-0"><circle cx="12" cy="12" r="10"/><path d="M16 8l-4 4-4-4"/><path d="M12 12v6"/></svg>
+            <span class="text-relay font-semibold">Your GPU, your credits</span>
+          </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Contribute idle compute and earn credits. Spend credits to run larger models. A fair exchange — not a subscription.
+            Contribute idle compute and earn credits. Spend them to run larger models. A fair exchange.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2">
-          <div class="text-ledger text-lg">No vendor lock-in</div>
+          <div class="flex items-center space-x-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ledger shrink-0"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+            <span class="text-ledger font-semibold">No vendor lock-in</span>
+          </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            OpenAI-compatible API. Switch between mycellm and any other provider with one env var. Your tools, your choice.
+            OpenAI-compatible API. Switch providers with one env var. Your tools, your choice.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2">
-          <div class="text-poison text-lg">Private networks</div>
+          <div class="flex items-center space-x-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-300 shrink-0"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            <span class="text-gray-200 font-semibold">Private networks</span>
+          </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Run your own swarm for your team or org. Full control over who joins, what models run, and how data is handled. Invite-only access.
+            Run your own swarm for your team. Full control over membership, models, and data. Invite-only.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2">
-          <div class="text-compute text-lg">Open source</div>
+          <div class="flex items-center space-x-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-compute shrink-0"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            <span class="text-compute font-semibold">Open source</span>
+          </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Apache 2.0 licensed. Audit the code, fork it, extend it. No black boxes, no hidden data collection.
+            Apache 2.0 licensed. Audit the code, fork it, extend it. No black boxes.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2">
-          <div class="text-spore-glow text-lg">Scales with community</div>
+          <div class="flex items-center space-x-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-spore-glow shrink-0"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+            <span class="text-spore-glow font-semibold">Scales with community</span>
+          </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Every new seeder makes the network faster. More contributors = more models, lower latency, higher availability.
+            Every new seeder makes the network faster. More contributors = more models, lower latency.
           </p>
         </div>
       </div>
@@ -99,38 +114,40 @@ import Page from '../layouts/Page.astro';
       <p class="text-gray-500 text-center text-sm mb-8">pip, Docker, or one-liner — your choice.</p>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <div class="glass rounded-xl p-5 relative group">
-          <div class="flex items-center justify-between mb-3">
-            <div class="text-xs text-gray-500 font-mono uppercase tracking-wider">pip</div>
-            <button onclick="navigator.clipboard.writeText('pip install mycellm && mycellm init && mycellm serve');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)"
-              class="text-[10px] text-gray-600 hover:text-spore transition-colors opacity-0 group-hover:opacity-100">Copy</button>
-          </div>
+        <div class="glass rounded-xl p-5 relative">
+          <button onclick="navigator.clipboard.writeText('pip install mycellm && mycellm init && mycellm serve');this.querySelector('span').textContent='Copied!';setTimeout(()=>this.querySelector('span').textContent='',2000)"
+            class="absolute top-3 right-3 flex items-center space-x-1 text-gray-500 hover:text-spore transition-colors" title="Copy">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            <span class="text-[10px]"></span>
+          </button>
+          <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">pip</div>
           <div class="font-mono text-sm space-y-1.5">
             <div><span class="text-gray-600">$</span> <span class="text-spore-glow">pip install mycellm</span></div>
             <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm init</span></div>
             <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm serve</span></div>
           </div>
         </div>
-        <div class="glass rounded-xl p-5 relative group">
-          <div class="flex items-center justify-between mb-3">
-            <div class="text-xs text-gray-500 font-mono uppercase tracking-wider">Docker</div>
-            <button onclick="navigator.clipboard.writeText('docker run -d --name mycellm -p 8420:8420 -v mycellm-data:/data/mycellm ghcr.io/mycellm/mycellm');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)"
-              class="text-[10px] text-gray-600 hover:text-spore transition-colors opacity-0 group-hover:opacity-100">Copy</button>
-          </div>
+        <div class="glass rounded-xl p-5 relative">
+          <button onclick="navigator.clipboard.writeText('docker run -d --name mycellm -p 8420:8420 -v mycellm-data:/data/mycellm ghcr.io/mycellm/mycellm');this.querySelector('span').textContent='Copied!';setTimeout(()=>this.querySelector('span').textContent='',2000)"
+            class="absolute top-3 right-3 flex items-center space-x-1 text-gray-500 hover:text-spore transition-colors" title="Copy">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            <span class="text-[10px]"></span>
+          </button>
+          <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Docker</div>
           <div class="font-mono text-xs text-spore-glow break-all leading-relaxed">
             docker run -d --name mycellm -p 8420:8420 -v mycellm-data:/data/mycellm ghcr.io/mycellm/mycellm
           </div>
         </div>
-        <div class="glass rounded-xl p-5 relative group">
-          <div class="flex items-center justify-between mb-3">
-            <div class="text-xs text-gray-500 font-mono uppercase tracking-wider">One-liner</div>
-            <button onclick="navigator.clipboard.writeText('curl -fsSL https://mycellm.dev/install.sh | sh');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)"
-              class="text-[10px] text-gray-600 hover:text-spore transition-colors opacity-0 group-hover:opacity-100">Copy</button>
-          </div>
+        <div class="glass rounded-xl p-5 relative">
+          <button onclick="navigator.clipboard.writeText('curl -fsSL https://mycellm.dev/install.sh | sh');this.querySelector('span').textContent='Copied!';setTimeout(()=>this.querySelector('span').textContent='',2000)"
+            class="absolute top-3 right-3 flex items-center space-x-1 text-gray-500 hover:text-spore transition-colors" title="Copy">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            <span class="text-[10px]"></span>
+          </button>
+          <div class="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">One-liner</div>
           <div class="font-mono text-sm text-spore-glow break-all">
             curl -fsSL mycellm.dev/install.sh | sh
           </div>
-          <p class="text-xs text-gray-600 mt-3">Installs, initializes, prints next steps.</p>
         </div>
       </div>
 
@@ -152,7 +169,7 @@ import Page from '../layouts/Page.astro';
         <div class="text-gray-500"># Point any OpenAI-compatible tool at mycellm</div>
         <div><span class="text-gray-500">export</span> <span class="text-relay">OPENAI_BASE_URL</span><span class="text-gray-400">=</span><span class="text-spore-glow">http://localhost:8420/v1</span></div>
         <div class="text-gray-500 mt-4"># Works with:</div>
-        <div class="text-gray-400">Python SDK &middot; LangChain &middot; LlamaIndex &middot; OpenCode &middot; Claude Code &middot; aider &middot; Continue.dev</div>
+        <div class="text-gray-400 text-xs">Python SDK &middot; LangChain &middot; LlamaIndex &middot; OpenCode &middot; Claude Code &middot; aider &middot; Continue.dev</div>
       </div>
 
       <div class="text-center mt-6">
@@ -183,55 +200,37 @@ import Page from '../layouts/Page.astro';
       }, 3000);
     }
 
-    // ── Randomized sample prompts ──
+    // ── Randomized diverse prompts ──
     const promptBanks = {
       tech: [
-        'Explain distributed computing',
-        'How does BitTorrent work?',
-        'Compare TCP and UDP',
-        'What is the CAP theorem?',
-        'How do neural networks learn?',
-        'What is edge computing?',
-        'Explain public key crypto',
-        'SQL vs NoSQL databases',
+        'Explain distributed computing', 'How does BitTorrent work?',
+        'Compare TCP and UDP', 'What is the CAP theorem?',
+        'How do neural networks learn?', 'What is edge computing?',
+        'Explain public key crypto', 'SQL vs NoSQL databases',
       ],
       science: [
-        'How do black holes form?',
-        'Why is the sky blue?',
-        'How does CRISPR work?',
-        'Explain quantum entanglement',
-        'What causes tides?',
-        'How do vaccines work?',
-        'What is dark matter?',
-        'How do plants make energy?',
+        'How do black holes form?', 'Why is the sky blue?',
+        'How does CRISPR work?', 'Explain quantum entanglement',
+        'What causes tides?', 'How do vaccines work?',
+        'What is dark matter?', 'How do plants make energy?',
       ],
       creative: [
-        'Write a haiku about the sea',
-        'Tell a two-sentence horror story',
-        'Describe a color to someone blind',
-        'Write a limerick about AI',
-        'Invent a word and define it',
-        'Write a tiny fairy tale',
-        'Describe rain poetically',
-        'Name a fictional planet',
+        'Write a haiku about the sea', 'Tell a two-sentence horror story',
+        'Describe a color to someone blind', 'Write a limerick about AI',
+        'Invent a word and define it', 'Write a tiny fairy tale',
+        'Describe rain poetically', 'Name a fictional planet',
       ],
       life: [
-        'Best productivity tip?',
-        'How to learn a new language',
-        'Explain stoicism simply',
-        'What makes a good leader?',
-        'How to start meditating',
-        'Why is sleep important?',
-        'Tips for public speaking',
-        'How to read more books',
+        'Best productivity tip?', 'How to learn a new language',
+        'Explain stoicism simply', 'What makes a good leader?',
+        'How to start meditating', 'Why is sleep important?',
+        'Tips for public speaking', 'How to read more books',
       ],
     };
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
     const shuffled = [
-      pick(promptBanks.tech),
-      pick(promptBanks.science),
-      pick(promptBanks.creative),
-      pick(promptBanks.life),
+      pick(promptBanks.tech), pick(promptBanks.science),
+      pick(promptBanks.creative), pick(promptBanks.life),
     ].sort(() => Math.random() - 0.5).slice(0, 3);
     const chips = document.getElementById('promptChips');
     if (chips) {
