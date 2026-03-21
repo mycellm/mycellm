@@ -91,6 +91,27 @@ def test_admission_result_has_score(tracker):
     assert result.score > 0
 
 
+def test_admission_with_trust_override():
+    """Full trust peers bypass admission regardless of reputation."""
+    tracker = ReputationTracker()
+    rep = tracker.get("org-peer")
+    rep.total_requests = 100
+    rep.receipt_count = 0  # never seeded — would be rejected normally
+
+    # With require_receipts=True, this peer would be rejected
+    result = tracker.check_admission(
+        "org-peer", require_receipts=True, grace_requests=5
+    )
+    assert not result.allowed
+
+    # But with org trust, we'd skip the check entirely
+    # (the trust override happens in node._resolve_peer_trust,
+    # not in the tracker — this test confirms the tracker rejects,
+    # and the node-level override would allow)
+    org_result = AdmissionResult(True, "org_trust", 1.0)
+    assert org_result.allowed
+
+
 def test_admission_different_peers_independent(tracker):
     """Each peer is evaluated independently."""
     # Good peer

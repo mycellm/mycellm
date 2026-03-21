@@ -26,7 +26,7 @@ from mycellm.router.health import HealthChecker
 from mycellm.router.model_resolver import ModelResolver
 from mycellm.transport.tls import generate_self_signed_cert
 from mycellm.transport.auth import build_node_hello, build_hello_ack, verify_hello_message
-from mycellm.accounting.reputation import ReputationTracker
+from mycellm.accounting.reputation import AdmissionResult, ReputationTracker
 from mycellm.accounting.receipts import (
     ReceiptValidator,
     build_receipt_data,
@@ -399,6 +399,54 @@ class MycellmNode:
             if conn:
                 conn.handle_response(msg)
 
+    def _resolve_peer_trust(self, peer_id: str) -> str:
+        """Determine the highest trust level for a peer based on shared networks.
+
+        Checks which networks the peer belongs to (from their NodeHello),
+        finds networks we share, and returns the highest trust level:
+          "full"      — org network, IT-managed (skip all checks)
+          "trusted"   — private network, vetted members
+          "untrusted" — public network or unknown peer
+
+        Returns:
+            Trust level string.
+        """
+        if not self.federation:
+            return "untrusted"
+
+        # Get peer's network IDs from their authenticated connection
+        conn = self._peer_connections.get(peer_id)
+        if not conn or not conn.hello:
+            # Also check the registry
+            reg_entry = self.registry.get(peer_id)
+            peer_networks = set(getattr(reg_entry, 'network_ids', []) if reg_entry else [])
+        else:
+            peer_networks = set(getattr(conn.hello, 'network_ids', []))
+
+        if not peer_networks:
+            return "untrusted"
+
+        # Our networks and their trust levels
+        trust_order = {"full": 3, "trusted": 2, "untrusted": 1}
+        best_trust = "untrusted"
+
+        # Check home network
+        if self.federation.identity:
+            if self.federation.identity.network_id in peer_networks:
+                level = self.federation.identity.trust_level
+                if trust_order.get(level, 0) > trust_order.get(best_trust, 0):
+                    best_trust = level
+
+        # Check joined networks
+        for membership in self.federation.memberships:
+            if membership.network_id in peer_networks:
+                # Memberships don't have trust_level yet — infer from home identity
+                # If we joined their network, treat as at least "trusted"
+                if trust_order.get("trusted", 0) > trust_order.get(best_trust, 0):
+                    best_trust = "trusted"
+
+        return best_trust
+
     async def _handle_inference_request(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
         """Handle an incoming inference request from a peer."""
         from mycellm.inference.base import InferenceRequest
@@ -408,13 +456,29 @@ class MycellmNode:
         messages = payload.get("messages", [])
         stream = payload.get("stream", False)
 
-        # Admission control — check peer reputation before serving
-        admission = self.reputation.check_admission(
-            msg.from_peer,
-            min_score=self._settings.admission_min_score,
-            require_receipts=self._settings.admission_require_receipts,
-            grace_requests=self._settings.admission_grace_requests,
-        )
+        # Determine trust level based on shared network memberships
+        peer_trust = self._resolve_peer_trust(msg.from_peer)
+
+        # Admission control — policy depends on trust level
+        if peer_trust == "full":
+            # Org network — IT-managed trust, skip all checks
+            admission = AdmissionResult(True, "org_trust", 1.0)
+        elif peer_trust == "trusted":
+            # Private network — check reputation only, no receipt requirement
+            admission = self.reputation.check_admission(
+                msg.from_peer,
+                min_score=self._settings.admission_min_score,
+                require_receipts=False,
+                grace_requests=self._settings.admission_grace_requests,
+            )
+        else:
+            # Public/untrusted — full admission check
+            admission = self.reputation.check_admission(
+                msg.from_peer,
+                min_score=self._settings.admission_min_score,
+                require_receipts=self._settings.admission_require_receipts,
+                grace_requests=self._settings.admission_grace_requests,
+            )
         try:
             from mycellm.metrics import admission_checks_total
             admission_checks_total.labels(result="allowed" if admission.allowed else "denied").inc()
