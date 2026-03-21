@@ -46,10 +46,14 @@ VOLUME /data/mycellm
 ENV MYCELLM_DATA_DIR=/data/mycellm
 ENV MYCELLM_CONFIG_DIR=/data/mycellm/config
 
+# Copy entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8420/health || exit 1
 
-# Entrypoint
-ENTRYPOINT ["mycellm"]
+# Entrypoint: auto-init if no identity, then exec mycellm
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["serve", "--host", "0.0.0.0"]

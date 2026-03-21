@@ -34,8 +34,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Skip auth for public paths and static assets
+        # Skip auth for public paths, public stats API, and static assets
         if path in _PUBLIC_PATHS or not path.startswith("/v1"):
+            return await call_next(request)
+        if "/public/" in path:
             return await call_next(request)
 
         # Check Authorization header

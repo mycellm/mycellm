@@ -235,15 +235,37 @@ class MycellmNode:
         return HardwareInfo(gpu="CPU", vram_gb=0.0, backend="cpu")
 
     async def _init_accounting(self) -> None:
-        """Initialize the credit accounting database."""
-        from mycellm.accounting.schema import init_db
-        from mycellm.accounting.local_ledger import LocalLedger
+        """Initialize the database and credit ledger."""
+        from mycellm.storage import init_database, LedgerRepository, NodeRegistryRepository, GrowthRepository
 
-        db_path = str(self._settings.db_path)
-        await init_db(db_path)
-        self.ledger = LocalLedger(db_path)
+        await init_database(
+            db_url=self._settings.db_url,
+            db_path=str(self._settings.db_path),
+        )
+        self.ledger = LedgerRepository()
+        self.node_registry_repo = NodeRegistryRepository()
+        self.growth_repo = GrowthRepository()
         await self.ledger.ensure_account(self.peer_id, self._settings.initial_credits)
+
+        # Migrate JSON registry to DB if it exists
+        await self._migrate_json_registry()
+
         logger.info(f"{styled_tag('CREDIT')} Ledger initialized (balance: {self._settings.initial_credits:.2f})")
+
+    async def _migrate_json_registry(self) -> None:
+        """One-time migration: import node_registry.json into DB if it exists."""
+        import json
+        path = self._settings.data_dir / "node_registry.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                if isinstance(data, dict) and data:
+                    count = await self.node_registry_repo.import_from_dict(data)
+                    # Rename so we don't re-import
+                    path.rename(path.with_suffix(".json.migrated"))
+                    logger.info(f"{styled_tag('BOOT')} Migrated {count} node(s) from JSON registry to DB")
+            except Exception as e:
+                logger.debug(f"JSON registry migration skipped: {e}")
 
     async def _start_transport(self) -> None:
         """Start the QUIC transport server."""
@@ -666,12 +688,11 @@ class MycellmNode:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.ensure_future(self.shutdown()))
 
-        # Load persisted node registry (survives restarts)
-        from mycellm.api.admin import _load_registry
-        _load_registry(self)
-
-        # Init subsystems
+        # Init subsystems (DB engine, ledger, repositories)
         await self._init_accounting()
+
+        # Load persisted node registry from DB
+        self.node_registry = await self.node_registry_repo.load_as_dict()
         await self._start_transport()
 
         if self.enable_dht:
@@ -686,6 +707,10 @@ class MycellmNode:
 
         # Start health checker
         await self.health_checker.start()
+
+        # Start growth snapshot task (hourly)
+        self._growth_task = asyncio.create_task(self._growth_snapshot_loop())
+        self._growth_snapshots: dict = {}
 
         logger.info(f"{styled_tag('NODE')} Swarm connected. Awaiting inference tasks.")
 
@@ -716,6 +741,8 @@ class MycellmNode:
             "capabilities": self.capabilities.to_dict(),
             "system": sys_info,
         }
+        if self._settings.external_host:
+            payload["external_host"] = self._settings.external_host
 
         async def _do_announce():
             payload["capabilities"] = self.capabilities.to_dict()
@@ -753,6 +780,68 @@ class MycellmNode:
             except Exception as e:
                 logger.warning(f"{styled_tag('NODE')} Announce loop error: {e}")
                 interval = 30
+
+    async def _growth_snapshot_loop(self) -> None:
+        """Record network growth snapshots every hour."""
+        while self._running:
+            try:
+                await asyncio.sleep(3600)  # 1 hour
+
+                approved = [n for n in self.node_registry.values() if n.get("status") == "approved"]
+                online = [n for n in approved if time.time() - n.get("last_seen", 0) < 120]
+                stats = self.activity.stats() if hasattr(self, "activity") else {}
+
+                model_names = set(m.name for m in self.inference.loaded_models)
+                for entry in approved:
+                    for m in entry.get("capabilities", {}).get("models", []):
+                        name = m.get("name", m) if isinstance(m, dict) else m
+                        model_names.add(name)
+
+                total_vram = self.capabilities.hardware.vram_gb
+                for entry in approved:
+                    hw = entry.get("system", {}).get("gpu", entry.get("capabilities", {}).get("hardware", {}))
+                    total_vram += hw.get("vram_gb", 0)
+
+                total_nodes = 1 + len(approved)
+                online_nodes = 1 + len(online)
+                total_models = len(model_names)
+                total_requests = stats.get("total_requests", 0)
+                total_tokens = stats.get("total_tokens", 0)
+                total_tps = self.activity.tps if hasattr(self, "activity") else 0
+
+                await self.growth_repo.record(
+                    total_nodes=total_nodes,
+                    online_nodes=online_nodes,
+                    total_models=total_models,
+                    total_requests=total_requests,
+                    total_tokens=total_tokens,
+                    total_tps=total_tps,
+                    total_vram_gb=round(total_vram, 1),
+                )
+
+                deltas = await self.growth_repo.get_deltas()
+                history = await self.growth_repo.get_history()
+
+                self._growth_snapshots = {
+                    "deltas": deltas,
+                    "history": history,
+                    "last_snapshot": {
+                        "total_nodes": total_nodes,
+                        "online_nodes": online_nodes,
+                        "total_models": total_models,
+                        "total_requests": total_requests,
+                        "total_tokens": total_tokens,
+                        "total_tps": total_tps,
+                        "total_vram_gb": round(total_vram, 1),
+                    },
+                }
+
+                logger.debug(f"{styled_tag('NODE')} Growth snapshot recorded: {total_nodes} nodes")
+
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.debug(f"Growth snapshot error: {e}")
 
     async def announce_capabilities(self) -> None:
         """Re-announce capabilities to all connected peers (e.g. after model load)."""

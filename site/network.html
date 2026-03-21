@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/brand/mycellm-red-logo-sans.svg">
+    <title>mycellm Network Stats</title>
+    <script defer src="https://analytics.zetaix.com/script.js" data-website-id="e70ee1fc-d684-497f-9f64-aa0dc624d74a"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        mycelium: {
+                            50: '#f0fdf4',
+                            500: '#22c55e',
+                            glow: '#4ade80',
+                            dark: '#052e16',
+                            bg: '#0a0a0a'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #0a0a0a; color: #e5e5e5; overflow-x: hidden; }
+        .text-glow { text-shadow: 0 0 10px rgba(74, 222, 128, 0.5), 0 0 20px rgba(74, 222, 128, 0.3); }
+        .glass-panel {
+            background: rgba(10, 10, 10, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(34, 197, 94, 0.1);
+        }
+        .stat-card { transition: transform 0.2s, border-color 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); border-color: rgba(34, 197, 94, 0.3); }
+        @keyframes countUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .count-up { animation: countUp 0.5s ease-out; }
+    </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-mycelium-500 selection:text-black">
+
+    <!-- Particle Background -->
+    <canvas id="networkCanvas" class="fixed inset-0 z-0 opacity-30"></canvas>
+
+    <div class="relative z-10 max-w-6xl mx-auto px-6 py-12">
+
+        <!-- Header -->
+        <header class="flex items-center justify-between mb-12">
+            <div class="flex items-center gap-4">
+                <a href="https://mycellm.ai">
+                    <img src="/brand/mycellm-red-logo-sans.svg" alt="mycellm" class="w-10 h-10"
+                         style="filter: drop-shadow(0px 0px 8px rgba(239, 68, 68, 0.5));">
+                </a>
+                <div>
+                    <h1 class="text-2xl font-bold text-mycelium-glow text-glow">Network Stats</h1>
+                    <p class="text-sm text-gray-500 font-mono" id="networkName">Loading...</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 text-sm text-gray-500">
+                <span id="statusDot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Big Counter Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="glass-panel stat-card rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-mycelium-glow text-glow font-mono" id="statNodes">-</div>
+                <div class="text-sm text-gray-400 mt-1">Nodes</div>
+                <div class="text-xs text-gray-600 mt-1"><span id="statOnline">-</span> online</div>
+            </div>
+            <div class="glass-panel stat-card rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-red-400 font-mono" id="statTPS">-</div>
+                <div class="text-sm text-gray-400 mt-1">Tokens/sec</div>
+                <div class="text-xs text-gray-600 mt-1">aggregate TPS</div>
+            </div>
+            <div class="glass-panel stat-card rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-blue-400 font-mono" id="statModels">-</div>
+                <div class="text-sm text-gray-400 mt-1">Models</div>
+                <div class="text-xs text-gray-600 mt-1"><span id="statLoaded">-</span> loaded</div>
+            </div>
+            <div class="glass-panel stat-card rounded-xl p-6 text-center">
+                <div class="text-4xl font-bold text-yellow-400 font-mono" id="statVRAM">-</div>
+                <div class="text-sm text-gray-400 mt-1">VRAM (GB)</div>
+                <div class="text-xs text-gray-600 mt-1"><span id="statRAM">-</span> GB RAM</div>
+            </div>
+        </div>
+
+        <!-- Activity + Requests Row -->
+        <div class="grid md:grid-cols-2 gap-4 mb-8">
+            <div class="glass-panel rounded-xl p-6">
+                <h3 class="text-sm text-gray-400 mb-4 uppercase tracking-wider">Activity</h3>
+                <div class="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                        <div class="text-2xl font-bold font-mono text-mycelium-glow" id="totalRequests">0</div>
+                        <div class="text-xs text-gray-500">Total Requests</div>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-bold font-mono text-mycelium-glow" id="totalTokens">0</div>
+                        <div class="text-xs text-gray-500">Total Tokens</div>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-bold font-mono text-mycelium-glow" id="reqPerMin">0</div>
+                        <div class="text-xs text-gray-500">Req/min</div>
+                    </div>
+                </div>
+            </div>
+            <div class="glass-panel rounded-xl p-6">
+                <h3 class="text-sm text-gray-400 mb-4 uppercase tracking-wider">Uptime</h3>
+                <div class="text-3xl font-bold font-mono text-mycelium-glow" id="uptime">-</div>
+                <div class="text-xs text-gray-500 mt-2">Bootstrap node uptime</div>
+            </div>
+        </div>
+
+        <!-- Contributors + Models Row -->
+        <div class="grid md:grid-cols-2 gap-4 mb-8">
+            <div class="glass-panel rounded-xl p-6">
+                <h3 class="text-sm text-gray-400 mb-4 uppercase tracking-wider">Top Contributors</h3>
+                <div id="contributors" class="space-y-2 font-mono text-sm">
+                    <div class="text-gray-600">Waiting for data...</div>
+                </div>
+            </div>
+            <div class="glass-panel rounded-xl p-6">
+                <h3 class="text-sm text-gray-400 mb-4 uppercase tracking-wider">Available Models</h3>
+                <div id="modelList" class="flex flex-wrap gap-2">
+                    <span class="text-gray-600 text-sm">Waiting for data...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- CTA -->
+        <div class="glass-panel rounded-xl p-8 text-center">
+            <h2 class="text-2xl font-bold text-mycelium-glow text-glow mb-2">Join the Network</h2>
+            <p class="text-gray-400 mb-6">Contribute your GPU and earn credits for inference.</p>
+            <div class="font-mono text-sm bg-black/50 rounded-lg p-4 max-w-md mx-auto text-left space-y-1">
+                <div><span class="text-gray-500">$</span> <span class="text-mycelium-glow">pip install mycellm</span></div>
+                <div><span class="text-gray-500">$</span> <span class="text-mycelium-glow">mycellm init</span></div>
+                <div><span class="text-gray-500">$</span> <span class="text-mycelium-glow">mycellm serve</span></div>
+            </div>
+            <div class="mt-6">
+                <a href="https://mycellm.dev/join" class="inline-block bg-mycelium-500 text-black font-semibold px-6 py-2 rounded-lg hover:bg-mycelium-glow transition-colors">
+                    Get Started &rarr;
+                </a>
+            </div>
+        </div>
+
+        <footer class="mt-12 text-center text-xs text-gray-600">
+            <a href="https://mycellm.ai" class="hover:text-gray-400">mycellm.ai</a>
+            &middot; Updates every 10 seconds
+        </footer>
+    </div>
+
+    <script>
+        const API_BASE = 'https://api.mycellm.dev';
+        let lastData = null;
+
+        function formatNumber(n) {
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+            return n.toString();
+        }
+
+        function formatUptime(seconds) {
+            const d = Math.floor(seconds / 86400);
+            const h = Math.floor((seconds % 86400) / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            if (d > 0) return `${d}d ${h}h ${m}m`;
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
+        function updateUI(data) {
+            lastData = data;
+
+            document.getElementById('networkName').textContent = data.network_name;
+            document.getElementById('statusDot').className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+            document.getElementById('statusText').textContent = 'Live';
+
+            // Big counters
+            document.getElementById('statNodes').textContent = data.nodes.total;
+            document.getElementById('statOnline').textContent = data.nodes.online;
+            document.getElementById('statTPS').textContent = data.compute.total_tps.toFixed(1);
+            document.getElementById('statModels').textContent = data.models.unique;
+            document.getElementById('statLoaded').textContent = data.models.total_loaded;
+            document.getElementById('statVRAM').textContent = data.compute.total_vram_gb.toFixed(1);
+            document.getElementById('statRAM').textContent = data.compute.total_ram_gb.toFixed(1);
+
+            // Activity
+            document.getElementById('totalRequests').textContent = formatNumber(data.activity.total_requests);
+            document.getElementById('totalTokens').textContent = formatNumber(data.activity.total_tokens);
+            document.getElementById('reqPerMin').textContent = data.activity.requests_per_min.toFixed(1);
+
+            // Uptime
+            document.getElementById('uptime').textContent = formatUptime(data.uptime_seconds);
+
+            // Contributors
+            const contribEl = document.getElementById('contributors');
+            if (data.top_contributors && data.top_contributors.length > 0) {
+                contribEl.innerHTML = data.top_contributors.map((c, i) => `
+                    <div class="flex justify-between items-center py-1 ${i < 3 ? 'text-mycelium-glow' : 'text-gray-400'}">
+                        <span>${i + 1}. ${c.name}</span>
+                        <span class="text-xs">${c.models} model${c.models !== 1 ? 's' : ''}</span>
+                    </div>
+                `).join('');
+            } else {
+                contribEl.innerHTML = '<div class="text-gray-600">No contributors yet</div>';
+            }
+
+            // Models
+            const modelEl = document.getElementById('modelList');
+            if (data.models.names && data.models.names.length > 0) {
+                modelEl.innerHTML = data.models.names.map(name => `
+                    <span class="px-2 py-1 bg-mycelium-500/10 border border-mycelium-500/20 rounded text-xs text-mycelium-glow">${name}</span>
+                `).join('');
+            } else {
+                modelEl.innerHTML = '<span class="text-gray-600 text-sm">No models loaded</span>';
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const resp = await fetch(`${API_BASE}/v1/node/public/stats`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    updateUI(data);
+                }
+            } catch (e) {
+                document.getElementById('statusDot').className = 'w-2 h-2 rounded-full bg-red-500';
+                document.getElementById('statusText').textContent = 'Offline';
+            }
+        }
+
+        // Initial fetch + poll every 10s
+        fetchStats();
+        setInterval(fetchStats, 10000);
+
+        // --- Particle background (same as landing page) ---
+        const canvas = document.getElementById('networkCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height, particles = [];
+        const connectionDistance = 120;
+        const particleCount = Math.min(window.innerWidth / 20, 60);
+
+        function resizeCanvas() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+
+        class Particle {
+            constructor() {
+                this.x = Math.random() * width; this.y = Math.random() * height;
+                this.vx = (Math.random() - 0.5) * 0.3; this.vy = (Math.random() - 0.5) * 0.3;
+                this.radius = Math.random() * 1.5 + 0.5; this.phase = Math.random() * Math.PI * 2;
+            }
+            update() {
+                this.x += this.vx; this.y += this.vy;
+                if (this.x < 0 || this.x > width) this.vx *= -1;
+                if (this.y < 0 || this.y > height) this.vy *= -1;
+                this.phase += 0.02;
+            }
+            draw() {
+                const r = this.radius + Math.sin(this.phase) * 0.5;
+                ctx.beginPath(); ctx.arc(this.x, this.y, Math.max(0.1, r), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(34, 197, 94, ${0.5 + Math.sin(this.phase) * 0.3})`; ctx.fill();
+            }
+        }
+
+        function initParticles() { particles = []; for (let i = 0; i < particleCount; i++) particles.push(new Particle()); }
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+            for (let i = 0; i < particles.length; i++) {
+                particles[i].update(); particles[i].draw();
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
+                    const d = Math.sqrt(dx*dx + dy*dy);
+                    if (d < connectionDistance) {
+                        ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = `rgba(74, 222, 128, ${(1-d/connectionDistance)*0.2})`; ctx.lineWidth = 1; ctx.stroke();
+                    }
+                }
+            }
+            requestAnimationFrame(animate);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas(); initParticles(); animate();
+    </script>
+</body>
+</html>

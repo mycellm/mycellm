@@ -39,6 +39,19 @@ CREATE TABLE IF NOT EXISTS receipts (
 );
 CREATE INDEX IF NOT EXISTS idx_receipts_consumer ON receipts(consumer_id);
 CREATE INDEX IF NOT EXISTS idx_receipts_seeder ON receipts(seeder_id);
+
+CREATE TABLE IF NOT EXISTS growth_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    total_nodes INTEGER NOT NULL DEFAULT 0,
+    online_nodes INTEGER NOT NULL DEFAULT 0,
+    total_models INTEGER NOT NULL DEFAULT 0,
+    total_requests INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tps REAL NOT NULL DEFAULT 0.0,
+    total_vram_gb REAL NOT NULL DEFAULT 0.0
+);
+CREATE INDEX IF NOT EXISTS idx_growth_ts ON growth_snapshots(timestamp);
 """
 
 

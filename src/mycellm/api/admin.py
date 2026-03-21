@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
-from pathlib import Path
+from collections import defaultdict
 
 from fastapi import APIRouter, Request
 
@@ -13,33 +12,28 @@ logger = logging.getLogger("mycellm.admin")
 
 router = APIRouter()
 
-
-def _registry_path(node) -> Path:
-    """Path to the persisted registry file."""
-    return node._settings.data_dir / "node_registry.json"
-
-
-def _save_registry(node) -> None:
-    """Persist the registry to disk."""
-    try:
-        path = _registry_path(node)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(node.node_registry, indent=2))
-    except Exception as e:
-        logger.debug(f"Failed to save registry: {e}")
+# Rate limit: track announce timestamps per IP for auto-approve
+_announce_timestamps: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT_WINDOW = 60.0  # seconds
+_RATE_LIMIT_MAX = 10  # max new nodes per IP per window
 
 
-def _load_registry(node) -> None:
-    """Load persisted registry from disk into node.node_registry."""
-    try:
-        path = _registry_path(node)
-        if path.exists():
-            data = json.loads(path.read_text())
-            if isinstance(data, dict):
-                node.node_registry.update(data)
-                logger.info(f"Loaded {len(data)} node(s) from registry")
-    except Exception as e:
-        logger.debug(f"Failed to load registry: {e}")
+async def _save_to_db(node, peer_id: str, data: dict) -> None:
+    """Persist a single registry entry to the database."""
+    if hasattr(node, "node_registry_repo") and node.node_registry_repo:
+        try:
+            await node.node_registry_repo.upsert(peer_id, data)
+        except Exception as e:
+            logger.debug(f"Failed to save node {peer_id[:16]} to DB: {e}")
+
+
+async def _remove_from_db(node, peer_id: str) -> None:
+    """Remove a registry entry from the database."""
+    if hasattr(node, "node_registry_repo") and node.node_registry_repo:
+        try:
+            await node.node_registry_repo.remove(peer_id)
+        except Exception as e:
+            logger.debug(f"Failed to remove node {peer_id[:16]} from DB: {e}")
 
 
 @router.post("/nodes/announce")
@@ -51,6 +45,11 @@ async def announce_node(request: Request):
     if not peer_id:
         return {"error": "peer_id required"}
 
+    # Validate required fields
+    capabilities = body.get("capabilities", {})
+    if not capabilities:
+        return {"error": "capabilities required"}
+
     # Detect the announcing node's actual IP from the request
     client_ip = request.client.host if request.client else "unknown"
     api_addr = body.get("api_addr", "")
@@ -59,24 +58,59 @@ async def announce_node(request: Request):
         port = api_addr.split(":")[1]
         api_addr = f"{client_ip}:{port}"
 
+    # Use external_host from body if provided
+    external_host = body.get("external_host", "")
+    if external_host and api_addr:
+        port = api_addr.split(":")[-1]
+        api_addr = f"{external_host}:{port}"
+
     existing = node.node_registry.get(peer_id, {})
     status = existing.get("status", "pending")
 
-    node.node_registry[peer_id] = {
+    # Auto-approve for public networks
+    is_new = peer_id not in node.node_registry
+    if status == "pending" and _is_public_network(node):
+        if is_new and not _check_rate_limit(client_ip):
+            return {"error": "rate_limited", "message": "Too many new nodes from this IP"}
+        status = "approved"
+        if is_new:
+            logger.info(f"Auto-approved node {peer_id[:16]}... (public network)")
+
+    entry = {
         "peer_id": peer_id,
         "node_name": body.get("node_name", ""),
         "api_addr": api_addr,
         "role": body.get("role", "seeder"),
-        "capabilities": body.get("capabilities", {}),
+        "capabilities": capabilities,
         "system": body.get("system", {}),
-        "status": status,  # preserve approval status
+        "status": status,
         "last_seen": time.time(),
         "first_seen": existing.get("first_seen", time.time()),
         "ip": client_ip,
     }
-    _save_registry(node)
+    node.node_registry[peer_id] = entry
+    await _save_to_db(node, peer_id, entry)
 
     return {"status": "ok", "node_status": status}
+
+
+def _is_public_network(node) -> bool:
+    """Check if this node is running a public network."""
+    if hasattr(node, "federation") and node.federation and node.federation.identity:
+        return node.federation.identity.public
+    return False
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Check if an IP is within the new-node rate limit. Returns True if allowed."""
+    now = time.time()
+    timestamps = _announce_timestamps[client_ip]
+    # Prune old entries
+    _announce_timestamps[client_ip] = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW]
+    if len(_announce_timestamps[client_ip]) >= _RATE_LIMIT_MAX:
+        return False
+    _announce_timestamps[client_ip].append(now)
+    return True
 
 
 @router.get("/nodes")
@@ -100,7 +134,7 @@ async def approve_node(peer_id: str, request: Request):
     if not entry:
         return {"error": "node not found"}
     entry["status"] = "approved"
-    _save_registry(node)
+    await _save_to_db(node, peer_id, entry)
     return {"status": "approved", "peer_id": peer_id}
 
 
@@ -111,5 +145,5 @@ async def remove_node(peer_id: str, request: Request):
     removed = node.node_registry.pop(peer_id, None)
     if not removed:
         return {"error": "node not found"}
-    _save_registry(node)
+    await _remove_from_db(node, peer_id)
     return {"status": "removed", "peer_id": peer_id}

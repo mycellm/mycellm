@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
@@ -575,6 +576,99 @@ async def fleet_hardware(request: Request):
             "total_ram_gb": round(total_ram, 1),
             "total_models": total_models,
         },
+    }
+
+
+@router.get("/public/stats")
+async def public_stats(request: Request):
+    """Public network stats — no auth required.
+
+    Returns aggregate network information suitable for a public stats page.
+    No IPs, keys, or sensitive data exposed.
+    """
+    node = request.app.state.node
+
+    # Network info
+    network_name = "mycellm"
+    is_public = False
+    if hasattr(node, "federation") and node.federation and node.federation.identity:
+        network_name = node.federation.identity.network_name
+        is_public = node.federation.identity.public
+
+    # Node counts
+    approved_nodes = [n for n in node.node_registry.values() if n.get("status") == "approved"]
+    online_nodes = [n for n in approved_nodes if time.time() - n.get("last_seen", 0) < 120]
+    seeding_nodes = [n for n in online_nodes if n.get("role") == "seeder"]
+
+    # Compute aggregates
+    total_vram_gb = 0.0
+    total_ram_gb = 0.0
+    for entry in approved_nodes:
+        sys = entry.get("system", {})
+        hw = sys.get("gpu", entry.get("capabilities", {}).get("hardware", {}))
+        mem = sys.get("memory", {})
+        total_vram_gb += hw.get("vram_gb", 0)
+        total_ram_gb += mem.get("total_gb", 0)
+
+    # Add self
+    sys_info = node.get_system_info()
+    total_vram_gb += node.capabilities.hardware.vram_gb
+    total_ram_gb += sys_info.get("memory", {}).get("total_gb", 0)
+    total_tps = node.activity.tps if hasattr(node, "activity") else 0
+
+    # Models (no sensitive info)
+    model_names = set()
+    for m in node.inference.loaded_models:
+        model_names.add(m.name)
+    for entry in approved_nodes:
+        for m in entry.get("capabilities", {}).get("models", []):
+            name = m.get("name", m) if isinstance(m, dict) else m
+            model_names.add(name)
+
+    # Activity stats
+    stats = node.activity.stats() if hasattr(node, "activity") else {}
+
+    # Top contributors (by node name only — no IPs or peer IDs)
+    contributors = []
+    for entry in online_nodes:
+        contributors.append({
+            "name": entry.get("node_name", "anonymous"),
+            "models": len(entry.get("capabilities", {}).get("models", [])),
+        })
+    contributors.sort(key=lambda c: c["models"], reverse=True)
+
+    # Growth data if available
+    growth = {}
+    if hasattr(node, "_growth_snapshots"):
+        growth = node._growth_snapshots
+
+    return {
+        "network_name": network_name,
+        "nodes": {
+            "total": 1 + len(approved_nodes),
+            "online": 1 + len(online_nodes),
+            "seeding": 1 + len(seeding_nodes),
+        },
+        "compute": {
+            "total_tps": round(total_tps, 1),
+            "total_vram_gb": round(total_vram_gb, 1),
+            "total_ram_gb": round(total_ram_gb, 1),
+        },
+        "models": {
+            "total_loaded": len(node.inference.loaded_models) + sum(
+                len(n.get("capabilities", {}).get("models", [])) for n in online_nodes
+            ),
+            "unique": len(model_names),
+            "names": sorted(model_names),
+        },
+        "activity": {
+            "total_requests": stats.get("total_requests", 0),
+            "total_tokens": stats.get("total_tokens", 0),
+            "requests_per_min": stats.get("requests_per_min", 0),
+        },
+        "top_contributors": contributors[:10],
+        "growth": growth,
+        "uptime_seconds": round(node.uptime),
     }
 
 

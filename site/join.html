@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/brand/mycellm-red-logo-sans.svg">
+    <title>Join mycellm</title>
+    <script defer src="https://analytics.zetaix.com/script.js" data-website-id="e70ee1fc-d684-497f-9f64-aa0dc624d74a"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: { mycelium: { 500: '#22c55e', glow: '#4ade80', bg: '#0a0a0a' } }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #0a0a0a; color: #e5e5e5; }
+        .text-glow { text-shadow: 0 0 10px rgba(74, 222, 128, 0.5); }
+        .glass-panel { background: rgba(10,10,10,0.6); backdrop-filter: blur(12px); border: 1px solid rgba(34,197,94,0.1); }
+        .copy-btn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-mycelium-500 selection:text-black">
+    <canvas id="networkCanvas" class="fixed inset-0 z-0 opacity-20"></canvas>
+
+    <div class="relative z-10 max-w-2xl mx-auto px-6 py-16">
+
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <a href="https://mycellm.ai">
+                <img src="/brand/mycellm-red-logo-sans.svg" alt="mycellm" class="w-16 h-16 mx-auto mb-4"
+                     style="filter: drop-shadow(0px 0px 12px rgba(239, 68, 68, 0.6));">
+            </a>
+            <h1 class="text-3xl font-bold text-mycelium-glow text-glow mb-2">Join mycellm</h1>
+            <p class="text-gray-400">Contribute your GPU to the distributed LLM inference network.</p>
+        </div>
+
+        <!-- Invite Token Section (shown when URL has token) -->
+        <div id="inviteSection" class="hidden mb-8">
+            <div class="glass-panel rounded-xl p-6 text-center">
+                <h2 class="text-lg font-semibold text-mycelium-glow mb-2">Network Invite</h2>
+                <p class="text-gray-400 text-sm mb-4" id="inviteNetwork">You've been invited to join a network.</p>
+                <div class="bg-black/50 rounded-lg p-4 font-mono text-sm text-left">
+                    <div class="flex items-center justify-between">
+                        <code id="inviteCommand" class="text-mycelium-glow break-all"></code>
+                        <button onclick="copyInvite()" class="copy-btn ml-4 px-3 py-1 bg-mycelium-500/20 text-mycelium-500 rounded text-xs hover:bg-mycelium-500/30 transition-colors whitespace-nowrap">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- General Install Instructions -->
+        <div class="space-y-6">
+
+            <!-- Step 1 -->
+            <div class="glass-panel rounded-xl p-6">
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="w-8 h-8 rounded-full bg-mycelium-500/20 text-mycelium-500 flex items-center justify-center font-bold text-sm">1</span>
+                    <h3 class="font-semibold text-lg">Install</h3>
+                </div>
+                <div class="bg-black/50 rounded-lg p-4 font-mono text-sm">
+                    <code class="text-mycelium-glow">pip install mycellm</code>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Requires Python 3.11+. Works on macOS, Linux, and Windows (WSL).</p>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="glass-panel rounded-xl p-6">
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="w-8 h-8 rounded-full bg-mycelium-500/20 text-mycelium-500 flex items-center justify-center font-bold text-sm">2</span>
+                    <h3 class="font-semibold text-lg">Initialize</h3>
+                </div>
+                <div class="bg-black/50 rounded-lg p-4 font-mono text-sm">
+                    <code class="text-mycelium-glow">mycellm init</code>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Creates your identity and connects to the public bootstrap node. Auto-approved.</p>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="glass-panel rounded-xl p-6">
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="w-8 h-8 rounded-full bg-mycelium-500/20 text-mycelium-500 flex items-center justify-center font-bold text-sm">3</span>
+                    <h3 class="font-semibold text-lg">Start Serving</h3>
+                </div>
+                <div class="bg-black/50 rounded-lg p-4 font-mono text-sm space-y-1">
+                    <div><code class="text-mycelium-glow">mycellm serve</code></div>
+                    <div class="text-gray-600"># Or install as a service:</div>
+                    <div><code class="text-mycelium-glow">mycellm serve --install-service</code></div>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Your node will appear on the <a href="https://stats.mycellm.dev" class="text-mycelium-500 hover:underline">network stats page</a>.</p>
+            </div>
+
+            <!-- Docker Alternative -->
+            <div class="glass-panel rounded-xl p-6">
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm">D</span>
+                    <h3 class="font-semibold text-lg">Docker Alternative</h3>
+                </div>
+                <div class="bg-black/50 rounded-lg p-4 font-mono text-sm">
+                    <code class="text-mycelium-glow text-xs">docker run -d --name mycellm -p 8420:8420 -v mycellm-data:/data/mycellm ghcr.io/mycellm/mycellm</code>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Auto-initializes on first run. Data persisted in the named volume.</p>
+            </div>
+        </div>
+
+        <footer class="mt-12 text-center text-sm text-gray-600">
+            <a href="https://mycellm.ai" class="hover:text-gray-400">mycellm.ai</a>
+            &middot;
+            <a href="https://stats.mycellm.dev" class="hover:text-gray-400">Network Stats</a>
+        </footer>
+    </div>
+
+    <script>
+        // Check for invite token in URL path: /join/<token>
+        const pathParts = window.location.pathname.split('/');
+        const tokenIndex = pathParts.indexOf('join');
+        if (tokenIndex >= 0 && pathParts[tokenIndex + 1]) {
+            const token = pathParts[tokenIndex + 1];
+            const section = document.getElementById('inviteSection');
+            section.classList.remove('hidden');
+
+            // Try to decode token to show network info
+            try {
+                const decoded = JSON.parse(atob(token.replace(/-/g, '+').replace(/_/g, '/')));
+                if (decoded.network_id) {
+                    document.getElementById('inviteNetwork').textContent =
+                        `Network: ${decoded.network_id.substring(0, 12)}...`;
+                }
+            } catch (e) {}
+
+            const command = `mycellm init --invite ${token}`;
+            document.getElementById('inviteCommand').textContent = command;
+        }
+
+        function copyInvite() {
+            const cmd = document.getElementById('inviteCommand').textContent;
+            navigator.clipboard.writeText(cmd).then(() => {
+                const btn = event.target;
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+            });
+        }
+
+        // Minimal particle background
+        const canvas = document.getElementById('networkCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height, particles = [];
+        function resizeCanvas() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+        class P {
+            constructor() { this.x = Math.random()*width; this.y = Math.random()*height; this.vx = (Math.random()-0.5)*0.3; this.vy = (Math.random()-0.5)*0.3; this.r = Math.random()*1.5+0.5; this.p = Math.random()*Math.PI*2; }
+            update() { this.x+=this.vx; this.y+=this.vy; if(this.x<0||this.x>width)this.vx*=-1; if(this.y<0||this.y>height)this.vy*=-1; this.p+=0.02; }
+            draw() { ctx.beginPath(); ctx.arc(this.x,this.y,Math.max(0.1,this.r+Math.sin(this.p)*0.5),0,Math.PI*2); ctx.fillStyle=`rgba(34,197,94,${0.4+Math.sin(this.p)*0.2})`; ctx.fill(); }
+        }
+        function init() { particles=[]; for(let i=0;i<30;i++) particles.push(new P()); }
+        function animate() {
+            ctx.clearRect(0,0,width,height);
+            for(let i=0;i<particles.length;i++) { particles[i].update(); particles[i].draw();
+                for(let j=i+1;j<particles.length;j++) { const dx=particles[i].x-particles[j].x,dy=particles[i].y-particles[j].y,d=Math.sqrt(dx*dx+dy*dy);
+                    if(d<150){ctx.beginPath();ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle=`rgba(74,222,128,${(1-d/150)*0.15})`;ctx.lineWidth=1;ctx.stroke();}
+                }
+            }
+            requestAnimationFrame(animate);
+        }
+        window.addEventListener('resize',resizeCanvas); resizeCanvas(); init(); animate();
+    </script>
+</body>
+</html>
