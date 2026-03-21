@@ -100,6 +100,7 @@ class MycellmNode:
         self.api_port = api_port
         self.quic_port = quic_port
         self.dht_port = dht_port
+        self._quic_host = api_host if api_host != "127.0.0.1" else "127.0.0.1"
         self.device_name = device_name
         self.enable_dht = enable_dht
         self._running = False
@@ -290,8 +291,11 @@ class MycellmNode:
             key_path=self._settings.data_dir / "tls" / "key.pem",
         )
 
+        # QUIC binds to same host as API (0.0.0.0 for network-accessible nodes)
+        quic_host = self.api_host if self.api_host != "127.0.0.1" else self._settings.quic_host
+        self._quic_host = quic_host
         self._quic_server = await create_quic_server(
-            host=self._settings.quic_host,
+            host=quic_host,
             port=self.quic_port,
             cert_path=self._tls_cert_path,
             key_path=self._tls_key_path,
@@ -594,7 +598,7 @@ class MycellmNode:
             # Announce ourselves
             await self._dht_node.announce(
                 self.peer_id,
-                [f"{self._settings.quic_host}:{self.quic_port}"],
+                [f"{self._quic_host}:{self.quic_port}"],
                 self.capabilities.to_dict(),
             )
         except Exception as e:
@@ -662,7 +666,7 @@ class MycellmNode:
         self.federation = FederationManager(self._settings.data_dir)
         self.federation.init_network(
             self.account_key.public_bytes,
-            bootstrap_addrs=[f"{self._settings.quic_host}:{self.quic_port}"],
+            bootstrap_addrs=[f"{self._quic_host}:{self.quic_port}"],
         )
 
         # Load cached peers
@@ -904,7 +908,7 @@ class MycellmNode:
                 try:
                     await self._dht_node.announce_model(
                         m.name, self.peer_id,
-                        [f"{self._settings.quic_host}:{self.quic_port}"],
+                        [f"{self._quic_host}:{self.quic_port}"],
                     )
                 except Exception:
                     pass
