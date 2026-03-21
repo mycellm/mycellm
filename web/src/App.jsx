@@ -2775,10 +2775,16 @@ function ChatTab() {
     ]
     const detected = sensitivePatterns.filter(p => p.re.test(text)).map(p => p.type)
     if (detected.length > 0) {
-      if (!window.confirm(`Sensitive content detected: ${detected.join(', ')}\n\nPrompts may be processed by remote peers. Send anyway?`)) {
-        setInput(text)
-        return
-      }
+      const proceed = await new Promise(resolve => {
+        const msg = `**Sensitive content detected:** ${detected.join(', ')}\n\nPrompts may be processed by remote peers. Do not send passwords, API keys, or personal data.`
+        setMessages(prev => [...prev, {
+          role: 'assistant', content: msg, isCommand: true, isSensitiveWarning: true,
+          _resolve: resolve,
+        }])
+      })
+      // Remove the warning message
+      setMessages(prev => prev.filter(m => !m.isSensitiveWarning))
+      if (!proceed) { setInput(text); return }
     }
 
     const userMsg = { role: 'user', content: text }
@@ -2934,6 +2940,14 @@ function ChatTab() {
                 ? <div className="whitespace-pre-wrap">{m.content}</div>
                 : <div className="chat-md" dangerouslySetInnerHTML={{ __html: marked.parse(m.content || '') }} />
               }
+              {m.isSensitiveWarning && m._resolve && (
+                <div className="mt-3 flex space-x-2">
+                  <button onClick={() => m._resolve(false)}
+                    className="flex-1 bg-white/5 border border-white/10 text-gray-300 text-xs py-1.5 rounded-lg hover:bg-white/10">Cancel</button>
+                  <button onClick={() => m._resolve(true)}
+                    className="flex-1 bg-compute/20 border border-compute/30 text-compute text-xs py-1.5 rounded-lg hover:bg-compute/30">Send anyway</button>
+                </div>
+              )}
               {m.model && (
                 <div className="mt-2 pt-2 border-t border-white/5 text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
                   <span>via {m.model}</span>

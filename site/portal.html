@@ -501,6 +501,50 @@
             return matches;
         }
 
+        function showSensitiveWarning(types) {
+            return new Promise(resolve => {
+                const overlay = document.createElement('div');
+                overlay.className = 'fixed inset-0 z-50 flex items-center justify-center p-4';
+                overlay.style.background = 'rgba(0,0,0,0.7)';
+                overlay.style.backdropFilter = 'blur(4px)';
+                overlay.innerHTML = `
+                    <div class="glass rounded-2xl p-5 sm:p-6 max-w-sm w-full" style="border-color: rgba(239,68,68,0.2);">
+                        <div class="flex items-start space-x-3 mb-4">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-compute shrink-0 mt-0.5">
+                                <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                            </svg>
+                            <div>
+                                <h3 class="text-white font-semibold text-sm">Sensitive content detected</h3>
+                                <div class="mt-2 space-y-1">
+                                    ${types.map(t => `<div class="flex items-center space-x-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-compute shrink-0"></span><span class="text-gray-300">${t}</span></div>`).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-400 leading-relaxed mb-4">
+                            Prompts on the public network are processed by distributed GPU nodes run by volunteers.
+                            Do not send passwords, API keys, private keys, or personal data.
+                        </p>
+                        <div class="flex space-x-2">
+                            <button id="sensitiveCancel" class="flex-1 glass text-gray-300 text-sm py-2 rounded-xl hover:text-white hover:border-white/20 transition-colors">
+                                Cancel
+                            </button>
+                            <button id="sensitiveSend" class="flex-1 bg-compute/20 border border-compute/30 text-compute text-sm py-2 rounded-xl hover:bg-compute/30 transition-colors">
+                                Send anyway
+                            </button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(overlay);
+
+                const cleanup = (result) => { overlay.remove(); resolve(result); };
+                overlay.querySelector('#sensitiveCancel').onclick = () => cleanup(false);
+                overlay.querySelector('#sensitiveSend').onclick = () => cleanup(true);
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+                document.addEventListener('keydown', function handler(e) {
+                    if (e.key === 'Escape') { cleanup(false); document.removeEventListener('keydown', handler); }
+                });
+            });
+        }
+
         async function sendMessage() {
             if (isStreaming) return;
 
@@ -513,12 +557,7 @@
             // Scan for sensitive content
             const sensitive = scanSensitive(text);
             if (sensitive.length > 0) {
-                const proceed = confirm(
-                    `Sensitive content detected: ${sensitive.join(', ')}\n\n` +
-                    `Prompts on the public network are processed by distributed GPU nodes.\n` +
-                    `Do NOT send passwords, API keys, or personal data.\n\n` +
-                    `Send anyway?`
-                );
+                const proceed = await showSensitiveWarning(sensitive);
                 if (!proceed) return;
             }
 
