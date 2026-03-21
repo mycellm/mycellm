@@ -66,7 +66,7 @@ class MycellmSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="MYCELLM_",
-        env_file=".env",
+        env_file=(".env", str(_default_config_dir() / ".env")),
         env_file_encoding="utf-8",
     )
 
@@ -97,6 +97,11 @@ class MycellmSettings(BaseSettings):
 
     # Bootstrap peers (comma-separated host:port)
     bootstrap_peers: str = ""
+
+    # Database URL — optional override (MYCELLM_DB_URL env var)
+    # Default: SQLite at data_dir/mycellm.db
+    # PostgreSQL: "postgresql+asyncpg://user:pass@host/dbname"
+    db_url: str = ""
 
     # Security — optional API key (MYCELLM_API_KEY env var)
     # When set, all API endpoints (except /health) require Authorization: Bearer <key>
