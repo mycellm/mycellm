@@ -29,6 +29,7 @@ export default defineConfig({
         { label: 'Integrations', items: [
           { label: 'OpenAI SDK', slug: 'integrations/openai' },
           { label: 'OpenCode', slug: 'integrations/opencode' },
+          { label: 'OpenClaw', slug: 'integrations/openclaw' },
           { label: 'Claude Code', slug: 'integrations/claude-code' },
           { label: 'Docker', slug: 'integrations/docker' },
         ]},

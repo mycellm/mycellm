@@ -11,31 +11,31 @@ title: "Installation"
 
 ## Install
 
-=== "pip (recommended)"
+### pip (recommended)
 
-    ```bash
-    pip install mycellm
-    ```
+```bash
+pip install mycellm
+```
 
-=== "Docker"
+### Docker
 
-    ```bash
-    docker pull ghcr.io/mycellm/mycellm
-    ```
+```bash
+docker pull ghcr.io/mycellm/mycellm
+```
 
-=== "From source"
+### From source
 
-    ```bash
-    git clone https://repo.zetaix.com/mycellm/mycellm.git
-    cd mycellm
-    pip install -e ".[dev]"
-    ```
+```bash
+git clone https://github.com/mycellm/mycellm.git
+cd mycellm
+pip install -e ".[dev]"
+```
 
-=== "One-liner"
+### One-liner
 
-    ```bash
-    curl -fsSL https://mycellm.dev/install.sh | sh
-    ```
+```bash
+curl -fsSL https://mycellm.dev/install.sh | sh
+```
 
 ## Initialize
 

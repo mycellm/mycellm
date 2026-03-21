@@ -11,28 +11,28 @@ A peer-to-peer network where anyone can contribute GPU power and run LLM inferen
 
 ## 60-Second Quick Start
 
-=== "pip"
+### pip
 
-    ```bash
-    pip install mycellm
-    mycellm init
-    mycellm serve
-    ```
+```bash
+pip install mycellm
+mycellm init
+mycellm serve
+```
 
-=== "Docker"
+### Docker
 
-    ```bash
-    docker run -d --name mycellm \
-      -p 8420:8420 -p 8421:8421/udp \
-      -v mycellm-data:/data/mycellm \
-      ghcr.io/mycellm/mycellm
-    ```
+```bash
+docker run -d --name mycellm \
+  -p 8420:8420 -p 8421:8421/udp \
+  -v mycellm-data:/data/mycellm \
+  ghcr.io/mycellm/mycellm
+```
 
-=== "One-liner"
+### One-liner
 
-    ```bash
-    curl -fsSL https://mycellm.dev/install.sh | sh
-    ```
+```bash
+curl -fsSL https://mycellm.dev/install.sh | sh
+```
 
 Then chat:
 

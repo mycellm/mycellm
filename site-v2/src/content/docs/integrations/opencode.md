@@ -48,8 +48,9 @@ export OPENAI_BASE_URL=https://api.mycellm.dev/v1/public
 opencode
 ```
 
-!!! note
-    The public gateway is rate-limited (5,000 tokens/day). For higher limits, [run your own node](../quickstart/join.md) — contributors who seed compute earn credits for inference on bigger models.
+:::note
+The public gateway is rate-limited (5,000 tokens/day). For higher limits, [run your own node](../quickstart/join.md) — contributors who seed compute earn credits for inference on bigger models.
+:::
 
 ## Tips
 

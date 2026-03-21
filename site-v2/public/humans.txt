@@ -3,7 +3,7 @@
 Creator: Michael Gifford-Santos
 Site: https://michaelgifford.com
 Contact: michael@mycellm.ai
-Location: Hawaii, USA
+Location: Seattle, WA
 
 /* THANKS */
 

@@ -64,37 +64,37 @@ Features:
 
 Any tool that speaks the OpenAI protocol works:
 
-=== "Python"
+### Python
 
-    ```python
-    from openai import OpenAI
+```python
+from openai import OpenAI
 
-    client = OpenAI(
-        base_url="http://localhost:8420/v1",
-        api_key="your-key",  # optional
-    )
-    response = client.chat.completions.create(
-        model="auto",
-        messages=[{"role": "user", "content": "Hello"}],
-    )
-    print(response.choices[0].message.content)
-    ```
+client = OpenAI(
+    base_url="http://localhost:8420/v1",
+    api_key="your-key",  # optional
+)
+response = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(response.choices[0].message.content)
+```
 
-=== "curl"
+### curl
 
-    ```bash
-    curl http://localhost:8420/v1/chat/completions \
-      -H "Content-Type: application/json" \
-      -d '{
-        "model": "auto",
-        "messages": [{"role": "user", "content": "Hello"}]
-      }'
-    ```
+```bash
+curl http://localhost:8420/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
 
-=== "Environment variables"
+### Environment variables
 
-    ```bash
-    export OPENAI_BASE_URL=http://localhost:8420/v1
-    export OPENAI_API_KEY=your-key
-    export OPENAI_MODEL=auto
-    ```
+```bash
+export OPENAI_BASE_URL=http://localhost:8420/v1
+export OPENAI_API_KEY=your-key
+export OPENAI_MODEL=auto
+```
