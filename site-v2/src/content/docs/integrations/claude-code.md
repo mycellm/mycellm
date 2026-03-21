@@ -1,9 +1,12 @@
 ---
-title: "Claude Code / OpenClaw"
+title: "Claude Code"
 ---
 
+[Claude Code](https://claude.ai/claude-code) and similar AI coding CLIs (aider, Continue.dev, Cursor) can use mycellm as their LLM backend via the OpenAI-compatible API.
 
-Claude Code and similar AI coding CLIs can use mycellm as their LLM backend via the OpenAI-compatible API.
+:::note
+For OpenClaw and its derivatives (NemoClaw, ClawdBot), see the dedicated [OpenClaw integration guide](/integrations/openclaw/).
+:::
 
 ## Environment setup
 
@@ -18,8 +21,8 @@ Then run your coding CLI as normal — it will route through mycellm.
 
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────┐
-│  Claude Code /   │────▶│  mycellm node    │────▶│  GPU peer    │
-│  OpenClaw        │     │  :8420           │     │  (aurora)    │
+│  Claude Code     │────▶│  mycellm node    │────▶│  GPU peer    │
+│  aider, etc.     │     │  :8420           │     │  (fleet)     │
 │                  │◀────│  /v1/chat/       │◀────│  llama.cpp   │
 │  your terminal   │     │  completions     │     │  or API      │
 └──────────────────┘     └──────────────────┘     └──────────────┘
@@ -37,8 +40,7 @@ export OPENAI_MODEL=Mistral-Small-24B-Instruct-2501-Q4_K_M
 
 Or use mycellm's quality routing:
 
-```python
-# In your tool's config, if it supports extra params:
+```json
 {
   "mycellm": {
     "min_tier": "capable",
@@ -57,5 +59,14 @@ mycellm serve --host 0.0.0.0
 
 # On your laptop
 export OPENAI_BASE_URL=http://gpu-server:8420/v1
-claude-code  # or opencode, aider, continue, etc.
+claude-code  # or aider, continue, cursor, etc.
 ```
+
+## Other coding tools
+
+The same env vars work with any OpenAI-compatible coding tool:
+
+- **aider** — `export OPENAI_API_BASE=http://localhost:8420/v1`
+- **Continue.dev** — set base URL in VS Code extension settings
+- **Cursor** — custom API endpoint in settings
+- **Tabby** — configure as OpenAI-compatible backend
