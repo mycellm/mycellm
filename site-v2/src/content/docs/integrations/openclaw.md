@@ -62,7 +62,7 @@ No node needed — use the public gateway directly:
 ```
 
 :::note
-The public gateway is rate-limited (5,000 tokens/day). For higher limits, [run your own node](../quickstart/join.md) — contributors who seed compute earn credits for inference on bigger models.
+The public gateway is rate-limited (5,000 tokens/day). For higher limits, [run your own node](/quickstart/join/) — contributors who seed compute earn credits for inference on bigger models.
 :::
 
 ## Multiple providers with fallback

@@ -77,6 +77,6 @@ mycellm --version
 
 ## Next steps
 
-- [Chat with the network](chat.md)
-- [Load a model](../cli/reference.md)
-- [Configure your node](../config/settings.md)
+- [Chat with the network](/quickstart/chat/)
+- [Load a model](/cli/reference/)
+- [Configure your node](/config/settings/)

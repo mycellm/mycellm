@@ -85,8 +85,8 @@ export OPENAI_API_KEY=your-key  # optional
 
 ## Links
 
-- [Quick Start](quickstart/install.md) — Install and join the network
-- [API Reference](api/overview.md) — OpenAI-compatible endpoints
-- [CLI Reference](cli/reference.md) — All commands and options
-- [Configuration](config/settings.md) — Environment variables
-- [Integrations](integrations/openai.md) — Use with existing tools
+- [Quick Start](/quickstart/install/) — Install and join the network
+- [API Reference](/api/overview/) — OpenAI-compatible endpoints
+- [CLI Reference](/cli/reference/) — All commands and options
+- [Configuration](/config/settings/) — Environment variables
+- [Integrations](/integrations/openai/) — Use with existing tools
