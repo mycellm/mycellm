@@ -28,5 +28,11 @@ rsync -a --delete "$LOCAL_DIST/" "$REMOTE:$REMOTE_PATH/"
 # Restore teaser over the Astro index
 ssh "$REMOTE" "cp /tmp/_mycellm_teaser.html $REMOTE_PATH/index.html 2>/dev/null || true"
 
+# Restore symlinks for teaser page (references flat /brand/mycellm-*.svg paths)
+ssh "$REMOTE" "cd $REMOTE_PATH/brand && \
+    for f in logo-icon/svg/mycellm-*.svg; do ln -sf \"\$f\" \$(basename \"\$f\"); done && \
+    ln -sf logotype/svg/mycellm-logotype-R.svg mycellm-logotype-R.svg && \
+    ln -sf favicon/png/favicon-32.png favicon-32.png 2>/dev/null"
+
 # Verify
 ssh "$REMOTE" "grep -q 'Booting Up Protocol' $REMOTE_PATH/index.html && echo 'Teaser index.html preserved.' || echo 'WARNING: teaser may not have restored correctly'"
