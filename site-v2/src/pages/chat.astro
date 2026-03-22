@@ -1,21 +1,14 @@
 ---
 import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
 import ParticleCanvas from '../components/ParticleCanvas.astro';
 ---
 <Base title="mycellm_ — Chat" description="Chat with the mycellm distributed network.">
   <ParticleCanvas />
 
-  <!-- Fixed header -->
-  <div style="position:fixed;top:0;left:0;right:0;z-index:40;border-bottom:1px solid rgba(255,255,255,0.05);background:rgba(10,10,10,0.9);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);">
-    <div style="max-width:48rem;margin:0 auto;padding:0 0.75rem;height:3rem;display:flex;align-items:center;justify-content:space-between;">
-      <a href="/" style="flex-shrink:0;">
-        <img src="/brand/header/svg/mycellm-h-R.svg" alt="mycellm" style="height:1.25rem;">
-      </a>
-      <div style="display:flex;align-items:center;gap:0.75rem;font-family:'JetBrains Mono',monospace;font-size:0.6875rem;color:#737373;">
-        <span style="width:6px;height:6px;border-radius:50%;background:#22C55E;"></span>
-        <span id="hdrNodes">-</span> nodes
-      </div>
-    </div>
+  <!-- Fixed header — same as all pages -->
+  <div style="position:fixed;top:0;left:0;right:0;z-index:40;">
+    <Header currentPath="/chat" />
   </div>
 
   <!-- Messages area — between fixed header and fixed input -->
@@ -100,12 +93,6 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
       } catch(e) { contentEl.closest('[style]')?.remove(); messages.pop(); messages.pop(); input.value=text }
       isStreaming = false;
     }
-
-    // Stats
-    const API = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.lan')
-      ? `${window.location.protocol}//${window.location.hostname}:8420` : 'https://api.mycellm.dev';
-    async function hdrStats(){try{const r=await fetch(`${API}/v1/node/public/stats`);if(!r.ok)return;const d=await r.json();const n=document.getElementById('hdrNodes');if(n)n.textContent=d.nodes?.online||'-'}catch{}}
-    hdrStats();setInterval(hdrStats,15000);
 
     // Initial prompt from homepage
     const ip = sessionStorage.getItem('mycellm_initial_prompt');
