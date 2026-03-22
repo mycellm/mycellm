@@ -91,11 +91,20 @@ def _select_tier1_model(node) -> tuple[str | None, str | None]:
     return None, None
 
 
+_round_robin_counter = 0
+
+
 def _get_candidates(node) -> list[tuple[str, str | None, int]]:
-    """Get all available model candidates, ranked: local first, then fleet by tier.
+    """Get all available model candidates, load-balanced across equal tiers.
 
     Returns list of (model_name, fleet_addr_or_None, tier).
+    Candidates within the same tier are rotated via round-robin so
+    concurrent requests spread across models/nodes instead of always
+    hitting the same one first.
     """
+    global _round_robin_counter
+    _round_robin_counter += 1
+
     candidates = []
 
     # Local models (preferred — no network hop)
@@ -121,9 +130,18 @@ def _get_candidates(node) -> list[tuple[str, str | None, int]]:
                 tier = 1
             candidates.append((name, addr, tier))
 
-    # Sort: Tier 1 first, then local before fleet
+    # Group by tier, rotate within each tier via round-robin
+    from itertools import groupby
     candidates.sort(key=lambda c: (c[2], 0 if c[1] is None else 1))
-    return candidates
+    rotated = []
+    for _tier, group in groupby(candidates, key=lambda c: c[2]):
+        items = list(group)
+        if len(items) > 1:
+            offset = _round_robin_counter % len(items)
+            items = items[offset:] + items[:offset]
+        rotated.extend(items)
+
+    return rotated
 
 
 @router.post("/chat/completions")

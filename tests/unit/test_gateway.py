@@ -89,7 +89,7 @@ def test_select_tier1_model():
                 ModelCapability(name="phi-3b", param_count_b=3.0),
             ]
     name, addr = _select_tier1_model(FakeNode())
-    assert name == "qwen-7b"
+    assert name in ("qwen-7b", "phi-3b")  # both Tier 1, round-robin picks either
     assert addr is None  # local model
 
 
