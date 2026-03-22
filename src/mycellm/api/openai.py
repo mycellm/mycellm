@@ -13,6 +13,18 @@ logger = logging.getLogger("mycellm.api")
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+
+def _find_alternative_model(node, busy_model: str) -> str | None:
+    """Find another loaded model to use when the requested one is busy."""
+    for m in node.inference.loaded_models:
+        if m.name != busy_model:
+            # Check if the model's lock is free (not queued)
+            lock = node.inference._model_locks.get(m.name)
+            if lock and isinstance(lock, __import__('asyncio').Lock) and lock.locked():
+                continue  # this one is also busy
+            return m.name
+    return None
+
 router = APIRouter()
 
 
@@ -212,10 +224,24 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             result = await node.inference.generate(req)
         except RuntimeError as e:
             if "busy" in str(e).lower() or "timed out" in str(e).lower():
-                return JSONResponse(status_code=503, content={
-                    "error": {"message": str(e), "type": "model_busy", "code": "model_busy"}
-                })
-            raise
+                # Try alternative loaded models before returning 503
+                alt_model = _find_alternative_model(node, model_name)
+                if alt_model:
+                    logger.info(f"Model {model_name} busy, trying {alt_model}")
+                    req.model = alt_model
+                    try:
+                        result = await node.inference.generate(req)
+                        model_name = alt_model  # update for response
+                    except RuntimeError:
+                        return JSONResponse(status_code=503, content={
+                            "error": {"message": str(e), "type": "model_busy", "code": "model_busy"}
+                        })
+                else:
+                    return JSONResponse(status_code=503, content={
+                        "error": {"message": str(e), "type": "model_busy", "code": "model_busy"}
+                    })
+            else:
+                raise
         except Exception as e:
             node.activity.record(EventType.INFERENCE_FAILED, model=model_name, error=str(e)[:200])
             error_msg = str(e)
@@ -346,7 +372,36 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             })
 
-            async for chunk in node.inference.generate_stream(req):
+            try:
+                stream_iter = node.inference.generate_stream(req)
+                # Acquire the lock by getting the first iteration
+                first_chunk_val = await stream_iter.__anext__()
+                # Got the lock — yield first chunk and continue
+                if first_chunk_val.text:
+                    yield json.dumps({
+                        "id": chunk_id, "object": "chat.completion.chunk",
+                        "created": int(time.time()), "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": first_chunk_val.text}, "finish_reason": None}],
+                    })
+            except RuntimeError as busy_err:
+                if "busy" in str(busy_err).lower() or "timed out" in str(busy_err).lower():
+                    alt = _find_alternative_model(node, model_name)
+                    if alt:
+                        logger.info(f"Stream: {model_name} busy, falling back to {alt}")
+                        req.model = alt
+                        model_name = alt
+                        stream_iter = node.inference.generate_stream(req)
+                    else:
+                        yield json.dumps({
+                            "id": chunk_id, "object": "chat.completion.chunk",
+                            "model": model_name,
+                            "choices": [{"index": 0, "delta": {"content": "[Model busy — try again]"}, "finish_reason": "stop"}],
+                        })
+                        return
+                else:
+                    raise
+
+            async for chunk in stream_iter:
                 if chunk.text:
                     yield json.dumps({
                         "id": chunk_id,

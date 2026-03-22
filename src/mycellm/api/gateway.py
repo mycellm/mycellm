@@ -218,8 +218,8 @@ async def public_chat(request: Request):
                                    result.finish_reason, result.prompt_tokens,
                                    result.completion_tokens, latency_ms)
 
-        except RuntimeError as e:
-            # Model busy (queue timeout) — try next candidate
+        except (RuntimeError, _FleetBusyError) as e:
+            # Model busy (local queue timeout or fleet 503) — try next candidate
             last_error = str(e)
             logger.info(f"Gateway failover: {model_name}{'@'+fleet_addr if fleet_addr else ''} busy, trying next")
             continue
@@ -267,6 +267,11 @@ def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, 
     }
 
 
+class _FleetBusyError(Exception):
+    """Raised when a fleet node returns 503 (model busy) — triggers failover."""
+    pass
+
+
 async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, temperature, max_tokens, client_ip, start_time):
     """Proxy a non-streaming request to a fleet node."""
     import httpx
@@ -285,6 +290,9 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
                         "max_tokens": max_tokens,
                         "stream": False,
                     })
+                    # 503 = model busy — propagate to failover loop
+                    if resp.status_code == 503:
+                        raise _FleetBusyError(f"Fleet {fleet_addr} model {model_name} busy")
                     resp.raise_for_status()
                     data = resp.json()
                     break
@@ -325,62 +333,72 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
 
 
 async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temperature, max_tokens, client_ip, start_time):
-    """Stream a response from a fleet node via SSE proxy."""
+    """Stream a response from a fleet node via SSE proxy.
+
+    Raises _FleetBusyError on 503 so the gateway failover loop can try next candidate.
+    """
     import httpx
     from fastapi.responses import StreamingResponse
     from mycellm.activity import EventType
+
+    base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
+
+    # Pre-flight: open the connection and check status before committing to StreamingResponse
+    client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=180.0))
+    resp_ctx = client.stream("POST", f"{base}/v1/chat/completions", json={
+        "model": model_name,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    })
+    upstream_resp = await resp_ctx.__aenter__()
+    if upstream_resp.status_code == 503:
+        await resp_ctx.__aexit__(None, None, None)
+        await client.aclose()
+        raise _FleetBusyError(f"Fleet {fleet_addr} model {model_name} busy")
+    if upstream_resp.status_code != 200:
+        await resp_ctx.__aexit__(None, None, None)
+        await client.aclose()
+        raise Exception(f"Fleet {fleet_addr} returned {upstream_resp.status_code}")
 
     node_id = _node_hash(fleet_addr)
 
     async def generate():
         total_tokens = 0
         first_chunk = True
-        base = fleet_addr if fleet_addr.startswith("http") else f"http://{fleet_addr}"
-        upstream_resp = None
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=180.0)) as client:
-                async with client.stream("POST", f"{base}/v1/chat/completions", json={
-                    "model": model_name,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "stream": True,
-                }) as resp:
-                    upstream_resp = resp
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        payload = line[6:].strip()
-                        if payload == "[DONE]":
-                            break
+            async for line in upstream_resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:].strip()
+                if payload == "[DONE]":
+                    break
 
-                        try:
-                            chunk = json.loads(payload)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            finish = chunk.get("choices", [{}])[0].get("finish_reason")
-                            if content:
-                                total_tokens += len(content.split())
+                try:
+                    chunk = json.loads(payload)
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content", "")
+                    finish = chunk.get("choices", [{}])[0].get("finish_reason")
+                    if content:
+                        total_tokens += len(content.split())
 
-                            out = {
-                                "id": request_id,
-                                "object": "chat.completion.chunk",
-                                "created": int(time.time()),
-                                "model": model_name,
-                                "choices": [{"index": 0, "delta": {"content": content} if content else {}, "finish_reason": finish}],
-                            }
-                            # First chunk: include node attribution
-                            if first_chunk:
-                                out["mycellm"] = {"node": node_id, "served_by": "mycellm-public"}
-                                first_chunk = False
-                            yield f"data: {json.dumps(out)}\n\n"
-                            if finish:
-                                break
-                        except json.JSONDecodeError:
-                            continue
+                    out = {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": content} if content else {}, "finish_reason": finish}],
+                    }
+                    if first_chunk:
+                        out["mycellm"] = {"node": node_id, "served_by": "mycellm-public"}
+                        first_chunk = False
+                    yield f"data: {json.dumps(out)}\n\n"
+                    if finish:
+                        break
+                except json.JSONDecodeError:
+                    continue
 
-            # Final metadata chunk with latency
             latency_ms = round((time.time() - start_time) * 1000)
             meta_chunk = {
                 "id": request_id, "object": "chat.completion.chunk",
@@ -411,12 +429,11 @@ async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temp
             yield f"data: {json.dumps(error_chunk)}\n\n"
             yield "data: [DONE]\n\n"
         finally:
-            # Close upstream connection if client disconnected mid-stream
-            if upstream_resp and not upstream_resp.is_stream_consumed:
-                try:
-                    await upstream_resp.aclose()
-                except Exception:
-                    pass
+            try:
+                await resp_ctx.__aexit__(None, None, None)
+                await client.aclose()
+            except Exception:
+                pass
 
     return StreamingResponse(
         generate(),
