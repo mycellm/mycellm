@@ -81,34 +81,36 @@ def _record_usage(ip: str, tokens: int) -> None:
 
 
 def _select_tier1_model(node) -> tuple[str | None, str | None]:
-    """Select the best available Tier 1 model.
+    """Select the best available Tier 1 model (first candidate).
 
-    Checks local models first, then fleet nodes.
     Returns (model_name, fleet_addr) — fleet_addr is None for local models.
     """
-    # Check local models
-    local_candidates = []
+    candidates = _get_candidates(node)
+    if candidates:
+        return candidates[0][0], candidates[0][1]
+    return None, None
+
+
+def _get_candidates(node) -> list[tuple[str, str | None, int]]:
+    """Get all available model candidates, ranked: local first, then fleet by tier.
+
+    Returns list of (model_name, fleet_addr_or_None, tier).
+    """
+    candidates = []
+
+    # Local models (preferred — no network hop)
     for m in node.inference.loaded_models:
         tier = classify_tier(m.param_count_b)
-        if tier == 1:
-            local_candidates.append(m)
+        candidates.append((m.name, None, tier))
 
-    if local_candidates:
-        local_candidates.sort(key=lambda m: m.param_count_b, reverse=True)
-        return local_candidates[0].name, None
-
-    # Fallback: any local model (param_count_b unknown)
-    if node.inference.loaded_models:
-        return node.inference.loaded_models[0].name, None
-
-    # Check fleet nodes — prefer Tier 1, fall back to any model
+    # Fleet nodes
     import time as _time
-    best_fleet = None  # (name, addr, tier)
     for entry in node.node_registry.values():
         if entry.get("status") != "approved":
             continue
         if _time.time() - entry.get("last_seen", 0) > 120:
             continue  # offline
+        addr = entry.get("api_addr", "")
         for m in entry.get("capabilities", {}).get("models", []):
             if isinstance(m, dict):
                 name = m.get("name", "")
@@ -116,18 +118,12 @@ def _select_tier1_model(node) -> tuple[str | None, str | None]:
                 tier = classify_tier(param_b)
             else:
                 name = m
-                tier = 1  # unknown defaults to Tier 1
-            addr = entry.get("api_addr", "")
-            if tier <= 1:
-                return name, addr  # Tier 1 — use immediately
-            if best_fleet is None or tier < best_fleet[2]:
-                best_fleet = (name, addr, tier)
+                tier = 1
+            candidates.append((name, addr, tier))
 
-    # No Tier 1 found — fall back to best available (better than nothing)
-    if best_fleet:
-        return best_fleet[0], best_fleet[1]
-
-    return None, None
+    # Sort: Tier 1 first, then local before fleet
+    candidates.sort(key=lambda c: (c[2], 0 if c[1] is None else 1))
+    return candidates
 
 
 @router.post("/chat/completions")
@@ -164,9 +160,9 @@ async def public_chat(request: Request):
     if not allowed:
         return JSONResponse(status_code=429, content={"error": {"message": reason}})
 
-    # Select model (Tier 1 only, user cannot choose)
-    model_name, fleet_addr = _select_tier1_model(node)
-    if not model_name:
+    # Get all available candidates, try each until one succeeds
+    candidates = _get_candidates(node)
+    if not candidates:
         return JSONResponse(status_code=503, content={
             "error": {"message": "No models currently available. Try again later."}
         })
@@ -178,59 +174,66 @@ async def public_chat(request: Request):
     start_time = time.time()
     request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
 
-    # Route to fleet node if model is remote
-    if fleet_addr:
-        if stream:
-            return await _stream_fleet(
-                node, request_id, model_name, fleet_addr, messages,
-                temperature, max_tokens, client_ip, start_time,
+    # Try candidates in order — failover to next if busy/error
+    last_error = ""
+    for model_name, fleet_addr, _tier in candidates:
+        try:
+            if fleet_addr:
+                if stream:
+                    return await _stream_fleet(
+                        node, request_id, model_name, fleet_addr, messages,
+                        temperature, max_tokens, client_ip, start_time,
+                    )
+                return await _proxy_fleet(
+                    node, request_id, model_name, fleet_addr, messages,
+                    temperature, max_tokens, client_ip, start_time,
+                )
+
+            if stream:
+                return await _stream_public(
+                    node, request_id, model_name, messages,
+                    temperature, max_tokens, client_ip, start_time,
+                )
+
+            # Non-streaming local inference
+            inf_req = InferenceRequest(
+                model=model_name,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
-        return await _proxy_fleet(
-            node, request_id, model_name, fleet_addr, messages,
-            temperature, max_tokens, client_ip, start_time,
-        )
 
-    if stream:
-        return await _stream_public(
-            node, request_id, model_name, messages,
-            temperature, max_tokens, client_ip, start_time,
-        )
+            result = await node.inference.generate(inf_req)
+            latency_ms = round((time.time() - start_time) * 1000)
+            total_tokens = result.prompt_tokens + result.completion_tokens
 
-    # Non-streaming local inference
-    try:
-        inf_req = InferenceRequest(
-            model=model_name,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        backend = node.inference.get_backend(model_name)
-        if not backend:
-            return JSONResponse(status_code=503, content={
-                "error": {"message": "Model temporarily unavailable."}
-            })
+            _record_usage(client_ip, total_tokens)
+            node.activity.record(
+                EventType.INFERENCE_COMPLETE,
+                model=model_name, source="public_gateway",
+                tokens=result.completion_tokens, latency_ms=latency_ms,
+            )
 
-        result = await backend.generate(inf_req)
-        latency_ms = round((time.time() - start_time) * 1000)
-        total_tokens = result.prompt_tokens + result.completion_tokens
+            return _clean_response(request_id, model_name, result.text,
+                                   result.finish_reason, result.prompt_tokens,
+                                   result.completion_tokens, latency_ms)
 
-        _record_usage(client_ip, total_tokens)
-        node.activity.record(
-            EventType.INFERENCE_COMPLETE,
-            model=model_name, source="public_gateway",
-            tokens=result.completion_tokens, latency_ms=latency_ms,
-        )
+        except RuntimeError as e:
+            # Model busy (queue timeout) — try next candidate
+            last_error = str(e)
+            logger.info(f"Gateway failover: {model_name}{'@'+fleet_addr if fleet_addr else ''} busy, trying next")
+            continue
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Gateway candidate {model_name} failed: {e}")
+            continue
 
-        return _clean_response(request_id, model_name, result.text,
-                               result.finish_reason, result.prompt_tokens,
-                               result.completion_tokens, latency_ms)
-
-    except Exception as e:
-        logger.warning(f"Public gateway inference failed: {e}")
-        node.activity.record(EventType.INFERENCE_FAILED, model=model_name, source="public_gateway")
-        return JSONResponse(status_code=500, content={
-            "error": {"message": "Inference failed. The network may be busy."}
-        })
+    # All candidates exhausted
+    logger.warning(f"Public gateway: all {len(candidates)} candidates failed. Last: {last_error}")
+    node.activity.record(EventType.INFERENCE_FAILED, model=candidates[0][0], source="public_gateway")
+    return JSONResponse(status_code=503, content={
+        "error": {"message": "All models are busy right now. Please try again in a moment."}
+    })
 
 
 def _node_hash(addr: str) -> str:
@@ -440,18 +443,8 @@ async def _stream_public(node, request_id, model_name, messages, temperature, ma
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            backend = node.inference.get_backend(model_name)
-            if not backend:
-                error_chunk = {
-                    "id": request_id, "object": "chat.completion.chunk",
-                    "model": model_name,
-                    "choices": [{"index": 0, "delta": {"content": "Model temporarily unavailable."}, "finish_reason": "stop"}],
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
-                yield "data: [DONE]\n\n"
-                return
 
-            async for chunk in backend.generate_stream(inf_req):
+            async for chunk in node.inference.generate_stream(inf_req):
                 total_tokens += len(chunk.text.split()) if chunk.text else 0
                 data = {
                     "id": request_id,

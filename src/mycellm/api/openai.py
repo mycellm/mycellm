@@ -210,6 +210,12 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         )
         try:
             result = await node.inference.generate(req)
+        except RuntimeError as e:
+            if "busy" in str(e).lower() or "timed out" in str(e).lower():
+                return JSONResponse(status_code=503, content={
+                    "error": {"message": str(e), "type": "model_busy", "code": "model_busy"}
+                })
+            raise
         except Exception as e:
             node.activity.record(EventType.INFERENCE_FAILED, model=model_name, error=str(e)[:200])
             error_msg = str(e)

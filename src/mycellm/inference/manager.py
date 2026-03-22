@@ -19,14 +19,26 @@ logger = logging.getLogger("mycellm.inference")
 
 
 class InferenceManager:
-    """Manages loaded models, concurrency limits, and backend routing."""
+    """Manages loaded models, concurrency limits, and backend routing.
 
-    def __init__(self, max_concurrent: int = 2):
+    Concurrency model:
+      - Global semaphore limits total active inferences across all models
+      - Per-model locks serialize access to llama.cpp backends (NOT thread-safe)
+      - OpenAI-compat backends get their own per-model semaphore (concurrent OK)
+      - When a model is busy, requests queue with a configurable timeout
+    """
+
+    def __init__(self, max_concurrent: int = 2, queue_timeout: float = 120.0):
         self._backends: dict[str, InferenceBackend] = {}
         self._model_info: dict[str, ModelCapability] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._max_concurrent = max_concurrent
         self._active_count = 0
+        self._queue_timeout = queue_timeout
+        # Per-model locks: llama.cpp → Lock (serialize), openai → Semaphore(4)
+        self._model_locks: dict[str, asyncio.Lock | asyncio.Semaphore] = {}
+        # Queue depth tracking per model
+        self._queue_depth: dict[str, int] = {}
         # Persistent configs — survives unload so models can be re-loaded
         self._saved_configs: dict[str, dict] = {}  # name -> config dict
         # Load status tracking
@@ -121,6 +133,13 @@ class InferenceManager:
             if model_path:
                 self._model_paths[model_name] = model_path
             self._backends[model_name] = backend
+            # Per-model concurrency: llama.cpp is NOT thread-safe, must serialize
+            # OpenAI-compat backends can handle concurrent requests
+            if backend_type == "llama.cpp":
+                self._model_locks[model_name] = asyncio.Lock()
+            else:
+                self._model_locks[model_name] = asyncio.Semaphore(4)
+            self._queue_depth[model_name] = 0
             self._model_info[model_name] = ModelCapability(
                 name=model_name,
                 quant=kwargs.get("quant", ""),
@@ -151,6 +170,8 @@ class InferenceManager:
         if backend:
             await backend.unload_model(model_name)
             self._model_info.pop(model_name, None)
+            self._model_locks.pop(model_name, None)
+            self._queue_depth.pop(model_name, None)
             logger.info(f"Model {model_name} unloaded")
 
             # Mark as disabled in saved configs (don't delete — allows re-enable)
@@ -184,8 +205,40 @@ class InferenceManager:
             return next(iter(self._backends))
         return ""
 
+    @property
+    def queue_status(self) -> dict[str, int]:
+        """Get current queue depth per model."""
+        return dict(self._queue_depth)
+
+    async def _acquire_model(self, model_name: str) -> None:
+        """Acquire the per-model lock with timeout. Raises if queue full or timeout."""
+        lock = self._model_locks.get(model_name)
+        if not lock:
+            return  # no lock (shouldn't happen)
+
+        self._queue_depth[model_name] = self._queue_depth.get(model_name, 0) + 1
+        try:
+            if isinstance(lock, asyncio.Lock):
+                # llama.cpp: serialize. If locked, we're queued.
+                if lock.locked():
+                    logger.info(f"Model {model_name} busy — request queued (depth={self._queue_depth[model_name]})")
+                await asyncio.wait_for(lock.acquire(), timeout=self._queue_timeout)
+            else:
+                # Semaphore for remote backends
+                await asyncio.wait_for(lock.acquire(), timeout=self._queue_timeout)
+        except asyncio.TimeoutError:
+            self._queue_depth[model_name] = max(0, self._queue_depth.get(model_name, 1) - 1)
+            raise RuntimeError(f"Model {model_name} is busy. Request timed out after {self._queue_timeout}s in queue.")
+
+    def _release_model(self, model_name: str) -> None:
+        """Release the per-model lock."""
+        lock = self._model_locks.get(model_name)
+        if lock:
+            lock.release()
+        self._queue_depth[model_name] = max(0, self._queue_depth.get(model_name, 1) - 1)
+
     async def generate(self, request: InferenceRequest) -> InferenceResult:
-        """Run inference with concurrency control."""
+        """Run inference with per-model locking and global concurrency control."""
         model_name = self.resolve_model_name(request.model)
         if not model_name:
             raise RuntimeError("No models loaded")
@@ -193,17 +246,18 @@ class InferenceManager:
         request.model = model_name
         backend = self._backends[model_name]
 
-        async with self._semaphore:
-            self._active_count += 1
-            try:
-                return await backend.generate(request)
-            finally:
-                self._active_count -= 1
+        await self._acquire_model(model_name)
+        self._active_count += 1
+        try:
+            return await backend.generate(request)
+        finally:
+            self._active_count -= 1
+            self._release_model(model_name)
 
     async def generate_stream(
         self, request: InferenceRequest
     ) -> AsyncIterator[InferenceChunk]:
-        """Run streaming inference with concurrency control."""
+        """Run streaming inference with per-model locking and global concurrency control."""
         model_name = self.resolve_model_name(request.model)
         if not model_name:
             raise RuntimeError("No models loaded")
@@ -211,13 +265,14 @@ class InferenceManager:
         request.model = model_name
         backend = self._backends[model_name]
 
-        async with self._semaphore:
-            self._active_count += 1
-            try:
-                async for chunk in backend.generate_stream(request):
-                    yield chunk
-            finally:
-                self._active_count -= 1
+        await self._acquire_model(model_name)
+        self._active_count += 1
+        try:
+            async for chunk in backend.generate_stream(request):
+                yield chunk
+        finally:
+            self._active_count -= 1
+            self._release_model(model_name)
 
     async def save_model_configs(self, data_dir: Path) -> None:
         """Save model configs to disk. Preserves unloaded API model configs."""

@@ -69,6 +69,16 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
       return { contentEl: d.querySelector('.msg-content'), attrEl: d.querySelector('.msg-attr') };
     }
 
+    function showError(contentEl, attrEl, message, retryText) {
+      contentEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" style="flex-shrink:0;"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        <span style="color:#A3A3A3;">${escHtml(message)}</span>
+      </div>`;
+      if (retryText && attrEl) {
+        attrEl.innerHTML = `<button onclick="document.getElementById('chatInput').value='${escHtml(retryText).replace(/'/g,"\\'")}';this.closest('[style]').remove();messages.pop();messages.pop();sendMessage()" style="background:none;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:2px 10px;cursor:pointer;color:#737373;font-size:10px;font-family:JetBrains Mono,monospace;-webkit-appearance:none;">Retry</button>`;
+      }
+    }
+
     async function sendMessage() {
       if (isStreaming) return;
       const input = document.getElementById('chatInput'), text = input.value.trim();
@@ -80,17 +90,40 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
       const startTime = Date.now();
       try {
         const resp = await fetch(`${API_BASE}/v1/public/chat/completions`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({messages:messages.slice(0,-1).map(m=>({role:m.role,content:m.content})),stream:true}) });
-        if (!resp.ok) { const e=await resp.json().catch(()=>({})); contentEl.textContent=e.error?.message||`Error: ${resp.status}`; isStreaming=false; return }
-        let fullText='',model='',nodeId='',sLat=0;
+        if (!resp.ok) {
+          const e = await resp.json().catch(()=>({}));
+          const msg = e.error?.message || `Error: ${resp.status}`;
+          if (resp.status === 429) {
+            showError(contentEl, attrEl, 'Rate limit reached — please wait a moment and try again.', text);
+          } else if (resp.status === 503) {
+            showError(contentEl, attrEl, 'All models are busy right now. Your request will be served shortly — please try again.', text);
+          } else {
+            showError(contentEl, attrEl, msg, text);
+          }
+          isStreaming = false; return;
+        }
+        // Show "queued" indicator while waiting for first token
+        contentEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;color:#737373;font-size:12px;"><span class="typing-dot" style="width:6px;height:6px;border-radius:50%;background:#22C55E;"></span><span class="typing-dot" style="width:6px;height:6px;border-radius:50%;background:#22C55E;"></span><span class="typing-dot" style="width:6px;height:6px;border-radius:50%;background:#22C55E;"></span></span>';
+        let fullText='',model='',nodeId='',sLat=0,gotFirstToken=false;
         const reader=resp.body.getReader(), dec=new TextDecoder(); let buf='';
         while(true) { const{done,value}=await reader.read(); if(done)break; buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop();
           for(const line of lines) { if(!line.startsWith('data: '))continue; const p=line.slice(6).trim(); if(p==='[DONE]')break;
             try { const ch=JSON.parse(p); model=ch.model||model; if(ch.mycellm){nodeId=ch.mycellm.node||nodeId;if(ch.mycellm.latency_ms)sLat=ch.mycellm.latency_ms;if(attrEl&&nodeId&&!attrEl.textContent)attrEl.textContent=`${model} via node ${nodeId}`}
-              const delta=ch.choices?.[0]?.delta?.content||''; if(delta){fullText+=delta;contentEl.innerHTML=renderMd(fullText);scrollToBottom()}
+              const delta=ch.choices?.[0]?.delta?.content||''; if(delta){if(!gotFirstToken){gotFirstToken=true;contentEl.innerHTML=''}fullText+=delta;contentEl.innerHTML=renderMd(fullText);scrollToBottom()}
             } catch{} } }
-        messages[messages.length-1].content=fullText;
-        if(attrEl) attrEl.innerHTML=`<span style="color:#525252;">${model}</span> via node ${nodeId||'local'} · ${sLat||(Date.now()-startTime)}ms`;
-      } catch(e) { contentEl.closest('[style]')?.remove(); messages.pop(); messages.pop(); input.value=text }
+        if (!fullText) {
+          showError(contentEl, attrEl, 'No response received. The network may be busy.', text);
+        } else {
+          messages[messages.length-1].content=fullText;
+          if(attrEl) attrEl.innerHTML=`<span style="color:#525252;">${model}</span> via node ${nodeId||'local'} · ${sLat||(Date.now()-startTime)}ms`;
+        }
+      } catch(e) {
+        if (e.name === 'TypeError' && e.message.includes('fetch')) {
+          showError(contentEl, attrEl, 'Cannot reach the network. Check your connection.', text);
+        } else {
+          showError(contentEl, attrEl, 'Connection lost. Please try again.', text);
+        }
+      }
       isStreaming = false;
     }
 
