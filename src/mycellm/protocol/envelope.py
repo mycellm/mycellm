@@ -1,9 +1,15 @@
-"""Protocol message envelope with versioning."""
+"""Protocol message envelope with versioning.
+
+Messages are CBOR-encoded. Messages larger than 1KB are zlib-compressed
+automatically (prefixed with a 0x01 byte to distinguish from uncompressed
+0x00-prefix messages). This helps with large inference responses over QUIC.
+"""
 
 from __future__ import annotations
 
 import time
 import uuid
+import zlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -12,6 +18,7 @@ import cbor2
 
 
 PROTOCOL_VERSION = 1
+_COMPRESS_THRESHOLD = 1024  # bytes — compress CBOR payloads above this
 
 
 class MessageType(str, Enum):
@@ -61,8 +68,13 @@ class MessageEnvelope:
     v: int = PROTOCOL_VERSION
 
     def to_cbor(self) -> bytes:
-        """Serialize to CBOR bytes."""
-        return cbor2.dumps({
+        """Serialize to CBOR bytes, with zlib compression for large payloads.
+
+        Wire format:
+          0x00 + cbor_bytes  = uncompressed
+          0x01 + zlib_bytes  = compressed
+        """
+        raw = cbor2.dumps({
             "v": self.v,
             "type": self.type.value,
             "id": self.id,
@@ -70,10 +82,22 @@ class MessageEnvelope:
             "from": self.from_peer,
             "payload": self.payload,
         })
+        if len(raw) >= _COMPRESS_THRESHOLD:
+            compressed = zlib.compress(raw, level=1)  # fast compression
+            if len(compressed) < len(raw) - 16:  # only if meaningful savings
+                return b'\x01' + compressed
+        return b'\x00' + raw
 
     @classmethod
     def from_cbor(cls, data: bytes) -> MessageEnvelope:
-        """Deserialize from CBOR bytes."""
+        """Deserialize from CBOR bytes (handles compressed and uncompressed)."""
+        if not data:
+            raise ValueError("Empty message data")
+        if data[0] == 0x01:
+            data = zlib.decompress(data[1:])
+        elif data[0] == 0x00:
+            data = data[1:]
+        # else: legacy uncompressed (no prefix) — parse as-is
         obj = cbor2.loads(data)
         return cls(
             v=obj["v"],

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -63,6 +64,11 @@ def create_app(node: MycellmNode) -> FastAPI:
         description="Distributed LLM inference node API",
         version="0.1.0",
     )
+
+    # GZip compression for responses > 500 bytes.
+    # Compresses JSON API responses, dashboard HTML/JS/CSS, fleet proxy payloads.
+    # SSE streams are excluded by default (Transfer-Encoding: chunked).
+    app.add_middleware(GZipMiddleware, minimum_size=500)
 
     # CORS: allow all origins — the embedded dashboard is served from the same
     # origin, so CORS doesn't add protection there. The real access control is
