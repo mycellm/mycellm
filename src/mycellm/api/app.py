@@ -55,10 +55,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         import time
         path = request.url.path
 
-        # Skip auth for public paths, public stats API, and static assets
+        # Skip auth for public paths, public stats API, node announce, and static assets
         if path in _PUBLIC_PATHS or not path.startswith("/v1"):
             return await call_next(request)
-        if "/public/" in path:
+        if "/public/" in path or path == "/v1/admin/nodes/announce":
             return await call_next(request)
 
         ip = request.client.host if request.client else "unknown"

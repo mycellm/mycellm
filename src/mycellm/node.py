@@ -979,7 +979,7 @@ class MycellmNode:
             for host, port in peers:
                 # LAN IPs: use http://host:api_port
                 # Public domains: use https://host (Caddy on 443)
-                is_lan = host.startswith("10.") or host.startswith("192.168.") or host.startswith("127.") or host == "localhost"
+                is_lan = host.startswith("10.") or host.startswith("192.168.") or host.startswith("172.") or host.startswith("127.") or host == "localhost"
                 if is_lan:
                     api_port = port if port != 8421 else 8420
                     url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
