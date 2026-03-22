@@ -5,29 +5,29 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
 ---
 <Base title="mycellm_ — Chat" description="Chat with the mycellm distributed network.">
   <ParticleCanvas />
-  <div class="relative z-10 min-h-screen min-h-[100dvh] flex flex-col overflow-x-hidden">
+  <div class="relative z-10" style="height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;">
     <Header currentPath="/chat" />
 
-    <div class="flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-6 overflow-x-hidden">
+    <div style="flex:1;display:flex;flex-direction:column;max-width:48rem;width:100%;margin:0 auto;padding:0 0.75rem;overflow:hidden;box-sizing:border-box;">
       <!-- Privacy notice -->
-      <div id="privacyNotice" class="glass rounded-lg px-3 py-2 mt-2 flex items-center justify-between text-[11px] text-gray-500">
-        <div class="flex items-center space-x-2">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-500 shrink-0"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-          <span>Prompts are processed by distributed GPU nodes. Don't share passwords, API keys, or personal data.</span>
+      <div id="privacyNotice" style="background:rgba(17,17,17,0.7);border:1px solid rgba(255,255,255,0.06);border-radius:0.5rem;padding:0.5rem 0.75rem;margin-top:0.5rem;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#737373;">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#737373" stroke-width="2" style="flex-shrink:0;"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+          <span>Prompts are processed by distributed GPU nodes. Don't share passwords or API keys.</span>
         </div>
-        <button onclick="this.parentElement.remove()" class="text-gray-600 hover:text-gray-400 ml-2 shrink-0">&times;</button>
+        <button onclick="this.parentElement.remove()" style="background:none;border:none;color:#525252;cursor:pointer;padding:0 4px;font-size:16px;line-height:1;-webkit-appearance:none;">×</button>
       </div>
 
-      <div id="chatMessages" class="flex-1 overflow-y-auto space-y-3 py-3 min-h-0"></div>
+      <div id="chatMessages" style="flex:1;overflow-y:auto;overflow-x:hidden;padding:0.75rem 0;min-height:0;"></div>
 
-      <div class="border-t border-white/5 py-3">
-        <div class="relative flex items-stretch">
+      <div style="border-top:1px solid rgba(255,255,255,0.05);padding:0.75rem 0;">
+        <div style="display:flex;width:100%;max-width:100%;box-sizing:border-box;">
           <textarea id="chatInput" rows="1" placeholder="Type a message..."
-            class="w-full glass rounded-xl rounded-r-none px-4 py-3 text-white text-base resize-none transition-all focus:outline-none focus:border-spore/40"
+            style="flex:1;min-width:0;background:rgba(17,17,17,0.7);border:1px solid rgba(255,255,255,0.06);border-right:none;border-radius:0.75rem 0 0 0.75rem;padding:0.75rem 1rem;color:white;font-size:16px;resize:none;outline:none;box-sizing:border-box;font-family:inherit;"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
           <button id="sendBtn" onclick="sendMessage()"
-            class="w-11 bg-spore text-black rounded-xl rounded-l-none flex items-center justify-center hover:bg-spore-glow active:scale-95 transition-all shrink-0">
+            style="width:44px;flex-shrink:0;background:#22C55E;color:black;border:none;border-radius:0 0.75rem 0.75rem 0;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-appearance:none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </button>
         </div>
