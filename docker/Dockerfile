@@ -13,21 +13,19 @@ RUN cd web && if [ -f package.json ]; then npm run build; fi
 # Stage 2: Python application
 FROM python:3.13-slim AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl \
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python deps (cache layer)
+# Install Python deps — wheels only, no compilation
 COPY pyproject.toml README.md ./
 COPY src/ src/
-RUN pip install --no-cache-dir -e ".[postgres]" 2>/dev/null || \
-    pip install --no-cache-dir \
+RUN pip install --no-cache-dir --only-binary :all: \
     cryptography aioquic cbor2 fastapi uvicorn sse-starlette \
     asyncpg sqlalchemy aiosqlite typer rich pydantic pydantic-settings \
-    pyyaml httpx prometheus-client && \
-    pip install --no-cache-dir -e .
+    pyyaml httpx prometheus-client 2>/dev/null; \
+    pip install --no-cache-dir --no-build-isolation -e .
 
 # Copy built web dashboard (overwrites placeholder in src/mycellm/web/)
 COPY --from=web-builder /build/src/mycellm/web/ src/mycellm/web/
