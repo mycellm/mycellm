@@ -392,7 +392,16 @@ async function api(path, opts = {}) {
   const headers = { ...authHeaders(), ...(opts.headers || {}) }
   const resp = await fetch(path, { ...opts, headers })
   if (resp.status === 401) throw new Error('unauthorized')
-  if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`)
+  if (!resp.ok) {
+    let msg = `${resp.status} ${resp.statusText}`
+    try {
+      const body = await resp.json()
+      if (body.error?.message) msg = body.error.message
+    } catch {}
+    const err = new Error(msg)
+    err.status = resp.status
+    throw err
+  }
   return resp.json()
 }
 
@@ -2824,8 +2833,19 @@ function ChatTab() {
       }])
     } catch (e) {
       if (e.name !== 'AbortError') {
-        setMessages(prev => [...prev, { role: 'assistant', content: `*Error: ${e.message}*` }])
-        setInput(text)
+        let errContent
+        if (e.status === 429) {
+          errContent = '⚠️ **Rate limit reached.** Please wait a moment and try again.'
+        } else if (e.status === 503) {
+          errContent = '⚠️ **All models are busy right now.** Your request was queued but timed out. Please try again in a moment.'
+        } else if (e.message?.includes('fetch') || e.message?.includes('Failed')) {
+          errContent = '⚠️ **Cannot reach the node.** Check that `mycellm serve` is running.'
+        } else {
+          errContent = `⚠️ **Error:** ${e.message}`
+        }
+        setMessages(prev => [...prev, {
+          role: 'assistant', content: errContent, isError: true, retryText: text,
+        }])
       }
     }
     abortRef.current = null
@@ -2942,6 +2962,18 @@ function ChatTab() {
                 ? <div className="whitespace-pre-wrap">{m.content}</div>
                 : <div className="chat-md" dangerouslySetInnerHTML={{ __html: marked.parse(m.content || '') }} />
               }
+              {m.isError && m.retryText && (
+                <div className="mt-2">
+                  <button onClick={() => {
+                    setMessages(prev => prev.filter((_, j) => j !== i && (j !== i - 1 || prev[j]?.role !== 'user')))
+                    setInput(m.retryText)
+                    setTimeout(() => document.querySelector('[placeholder*="message"]')?.focus(), 50)
+                  }}
+                    className="text-xs bg-white/5 border border-white/10 text-gray-400 px-3 py-1 rounded-lg hover:bg-white/10 hover:text-white transition-colors">
+                    <span className="flex items-center space-x-1"><RefreshCw size={10} /><span>Retry</span></span>
+                  </button>
+                </div>
+              )}
               {m.isSensitiveWarning && m._resolve && (
                 <div className="mt-3 flex space-x-2">
                   <button onClick={() => m._resolve(false)}
