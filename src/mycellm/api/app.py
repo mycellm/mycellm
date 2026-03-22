@@ -27,13 +27,32 @@ _PUBLIC_PREFIXES = ("/health",)  # dashboard static files served at /
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
-    """Require Bearer token on API routes when MYCELLM_API_KEY is set."""
+    """Require Bearer token on API routes when MYCELLM_API_KEY is set.
+
+    Includes brute-force protection:
+      - 5 failed attempts → 60s lockout
+      - 10 failed attempts → 15min lockout
+      - 20+ failed attempts → 1hr lockout
+    Lockouts are per-IP. Successful auth resets the counter.
+    """
+
+    _MAX_ATTEMPTS = [5, 10, 20]  # thresholds
+    _LOCKOUT_SECS = [60, 900, 3600]  # 1min, 15min, 1hr
 
     def __init__(self, app, api_key: str):
         super().__init__(app)
         self.api_key = api_key
+        # {ip: {"failures": N, "locked_until": timestamp}}
+        self._auth_state: dict[str, dict] = {}
+
+    def _get_lockout(self, failures: int) -> int:
+        for threshold, lockout in zip(reversed(self._MAX_ATTEMPTS), reversed(self._LOCKOUT_SECS)):
+            if failures >= threshold:
+                return lockout
+        return 0
 
     async def dispatch(self, request: Request, call_next):
+        import time
         path = request.url.path
 
         # Skip auth for public paths, public stats API, and static assets
@@ -42,14 +61,54 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         if "/public/" in path:
             return await call_next(request)
 
+        ip = request.client.host if request.client else "unknown"
+
+        # Check lockout
+        state = self._auth_state.get(ip, {"failures": 0, "locked_until": 0})
+        if state["locked_until"] > time.time():
+            remaining = int(state["locked_until"] - time.time())
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "locked",
+                    "message": f"Too many failed attempts. Try again in {remaining}s.",
+                },
+            )
+
         # Check Authorization header
         auth = request.headers.get("authorization", "")
         if auth == f"Bearer {self.api_key}":
+            self._auth_state.pop(ip, None)  # reset on success
             return await call_next(request)
 
         # Check x-api-key header (convenience)
         if request.headers.get("x-api-key") == self.api_key:
+            self._auth_state.pop(ip, None)
             return await call_next(request)
+
+        # Failed auth — increment counter and maybe lock
+        state["failures"] = state.get("failures", 0) + 1
+        lockout = self._get_lockout(state["failures"])
+        if lockout:
+            state["locked_until"] = time.time() + lockout
+        self._auth_state[ip] = state
+
+        # Prune old entries (prevent memory leak)
+        if len(self._auth_state) > 1000:
+            cutoff = time.time() - 7200
+            self._auth_state = {
+                k: v for k, v in self._auth_state.items()
+                if v.get("locked_until", 0) > cutoff or v.get("failures", 0) > 0
+            }
+
+        if lockout:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "locked",
+                    "message": f"Too many failed attempts. Locked for {lockout}s.",
+                },
+            )
 
         return JSONResponse(
             status_code=401,
