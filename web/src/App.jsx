@@ -1707,7 +1707,7 @@ function SortHeader({ label, field, sortBy, sortDir, onSort }) {
 
 // ── Model Table with inline edit ──
 
-function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doApi, refreshAll, nodeApi }) {
+function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doApi, refreshAll, nodeApi, readOnly = false }) {
   const [editingModel, setEditingModel] = useState(null) // model name being edited
   const [editForm, setEditForm] = useState({})
   const [editLoading, setEditLoading] = useState(false)
@@ -1806,7 +1806,7 @@ function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doA
               <td className="py-2.5 px-4 hidden lg:table-cell">
                 <div className="flex items-center space-x-2">
                   {stateBadge[m.state]}
-                  {m.state === 'active' && (
+                  {m.state === 'active' && !readOnly && (
                     <button onClick={async () => {
                       const next = m.scope === 'public' ? 'home' : 'public'
                       await doApi('/v1/node/models/scope', { model: m.name, scope: next })
@@ -1823,7 +1823,7 @@ function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doA
                 </div>
               </td>
               <td className="py-2.5 px-4 text-right space-x-2 whitespace-nowrap">
-                {m.state === 'active' && (
+                {m.state === 'active' && !readOnly && (
                   <>
                     {m.backend !== 'llama.cpp' && (
                       <button onClick={() => startEdit(m.name)}
@@ -1840,7 +1840,7 @@ function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doA
                     )}
                   </>
                 )}
-                {m.state === 'on-disk' && (
+                {m.state === 'on-disk' && !readOnly && (
                   <>
                     <button onClick={async () => {
                       await doApi('/v1/node/models/load', { model_path: m.filePath, name: m.name, backend: 'llama.cpp', ctx_len: m.ctx || 4096 })
@@ -1851,7 +1851,7 @@ function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doA
                     }} className="text-xs text-gray-600 hover:text-compute transition-colors">delete</button>
                   </>
                 )}
-                {m.state === 'disabled' && (
+                {m.state === 'disabled' && !readOnly && (
                   <>
                     {m.backend !== 'llama.cpp' && (
                       <button onClick={() => startEdit(m.name)}
@@ -2078,12 +2078,15 @@ function ModelsTab({ status, onRefresh }) {
           const hw = n.system?.gpu || n.capabilities?.hardware || {}
           const mem = n.system?.memory || {}
           const models = n.capabilities?.models || []
+          const pid = n.peer_id || ''
           return {
-            id: n.peer_id, name: n.node_name || `node-${(n.peer_id||'').slice(0,8)}`, peerId: n.peer_id, addr: n.api_addr,
+            id: pid, name: n.node_name || `node-${pid.slice(0,8)}`, peerId: pid,
+            addr: pid.slice(0,12),  // use peer_id prefix as unique key, not api_addr
             gpu: hw.gpu || 'CPU', backend: hw.backend || 'cpu',
             ram: mem.total_gb || hw.vram_gb || 0,
             models: models.map(m => typeof m === 'string' ? { name: m } : m),
             online: n.online, role: n.role || 'seeder',
+            readOnly: true,  // can't manage models on remote fleet nodes
           }
         })
       } catch {}
@@ -2098,6 +2101,7 @@ function ModelsTab({ status, onRefresh }) {
   // Fetch selected remote node's live models
   const selectedDevice = devices.find(d => d.id === selected || d.addr === selected)
   const isRemote = selected !== 'local' && !selectedDevice?.isSelf
+  const isReadOnly = selectedDevice?.readOnly || false
 
   useEffect(() => {
     if (!isRemote || !selectedDevice?.addr) { setRemoteStatus(null); return }
@@ -2428,7 +2432,7 @@ function ModelsTab({ status, onRefresh }) {
             </div>
             {allModels.length > 0 ? (
               <ModelTable allModels={allModels} stateIndicator={stateIndicator} stateNameColor={stateNameColor}
-                stateBadge={stateBadge} doApi={doApi} refreshAll={refreshAll} nodeApi={nodeApi} />
+                stateBadge={stateBadge} doApi={doApi} refreshAll={refreshAll} nodeApi={nodeApi} readOnly={isReadOnly} />
             ) : (
               <div className="px-5 py-8 text-center text-sm text-gray-600">
                 No models on this node. Search HuggingFace below to get started.
@@ -2438,8 +2442,8 @@ function ModelsTab({ status, onRefresh }) {
         )
       })()}
 
-      {/* Add Model */}
-      <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
+      {/* Add Model — hidden for read-only fleet nodes (bootstrap can't manage remote nodes) */}
+      {!isReadOnly && <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
         <div className="flex border-b border-white/10">
           {[
             { id: 'browse', label: 'HuggingFace', icon: '\u{1F917}' },
@@ -2713,7 +2717,15 @@ function ModelsTab({ status, onRefresh }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
+
+      {/* Read-only fleet node indicator */}
+      {isReadOnly && (
+        <div className="border border-white/10 bg-[#111] rounded-xl p-5 text-center">
+          <p className="text-sm text-gray-500">This node is managed by its operator. Models shown are from its last announce.</p>
+          <p className="text-xs text-gray-600 mt-1">Connect to the node's dashboard directly to manage its models.</p>
+        </div>
+      )}
     </div>
   )
 }
