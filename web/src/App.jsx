@@ -1041,6 +1041,7 @@ function HardwareCard({ node, compact = false }) {
         <div className="flex items-center space-x-2">
           <div className={`w-2.5 h-2.5 rounded-full ${node.online !== false ? 'bg-spore' : 'bg-gray-600'}`} />
           <span className="font-mono text-sm text-white font-medium">{node.name}</span>
+          {node.peerId && <span className="font-mono text-xs text-gray-600" title={node.peerId}>{node.peerId.slice(0,8)}</span>}
         </div>
         <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${node.type === 'self' ? 'bg-spore/10 text-spore' : 'bg-white/5 text-gray-500'}`}>
           {node.type}
@@ -2078,7 +2079,7 @@ function ModelsTab({ status, onRefresh }) {
           const mem = n.system?.memory || {}
           const models = n.capabilities?.models || []
           return {
-            id: n.peer_id, name: n.node_name || n.api_addr, addr: n.api_addr,
+            id: n.peer_id, name: n.node_name || `node-${(n.peer_id||'').slice(0,8)}`, peerId: n.peer_id, addr: n.api_addr,
             gpu: hw.gpu || 'CPU', backend: hw.backend || 'cpu',
             ram: mem.total_gb || hw.vram_gb || 0,
             models: models.map(m => typeof m === 'string' ? { name: m } : m),

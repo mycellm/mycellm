@@ -951,23 +951,24 @@ class MycellmNode:
             headers["Authorization"] = f"Bearer {self._settings.api_key}"
 
         sys_info = self.get_system_info()
-        payload = {
+        # Public name: peer_id prefix, not hostname (privacy + dedup)
+        public_name = f"node-{self.peer_id[:8]}"
+
+        base_payload = {
             "peer_id": self.peer_id,
-            "node_name": self._settings.node_name,
             "api_addr": f"{self.api_host}:{self.api_port}",
             "role": self.capabilities.role,
-            "capabilities": self.capabilities.to_dict(),
             "system": sys_info,
         }
         if self._settings.external_host:
-            payload["external_host"] = self._settings.external_host
+            base_payload["external_host"] = self._settings.external_host
 
         async def _do_announce():
-            payload["capabilities"] = self.capabilities.to_dict()
+            base_payload["capabilities"] = self.capabilities.to_dict()
             # Include telemetry if opted in
             if self._settings.telemetry:
                 stats = self.activity.stats() if hasattr(self, "activity") else {}
-                payload["telemetry"] = {
+                base_payload["telemetry"] = {
                     "requests_total": stats.get("total_requests", 0),
                     "tokens_total": stats.get("total_tokens", 0),
                     "tps": self.activity.tps if hasattr(self, "activity") else 0,
@@ -977,14 +978,22 @@ class MycellmNode:
                 }
             any_ok = False
             for host, port in peers:
-                # LAN IPs: use http://host:api_port
-                # Public domains: use https://host (Caddy on 443)
+                # LAN IPs: use http://host:api_port, send real hostname
+                # Public domains: use https://host, send anonymized name
                 is_lan = host.startswith("10.") or host.startswith("192.168.") or host.startswith("172.") or host.startswith("127.") or host == "localhost"
+                payload = {**base_payload}
                 if is_lan:
                     api_port = port if port != 8421 else 8420
                     url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
+                    payload["node_name"] = self._settings.node_name
+                    payload["system"] = sys_info
                 else:
                     url = f"https://{host}/v1/admin/nodes/announce"
+                    payload["node_name"] = public_name
+                    # Public: only share GPU type + model count, not full system info
+                    payload["system"] = {
+                        "gpu": sys_info.get("gpu", {}),
+                    }
                 try:
                     transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
                     async with httpx.AsyncClient(timeout=10, transport=transport) as client:
