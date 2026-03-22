@@ -32,7 +32,7 @@ Models prefixed with `relay:` are served by external devices connected via [rela
 }
 ```
 
-### Remote API model
+### API Provider model
 
 ```json
 {
@@ -40,11 +40,14 @@ Models prefixed with `relay:` are served by external devices connected via [rela
   "backend": "openai",
   "api_base": "https://openrouter.ai/api/v1",
   "api_key": "secret:openrouter",
-  "api_model": "anthropic/claude-sonnet-4"
+  "api_model": "anthropic/claude-sonnet-4",
+  "max_concurrent": 32
 }
 ```
 
 Use `secret:name` to reference encrypted secrets instead of raw API keys.
+
+`max_concurrent` controls how many simultaneous requests this model can handle (default: 32 for API/relay, 1 for local GGUF). See [relay docs](/integrations/relay/#concurrency) for details.
 
 ## `POST /v1/node/models/unload`
 

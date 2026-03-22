@@ -72,28 +72,29 @@ Any app that exposes an OpenAI-compatible API works as a relay:
 
 | App | Platform | Notes |
 |-----|----------|-------|
-| [Ollama](https://ollama.com) | macOS, Linux, Windows | Default port 11434 |
-| [LM Studio](https://lmstudio.ai) | macOS, Linux, Windows | Enable API server in settings |
-| [PocketPal AI](https://apps.apple.com/app/pocketpal-ai/id6502579498) | iOS, iPadOS | Runs llama.cpp with Metal |
-| [LLM Farm](https://apps.apple.com/app/llm-farm/id6461209867) | iOS, iPadOS | Open source, Metal acceleration |
-| [vLLM](https://docs.vllm.ai) | Linux (CUDA) | High-throughput serving |
+| [Ollama](https://ollama.com) | macOS, Linux, Windows | Default port 11434. Batches requests. |
+| [LM Studio](https://lmstudio.ai) | macOS, Linux, Windows | Enable "Local Server" in sidebar |
 | [llama.cpp server](https://github.com/ggml-org/llama.cpp/blob/master/examples/server/README.md) | Any | `llama-server --port 8080` |
+| [vLLM](https://docs.vllm.ai) | Linux (CUDA) | High-throughput, continuous batching |
 | [LocalAI](https://localai.io) | Any | Drop-in OpenAI replacement |
 
 ## iPad / iPhone as a relay
 
-Apple Silicon devices (M1–M4) are excellent inference backends:
+Apple Silicon devices (M1–M4) are excellent inference backends. You need an app that runs a local LLM **and** exposes an OpenAI-compatible API server.
 
-1. Install **PocketPal AI** or **LLM Farm** from the App Store
-2. Download a model (e.g., Llama 3.2 3B, Phi-4 Mini)
-3. Enable the API server (usually in app settings)
-4. Note the device's local IP (Settings → Wi-Fi → tap network → IP)
-5. Add as relay: `mycellm serve --relay http://<ipad-ip>:8080`
+Currently the best option for iOS/iPadOS is running Ollama via a Mac on the same network, then pointing the relay at that Mac. Native iOS apps with API server support are still emerging — check the [App Store](https://apps.apple.com/us/charts/iphone/productivity-apps/6007) for new options.
 
-The M4 iPad Pro with 16GB RAM can run 8B models at ~30 tok/s via Metal.
+For **Mac** devices (MacBook, Mac Mini, Mac Studio):
+
+1. Install [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai)
+2. Pull a model: `ollama pull llama3.2:3b`
+3. Ollama serves on port 11434 by default
+4. Add as relay: `mycellm serve --relay http://<mac-ip>:11434`
+
+The M4 with 16GB RAM can run 8B models at ~30 tok/s via Metal.
 
 :::note
-iOS/iPadOS apps can't run in the background indefinitely. Keep the app in the foreground while serving as a relay, or use Guided Access to prevent the app from being suspended.
+Set `max_concurrent` appropriately for the device: `2` for an iPad or single-GPU Mac, `32` for a multi-GPU server or cloud API.
 :::
 
 ## API reference
@@ -119,8 +120,10 @@ List all relay backends and their status.
 ### `POST /v1/node/relay/add`
 
 ```json
-{"url": "http://ipad.lan:8080", "name": "iPad Pro", "api_key": ""}
+{"url": "http://ipad.lan:8080", "name": "iPad Pro", "max_concurrent": 2}
 ```
+
+`max_concurrent` controls how many simultaneous requests mycellm sends to this device (default: 32). Set lower for constrained devices like iPads (`2`), higher for beefy GPU servers.
 
 ### `POST /v1/node/relay/remove`
 
@@ -149,6 +152,30 @@ GET /v1/models
 ```
 
 To the rest of the network, these models are indistinguishable from locally-loaded models. Peers route inference requests to your node, and your node proxies them to the relay device.
+
+## Concurrency
+
+Each model source has different concurrency characteristics:
+
+| Source | Concurrent requests | Why |
+|--------|-------------------|-----|
+| Local GGUF (llama.cpp) | 1 per model | C library context is not thread-safe |
+| API Provider | 32 per model (default) | Cloud server handles backpressure |
+| Device Relay | 32 per model (default) | Remote device handles backpressure |
+
+A node with 2 local models can serve 2 concurrent users — one per model. Adding relay or API provider models adds more concurrent capacity without the hardware constraint.
+
+Tune per device with `max_concurrent`:
+
+```bash
+# iPad relay — limited device, keep low
+curl -X POST localhost:8420/v1/node/relay/add \
+  -d '{"url": "http://ipad:8080", "max_concurrent": 2}'
+
+# Cloud API — high throughput
+curl -X POST localhost:8420/v1/node/models/load \
+  -d '{"name": "gpt-4o", "backend": "openai", "api_base": "...", "max_concurrent": 64}'
+```
 
 ## Automatic health checking
 
