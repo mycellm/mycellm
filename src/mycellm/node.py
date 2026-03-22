@@ -768,17 +768,56 @@ class MycellmNode:
             self._dht_node = None
 
     async def _start_api(self) -> None:
-        """Start the FastAPI server."""
+        """Start the FastAPI server, then restore models in background."""
         import uvicorn
         from mycellm.api.app import create_app
 
         app = create_app(self)
+
+        # Schedule model restore + relay init AFTER API is accepting connections
+        @app.on_event("startup")
+        async def _on_api_ready():
+            logger.info(f"{styled_tag('BOOT')} API ready — loading models in background")
+            asyncio.ensure_future(self._restore_models_bg())
+
         config = uvicorn.Config(
             app, host=self.api_host, port=self.api_port, log_level="warning",
         )
         self._api_server = uvicorn.Server(config)
         logger.info(f"{styled_tag('API')} http://{self.api_host}:{self.api_port}")
         await self._api_server.serve()
+
+    async def _restore_models_bg(self) -> None:
+        """Restore saved models + connect relays in background. Never blocks API/transport."""
+        # 1. Restore persisted models (can take minutes for large GGUF files)
+        try:
+            restored = await self.inference.restore_models(self._settings.data_dir)
+            if restored:
+                self.capabilities.models = self.inference.loaded_models
+                logger.info(f"{styled_tag('BOOT')} Restored {restored} model(s)")
+                await self.announce_capabilities()
+        except Exception as e:
+            logger.warning(f"{styled_tag('BOOT')} Model restore failed: {e} — load models via dashboard")
+
+        # 2. Connect configured relay backends
+        try:
+            from mycellm.inference.relay import parse_relay_backends
+            relay_urls = parse_relay_backends(self._settings.relay_backends)
+            for url in relay_urls:
+                try:
+                    relay = await self.relay_manager.add(url)
+                    if relay.online:
+                        logger.info(f"{styled_tag('RELAY')} Connected: {relay.name} ({len(relay.models)} models)")
+                    else:
+                        logger.warning(f"{styled_tag('RELAY')} Offline: {url} — {relay.error}")
+                except Exception as e:
+                    logger.warning(f"{styled_tag('RELAY')} Failed to add {url}: {e}")
+            if relay_urls and self.relay_manager.relays:
+                self.capabilities.models = self.inference.loaded_models
+                await self.announce_capabilities()
+                self.relay_manager.start_polling(interval=60)
+        except Exception as e:
+            logger.warning(f"{styled_tag('RELAY')} Relay init failed: {e}")
 
     def _save_peer_cache(self) -> None:
         """Persist known peers to disk."""
@@ -834,22 +873,10 @@ class MycellmNode:
         # Load cached peers
         self._load_peer_cache()
 
-        # Restore persisted models (non-blocking — don't delay API startup)
-        async def _restore_models_bg():
-            try:
-                restored = await asyncio.wait_for(
-                    self.inference.restore_models(self._settings.data_dir),
-                    timeout=30.0,
-                )
-                if restored:
-                    self.capabilities.models = self.inference.loaded_models
-                    logger.info(f"{styled_tag('BOOT')} Restored {restored} model(s)")
-                    await self.announce_capabilities()
-            except asyncio.TimeoutError:
-                logger.warning(f"{styled_tag('BOOT')} Model restore timed out — will retry via dashboard")
-            except Exception as e:
-                logger.warning(f"{styled_tag('BOOT')} Model restore failed: {e}")
-        asyncio.ensure_future(_restore_models_bg())
+        # Restore persisted models — truly non-blocking.
+        # Model loading (especially llama.cpp) can take minutes and hold the GIL.
+        # We schedule it as a task that runs AFTER the API server starts accepting.
+        self._model_restore_task = None  # set below after API is ready
 
         hw = self._detect_hardware()
         self.capabilities = Capabilities(
@@ -899,24 +926,9 @@ class MycellmNode:
         except ImportError:
             pass
 
-        # Initialize relay manager and connect configured relays
-        from mycellm.inference.relay import RelayManager, parse_relay_backends
+        # Initialize relay manager (relay connections happen in _restore_models_bg after API ready)
+        from mycellm.inference.relay import RelayManager
         self.relay_manager = RelayManager(self.inference)
-        relay_urls = parse_relay_backends(self._settings.relay_backends)
-        if relay_urls:
-            for url in relay_urls:
-                try:
-                    relay = await self.relay_manager.add(url)
-                    if relay.online:
-                        logger.info(f"{styled_tag('RELAY')} Connected: {relay.name} ({len(relay.models)} models)")
-                    else:
-                        logger.warning(f"{styled_tag('RELAY')} Offline: {url} — {relay.error}")
-                except Exception as e:
-                    logger.warning(f"{styled_tag('RELAY')} Failed to add {url}: {e}")
-            if self.relay_manager.relays:
-                self.capabilities.models = self.inference.loaded_models
-                await self.announce_capabilities()
-            self.relay_manager.start_polling(interval=60)
 
         logger.info(f"{styled_tag('NODE')} Swarm connected. Awaiting inference tasks.")
 

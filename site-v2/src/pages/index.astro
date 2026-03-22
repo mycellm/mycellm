@@ -51,20 +51,20 @@ import Page from '../layouts/Page.astro';
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         <div class="glass rounded-xl p-5 space-y-2 hover-lift anim anim-d1">
           <div class="flex items-center space-x-2">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-spore shrink-0"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-spore shrink-0"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><path d="M12 8v4M8.5 17.5l2-4M15.5 17.5l-2-4"/></svg>
             <span class="text-spore font-semibold">No single point of failure</span>
           </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Models run across multiple peers. If one node goes down, requests route to another automatically.
+            Models run across multiple peers. If one goes down, requests automatically route to another — no downtime.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2 hover-lift anim anim-d2">
           <div class="flex items-center space-x-2">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-relay shrink-0"><circle cx="12" cy="12" r="10"/><path d="M16 8l-4 4-4-4"/><path d="M12 12v6"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-relay shrink-0"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
             <span class="text-relay font-semibold">Your GPU, your credits</span>
           </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Contribute idle compute and earn credits. Spend them to run larger models. A fair exchange.
+            Contribute idle compute and earn credits. Spend them to run larger models across the network. A fair exchange.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2 hover-lift anim anim-d3">
@@ -73,16 +73,16 @@ import Page from '../layouts/Page.astro';
             <span class="text-ledger font-semibold">No vendor lock-in</span>
           </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            OpenAI-compatible API. Switch providers with one env var. Your tools, your choice.
+            Drop-in OpenAI-compatible API. Switch from any provider with one env var. Your tools, your choice.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2 hover-lift anim anim-d4">
           <div class="flex items-center space-x-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-300 shrink-0"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-            <span class="text-gray-200 font-semibold">Private networks</span>
+            <span class="text-gray-200 font-semibold">Private & federated</span>
           </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Run your own swarm for your team. Full control over membership, models, and data. Invite-only.
+            Run your own swarm or federate with trusted peers. Control membership, models, and data with cross-network routing.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2 hover-lift anim anim-d5">
@@ -91,7 +91,7 @@ import Page from '../layouts/Page.astro';
             <span class="text-compute font-semibold">Open source</span>
           </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Apache 2.0 licensed. Audit the code, fork it, extend it. No black boxes.
+            Apache 2.0 licensed. Audit the code, fork it, extend it. Every layer is transparent — no black boxes, no hidden costs.
           </p>
         </div>
         <div class="glass rounded-xl p-5 space-y-2 hover-lift anim anim-d6">
@@ -100,7 +100,7 @@ import Page from '../layouts/Page.astro';
             <span class="text-spore-glow font-semibold">Scales with community</span>
           </div>
           <p class="text-sm text-gray-400 leading-relaxed">
-            Every new seeder makes the network faster. More contributors = more models, lower latency.
+            Every new seeder makes the network faster and more capable. More contributors means more models and lower latency.
           </p>
         </div>
       </div>
