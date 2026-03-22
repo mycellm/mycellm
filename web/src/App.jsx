@@ -3665,9 +3665,8 @@ function AuthGate({ onAuth }) {
   return (
     <div className="min-h-screen bg-void text-console font-mono flex items-center justify-center p-6">
       <div className="max-w-sm w-full border border-white/10 bg-[#111] p-6 rounded-xl">
-        <div className="flex items-center space-x-3 mb-6">
-          <Shield size={20} className="text-spore" />
-          <h1 className="text-lg font-bold text-white">mycellm<span className="text-spore">.</span></h1>
+        <div className="mb-6">
+          <img src="/brand/mycellm-h-R.svg" alt="mycellm" className="h-6" />
         </div>
         <p className="text-sm text-gray-400 mb-4">This node requires an API key.</p>
         <input type="password" value={key} onChange={e => setKey(e.target.value)}
