@@ -22,6 +22,7 @@ services:
     env_file:
       - .env.prod
     environment:
+      MYCELLM_NODE_NAME: mycel_prime
       MYCELLM_NETWORK_NAME: mycellm-public
       MYCELLM_PUBLIC: "true"
       MYCELLM_API_HOST: "0.0.0.0"
