@@ -1778,8 +1778,22 @@ function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doA
               <td className="py-2.5 px-4" title={m.state}>{stateIndicator[m.state]}</td>
               <td className={`py-2.5 px-4 font-mono ${stateNameColor[m.state]}`}>
                 {m.name}
-                {m.state === 'loading' && m.phase && (
-                  <div className="text-xs text-ledger/70 font-sans mt-0.5">{m.phase}{m.elapsed ? ` · ${m.elapsed}s` : ''}</div>
+                {m.state === 'loading' && (
+                  <div className="mt-1 space-y-1">
+                    {m.progress > 0 && m.progress < 1 ? (
+                      <>
+                        <div className="flex items-center space-x-2">
+                          <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden" style={{maxWidth: '160px'}}>
+                            <div className="h-full bg-ledger rounded-full transition-all duration-500" style={{width: `${Math.round(m.progress * 100)}%`}} />
+                          </div>
+                          <span className="text-xs text-ledger/70 font-mono">{Math.round(m.progress * 100)}%</span>
+                          {m.eta_seconds != null && <span className="text-xs text-gray-600">{m.eta_seconds > 60 ? `${Math.round(m.eta_seconds / 60)}m` : `${Math.round(m.eta_seconds)}s`} left</span>}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-xs text-ledger/70 font-sans">{m.phase || 'loading...'}{m.elapsed ? ` · ${m.elapsed}s` : ''}</div>
+                    )}
+                  </div>
                 )}
                 {m.state === 'failed' && m.error && (
                   <div className="text-xs text-compute/70 font-sans mt-0.5 truncate max-w-[250px]" title={m.error}>{m.error}</div>
@@ -2304,7 +2318,8 @@ function ModelsTab({ status, onRefresh }) {
             merged.set(s.model, {
               name: s.model, state: s.status, backend: s.backend || 'llama.cpp',
               phase: s.phase, error: s.error, elapsed: s.elapsed,
-              quant: '', size: '', ctx: 0,
+              progress: s.progress || 0, eta_seconds: s.eta_seconds, size_gb: s.size_gb || 0,
+              quant: '', size: s.size_gb ? `${s.size_gb}GB` : '', ctx: 0,
             })
           }
         }

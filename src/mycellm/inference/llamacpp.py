@@ -34,6 +34,13 @@ class LlamaCppBackend(InferenceBackend):
         model_name = kwargs.get("name", model_path.split("/")[-1])
         n_ctx = kwargs.get("n_ctx", 4096)
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)  # -1 = auto
+        progress_callback = kwargs.get("progress_callback")
+
+        # Bridge llama.cpp's progress_callback (called from C thread) to our tracker
+        def _on_progress(progress: float) -> bool:
+            if progress_callback:
+                progress_callback(progress)
+            return True  # return True to continue loading
 
         logger.info(f"Loading model {model_name} from {model_path}")
         llm = await asyncio.to_thread(
@@ -42,6 +49,7 @@ class LlamaCppBackend(InferenceBackend):
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             verbose=False,
+            progress_callback=_on_progress,
         )
         self._models[model_name] = llm
         logger.info(f"Model {model_name} loaded")

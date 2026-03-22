@@ -79,6 +79,9 @@ class InferenceManager:
             "phase": "initializing",
             "backend": backend_type,
             "started_at": _time.time(),
+            "progress": 0.0,  # 0.0 - 1.0
+            "eta_seconds": None,
+            "size_gb": 0.0,
             "error": None,
         }
 
@@ -124,6 +127,21 @@ class InferenceManager:
                     size_gb = Path(model_path).stat().st_size / (1024**3) if Path(model_path).exists() else 0
                     if size_gb > 0:
                         self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
+                        self._load_status[model_name]["size_gb"] = round(size_gb, 2)
+
+                # Progress callback — updates load status with % and ETA
+                load_start = _time.time()
+                def _progress_cb(progress: float):
+                    self._load_status[model_name]["progress"] = round(progress, 3)
+                    elapsed = _time.time() - load_start
+                    if progress > 0.01:
+                        eta = (elapsed / progress) * (1.0 - progress)
+                        self._load_status[model_name]["eta_seconds"] = round(eta, 1)
+                    pct = int(progress * 100)
+                    sz = self._load_status[model_name].get("size_gb", 0)
+                    self._load_status[model_name]["phase"] = f"loading {sz:.1f}GB — {pct}%"
+
+                kwargs["progress_callback"] = _progress_cb
             else:
                 self._load_status[model_name]["phase"] = "connecting to API"
 
