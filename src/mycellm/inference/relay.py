@@ -38,6 +38,7 @@ class RelayEndpoint:
     url: str
     name: str = ""  # user-friendly label
     api_key: str = ""
+    max_concurrent: int = 32  # per-model concurrency limit for this device
     models: list[dict] = field(default_factory=list)
     online: bool = False
     error: str = ""
@@ -56,7 +57,7 @@ class RelayManager:
     def relays(self) -> list[RelayEndpoint]:
         return list(self._relays.values())
 
-    async def add(self, url: str, api_key: str = "", name: str = "") -> RelayEndpoint:
+    async def add(self, url: str, api_key: str = "", name: str = "", max_concurrent: int = 32) -> RelayEndpoint:
         """Add a relay backend and discover its models."""
         url = url.rstrip("/")
 
@@ -64,7 +65,7 @@ class RelayManager:
         if url.endswith("/v1"):
             url = url[:-3]
 
-        relay = RelayEndpoint(url=url, api_key=api_key, name=name or _label_from_url(url))
+        relay = RelayEndpoint(url=url, api_key=api_key, name=name or _label_from_url(url), max_concurrent=max_concurrent)
         self._relays[url] = relay
 
         await self._discover_models(relay)
@@ -188,6 +189,7 @@ class RelayManager:
                     api_key=relay.api_key,
                     api_model=model_id,
                     ctx_len=model.get("context_length", 4096) if isinstance(model, dict) else 4096,
+                    max_concurrent=relay.max_concurrent,
                 )
                 registered += 1
                 logger.info(f"Relay model registered: {relay_name} (via {relay.name})")

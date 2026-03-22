@@ -208,12 +208,15 @@ class InferenceManager:
             if model_path:
                 self._model_paths[model_name] = model_path
             self._backends[model_name] = backend
-            # Per-model concurrency: llama.cpp is NOT thread-safe, must serialize
-            # OpenAI-compat backends can handle concurrent requests
+            # Per-model concurrency control:
+            # - llama.cpp: Lock (1 concurrent) — C context is NOT thread-safe
+            # - Remote/relay: configurable via max_concurrent kwarg, default 32
+            #   The remote server handles its own backpressure via HTTP 429/503
             if backend_type == "llama.cpp":
                 self._model_locks[model_name] = asyncio.Lock()
             else:
-                self._model_locks[model_name] = asyncio.Semaphore(4)
+                max_c = kwargs.get("max_concurrent", 32)
+                self._model_locks[model_name] = asyncio.Semaphore(max_c)
             self._queue_depth[model_name] = 0
             self._model_info[model_name] = ModelCapability(
                 name=model_name,

@@ -247,6 +247,7 @@ async def load_model(request: Request):
             api_base=body.get("api_base", ""), api_key=api_key,
             api_model=body.get("api_model", ""), ctx_len=body.get("ctx_len", 4096),
             timeout=body.get("timeout", 120),
+            max_concurrent=body.get("max_concurrent", 32),
         )
         scope = body.get("scope", "home")
         info = node.inference._model_info.get(loaded_name)
@@ -924,6 +925,7 @@ async def add_relay(request: Request):
         url=url,
         api_key=api_key,
         name=body.get("name", ""),
+        max_concurrent=body.get("max_concurrent", 32),
     )
 
     # Announce new models to the network
