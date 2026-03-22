@@ -2425,6 +2425,7 @@ function ModelsTab({ status, onRefresh }) {
             { id: 'browse', label: 'Browse HuggingFace', icon: '\u{1F917}' },
             { id: 'local', label: 'Local File', icon: '\u{1F4C1}' },
             { id: 'api', label: 'Remote API', icon: '\u{1F517}' },
+            { id: 'relay', label: 'Relay Device', icon: '\u{1F4F1}' },
           ].map(tab => (
             <button key={tab.id} onClick={() => setAddMode(tab.id)}
               className={`flex items-center space-x-2 px-4 py-3 text-xs font-medium border-b-2 transition-all ${
@@ -2679,6 +2680,10 @@ function ModelsTab({ status, onRefresh }) {
             </div>
           )}
 
+          {addMode === 'relay' && (
+            <RelayPanel nodeApi={nodeApi} onRefresh={onRefresh} />
+          )}
+
           {result && (
             <div className={`flex items-center space-x-2 text-sm p-2.5 rounded-lg mt-3 ${
               result.error ? 'bg-compute/10 text-compute' : 'bg-spore/10 text-spore'
@@ -2692,6 +2697,169 @@ function ModelsTab({ status, onRefresh }) {
     </div>
   )
 }
+
+
+function RelayPanel({ nodeApi, onRefresh }) {
+  const [relays, setRelays] = useState([])
+  const [newUrl, setNewUrl] = useState('')
+  const [newName, setNewName] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [result, setResult] = useState(null)
+
+  const fetchRelays = () => {
+    api('/v1/node/relay').then(d => setRelays(d.relays || [])).catch(() => {})
+  }
+
+  useEffect(() => {
+    fetchRelays()
+    const iv = setInterval(fetchRelays, 5000)
+    return () => clearInterval(iv)
+  }, [])
+
+  const addRelay = async () => {
+    if (!newUrl.trim()) return
+    setAdding(true)
+    setResult(null)
+    try {
+      const resp = await api('/v1/node/relay/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: newUrl.trim(), name: newName.trim() }),
+      })
+      if (resp.error) {
+        setResult({ error: resp.error })
+      } else {
+        const relay = resp.relay || {}
+        if (relay.online) {
+          setResult({ success: `Connected to ${relay.name} — ${relay.models?.length || 0} model(s) discovered` })
+        } else {
+          setResult({ error: `Added but offline: ${relay.error || 'cannot connect'}` })
+        }
+        setNewUrl('')
+        setNewName('')
+        fetchRelays()
+        onRefresh()
+      }
+    } catch (e) {
+      setResult({ error: e.message })
+    }
+    setAdding(false)
+    setTimeout(() => setResult(null), 5000)
+  }
+
+  const removeRelay = async (url) => {
+    try {
+      await api('/v1/node/relay/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      fetchRelays()
+      onRefresh()
+    } catch {}
+  }
+
+  const refreshAll = async () => {
+    setRefreshing(true)
+    try {
+      const resp = await api('/v1/node/relay/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      setResult({ success: `Discovered ${resp.models_discovered || 0} new model(s)` })
+      fetchRelays()
+      onRefresh()
+    } catch (e) {
+      setResult({ error: e.message })
+    }
+    setRefreshing(false)
+    setTimeout(() => setResult(null), 4000)
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-gray-500">
+        Connect a device running an OpenAI-compatible API (iPad, phone, Ollama, LM Studio, etc.).
+        Models are auto-discovered and announced to the network.
+      </p>
+
+      {/* Existing relays */}
+      {relays.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-mono uppercase tracking-wider">{relays.length} relay{relays.length !== 1 ? 's' : ''} connected</span>
+            <button onClick={refreshAll} disabled={refreshing}
+              className="flex items-center space-x-1 text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-40">
+              <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
+              <span>Refresh all</span>
+            </button>
+          </div>
+          {relays.map(r => (
+            <div key={r.url} className="bg-black/40 border border-white/5 rounded-lg px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${r.online ? 'bg-spore' : 'bg-compute animate-pulse'}`} />
+                  <span className="font-mono text-sm text-white font-medium">{r.name}</span>
+                  <span className="text-xs text-gray-600 font-mono">{r.url}</span>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <span className={`text-xs ${r.online ? 'text-gray-500' : 'text-compute'}`}>
+                    {r.online ? `${r.model_count} model${r.model_count !== 1 ? 's' : ''}` : r.error || 'offline'}
+                  </span>
+                  <button onClick={() => removeRelay(r.url)} className="text-gray-600 hover:text-compute transition-colors">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+              {r.online && r.models?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2.5">
+                  {r.models.map(m => (
+                    <span key={m} className="text-xs font-mono bg-spore/5 text-spore border border-spore/10 rounded px-2 py-0.5">
+                      relay:{m}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add relay form */}
+      <div className="flex items-end gap-2">
+        <div className="flex-[2]">
+          <label className="text-xs text-gray-500 block mb-1">Device URL</label>
+          <input value={newUrl} onChange={e => setNewUrl(e.target.value)}
+            placeholder="http://ipad.lan:8080"
+            onKeyDown={e => e.key === 'Enter' && addRelay()}
+            className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs text-gray-500 block mb-1">Label <span className="text-gray-700">(optional)</span></label>
+          <input value={newName} onChange={e => setNewName(e.target.value)}
+            placeholder="iPad Pro"
+            onKeyDown={e => e.key === 'Enter' && addRelay()}
+            className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
+        </div>
+        <button onClick={addRelay} disabled={adding || !newUrl.trim()}
+          className="bg-white/10 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/20 disabled:opacity-40 whitespace-nowrap flex items-center space-x-1.5">
+          {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          <span>{adding ? 'Connecting...' : 'Add Relay'}</span>
+        </button>
+      </div>
+
+      {result && (
+        <div className={`flex items-center space-x-2 text-sm p-2.5 rounded-lg ${result.error ? 'bg-compute/10 text-compute' : 'bg-spore/10 text-spore'}`}>
+          {result.error ? <AlertCircle size={14} /> : <Check size={14} />}
+          <span>{result.error || result.success}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 // ── Chat Tab ──
 
@@ -3236,173 +3404,6 @@ function LogsTab({ logs }) {
 
 // ── Settings Tab ──
 
-function RelaySection() {
-  const [relays, setRelays] = useState([])
-  const [newUrl, setNewUrl] = useState('')
-  const [newName, setNewName] = useState('')
-  const [adding, setAdding] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
-  const [result, setResult] = useState(null)
-
-  const fetchRelays = () => {
-    api('/v1/node/relay').then(d => setRelays(d.relays || [])).catch(() => {})
-  }
-
-  useEffect(() => {
-    fetchRelays()
-    const iv = setInterval(fetchRelays, 10000)
-    return () => clearInterval(iv)
-  }, [])
-
-  const addRelay = async () => {
-    if (!newUrl.trim()) return
-    setAdding(true)
-    setResult(null)
-    try {
-      const resp = await api('/v1/node/relay/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: newUrl.trim(), name: newName.trim() }),
-      })
-      if (resp.error) {
-        setResult({ error: resp.error })
-      } else {
-        const relay = resp.relay || {}
-        if (relay.online) {
-          setResult({ success: `Connected to ${relay.name} — ${relay.models?.length || 0} model(s) discovered` })
-        } else {
-          setResult({ error: `Added but offline: ${relay.error || 'cannot connect'}` })
-        }
-        setNewUrl('')
-        setNewName('')
-        fetchRelays()
-      }
-    } catch (e) {
-      setResult({ error: e.message })
-    }
-    setAdding(false)
-    setTimeout(() => setResult(null), 5000)
-  }
-
-  const removeRelay = async (url) => {
-    try {
-      await api('/v1/node/relay/remove', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      })
-      fetchRelays()
-    } catch {}
-  }
-
-  const refreshAll = async () => {
-    setRefreshing(true)
-    try {
-      const resp = await api('/v1/node/relay/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      setResult({ success: `Discovered ${resp.models_discovered || 0} new model(s)` })
-      fetchRelays()
-    } catch (e) {
-      setResult({ error: e.message })
-    }
-    setRefreshing(false)
-    setTimeout(() => setResult(null), 4000)
-  }
-
-  return (
-    <div className="border border-white/10 bg-[#111] rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-2">
-          <MonitorSmartphone size={16} className="text-relay" />
-          <h3 className="text-white font-medium text-sm">Relay Backends</h3>
-          <span className="text-xs text-gray-600">External devices serving models via OpenAI-compatible API</span>
-        </div>
-        {relays.length > 0 && (
-          <button onClick={refreshAll} disabled={refreshing}
-            className="flex items-center space-x-1 text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-40">
-            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
-            <span>Refresh</span>
-          </button>
-        )}
-      </div>
-
-      {/* Existing relays */}
-      {relays.length > 0 && (
-        <div className="space-y-2 mb-4">
-          {relays.map(r => (
-            <div key={r.url} className="bg-black/40 border border-white/5 rounded-lg px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${r.online ? 'bg-spore' : 'bg-compute'}`} />
-                  <span className="font-mono text-sm text-white font-medium">{r.name}</span>
-                  <span className="text-xs text-gray-600 font-mono">{r.url}</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <span className="text-xs text-gray-500">
-                    {r.online ? `${r.model_count} model${r.model_count !== 1 ? 's' : ''}` : r.error || 'offline'}
-                  </span>
-                  <button onClick={() => removeRelay(r.url)} className="text-gray-600 hover:text-compute transition-colors">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-              {r.online && r.models?.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {r.models.map(m => (
-                    <span key={m} className="text-xs font-mono bg-spore/5 text-spore border border-spore/10 rounded px-2 py-0.5">
-                      relay:{m}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Add relay */}
-      <div className="flex items-end gap-2">
-        <div className="flex-[2]">
-          <label className="text-xs text-gray-500 block mb-1">Endpoint URL</label>
-          <input value={newUrl} onChange={e => setNewUrl(e.target.value)}
-            placeholder="http://ipad.lan:8080"
-            onKeyDown={e => e.key === 'Enter' && addRelay()}
-            className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-        </div>
-        <div className="flex-1">
-          <label className="text-xs text-gray-500 block mb-1">Label <span className="text-gray-700">(optional)</span></label>
-          <input value={newName} onChange={e => setNewName(e.target.value)}
-            placeholder="iPad Pro"
-            onKeyDown={e => e.key === 'Enter' && addRelay()}
-            className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-spore/50 focus:outline-none" />
-        </div>
-        <button onClick={addRelay} disabled={adding || !newUrl.trim()}
-          className="bg-white/10 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-white/20 disabled:opacity-40 whitespace-nowrap flex items-center space-x-1.5">
-          {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-          <span>{adding ? 'Connecting...' : 'Add Relay'}</span>
-        </button>
-      </div>
-
-      <p className="text-xs text-gray-600 mt-3">
-        Connect iPads, phones, Ollama instances, or any device with an OpenAI-compatible API.
-        Models are auto-discovered and announced to the network.
-        <a href="/docs/integrations/relay/" target="_blank" rel="noopener" className="text-gray-500 hover:text-spore ml-1">Docs →</a>
-      </p>
-
-      {result && (
-        <div className={`flex items-center space-x-2 text-sm p-2 rounded-lg mt-2 ${result.error ? 'bg-compute/10 text-compute' : 'bg-spore/10 text-spore'}`}>
-          {result.error ? <AlertCircle size={14} /> : <Check size={14} />}
-          <span>{result.error || result.success}</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-
 function SettingsTab() {
   const [config, setConfig] = useState(null)
   const [secrets, setSecrets] = useState([])
@@ -3597,9 +3598,6 @@ function SettingsTab() {
           {config?.telemetry && ' — stats included in bootstrap announce every 60s'}
         </p>
       </div>
-
-      {/* Relay Backends */}
-      <RelaySection />
 
       {/* Integration Links */}
       <div className="border border-white/10 bg-[#111] rounded-xl p-5">

@@ -43,6 +43,12 @@ mycellm serve --relay http://ipad.lan:8080 --relay http://ollama.lan:11434
 MYCELLM_RELAY_BACKENDS=http://ipad.lan:8080,http://ollama.lan:11434
 ```
 
+### Via dashboard
+
+Open the dashboard → **Models** tab → **Relay Device** tab → paste the device URL and click **Add Relay**.
+
+Connected relays show online/offline status and their discovered models.
+
 ### Via API
 
 ```bash
