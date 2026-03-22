@@ -1,0 +1,63 @@
+# mycellm public bootstrap node — no models, just network coordination.
+#
+# Runs on docker-box (96.126.98.204) behind Caddy:
+#   api.mycellm.dev       → localhost:8420 (HTTP API + dashboard)
+#   bootstrap.mycellm.dev → :8421/UDP     (QUIC peer bootstrap)
+#
+# Usage:
+#   docker compose -f docker/docker-compose.prod.yml up -d --build
+#
+# First run auto-creates identity + public network via entrypoint.sh.
+# Set MYCELLM_API_KEY in .env to secure the admin dashboard.
+
+services:
+  mycellm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8420:8420"    # API + dashboard (behind Caddy)
+      - "8421:8421/udp"          # QUIC bootstrap (direct, no proxy)
+    env_file:
+      - .env.prod
+    environment:
+      MYCELLM_NETWORK_NAME: mycellm-public
+      MYCELLM_PUBLIC: "true"
+      MYCELLM_API_HOST: "0.0.0.0"
+      MYCELLM_EXTERNAL_HOST: "96.126.98.204"
+      MYCELLM_DB_URL: postgresql+asyncpg://mycellm:mycellm@postgres:5432/mycellm
+      MYCELLM_TELEMETRY: "true"
+      MYCELLM_LOG_LEVEL: INFO
+      MYCELLM_NO_LOG_INFERENCE: "true"
+    volumes:
+      - mycellm-data:/data/mycellm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8420/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mycellm
+      POSTGRES_USER: mycellm
+      POSTGRES_PASSWORD: mycellm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mycellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 128m
+
+volumes:
+  mycellm-data:
+  pgdata:
