@@ -21,11 +21,12 @@ WORKDIR /app
 # Install Python deps — wheels only, no compilation
 COPY pyproject.toml README.md ./
 COPY src/ src/
-RUN pip install --no-cache-dir --only-binary :all: \
+RUN pip install --no-cache-dir hatchling && \
+    pip install --no-cache-dir --only-binary :all: \
     cryptography aioquic cbor2 fastapi uvicorn sse-starlette \
     asyncpg sqlalchemy aiosqlite typer rich pydantic pydantic-settings \
-    pyyaml httpx prometheus-client 2>/dev/null; \
-    pip install --no-cache-dir --no-build-isolation -e .
+    pyyaml httpx prometheus-client && \
+    pip install --no-cache-dir -e .
 
 # Copy built web dashboard (overwrites placeholder in src/mycellm/web/)
 COPY --from=web-builder /build/src/mycellm/web/ src/mycellm/web/
