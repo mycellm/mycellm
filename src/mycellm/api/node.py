@@ -76,6 +76,8 @@ async def debug_config(request: Request):
         "admission_require_receipts": node._settings.admission_require_receipts,
         "admission_grace_requests": node._settings.admission_grace_requests,
         "telemetry": node._settings.telemetry,
+        "max_public_requests_per_hour": node._settings.max_public_requests_per_hour,
+        "relay_backends": node._settings.relay_backends,
         "announce_task_alive": node._announce_task is not None and not node._announce_task.done() if hasattr(node, '_announce_task') else False,
     }
 
@@ -389,6 +391,44 @@ async def reload_model(request: Request):
         return {"status": "loaded", "model": model_name}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.post("/models/scope")
+async def set_model_scope(request: Request):
+    """Set a model's network scope.
+
+    Scope controls who can use this model:
+      - "home": local only (not shared with network)
+      - "public": shared with all connected networks
+
+    Example: {"model": "Qwen2.5-3B", "scope": "public"}
+    """
+    node = request.app.state.node
+    body = await request.json()
+    model_name = body.get("model", "")
+    scope = body.get("scope", "")
+    if not model_name or scope not in ("home", "public"):
+        return {"error": "model and scope (home|public) required"}
+
+    info = node.inference._model_info.get(model_name)
+    if not info:
+        return {"error": f"Model '{model_name}' not loaded"}
+
+    info.scope = scope
+    node.capabilities.models = node.inference.loaded_models
+    await node.announce_capabilities()
+
+    # Persist scope in saved config
+    if model_name in node.inference._saved_configs:
+        node.inference._saved_configs[model_name]["scope"] = scope
+        try:
+            from mycellm.config import get_settings
+            await node.inference.save_model_configs(get_settings().data_dir)
+        except Exception:
+            pass
+
+    node.activity.record(EventType.MODEL_LOADED, model=model_name, backend=f"scope:{scope}")
+    return {"status": "ok", "model": model_name, "scope": scope}
 
 
 @router.post("/models/remove-config")

@@ -1802,7 +1802,25 @@ function ModelTable({ allModels, stateIndicator, stateNameColor, stateBadge, doA
               <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.backend}</td>
               <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell font-mono">{m.quant || '-'}</td>
               <td className="py-2.5 px-4 text-gray-500 hidden md:table-cell">{m.size || '-'}</td>
-              <td className="py-2.5 px-4 hidden lg:table-cell">{stateBadge[m.state]}</td>
+              <td className="py-2.5 px-4 hidden lg:table-cell">
+                <div className="flex items-center space-x-2">
+                  {stateBadge[m.state]}
+                  {m.state === 'active' && (
+                    <button onClick={async () => {
+                      const next = m.scope === 'public' ? 'home' : 'public'
+                      await doApi('/v1/node/models/scope', { model: m.name, scope: next })
+                      refreshAll()
+                    }}
+                      className={`text-xs px-1.5 py-0.5 rounded border transition-colors ${
+                        m.scope === 'public'
+                          ? 'border-spore/30 text-spore bg-spore/5 hover:bg-spore/10'
+                          : 'border-white/10 text-gray-600 hover:text-gray-400'
+                      }`}
+                      title={m.scope === 'public' ? 'Shared with network — click to make private' : 'Private — click to share with network'}
+                    >{m.scope === 'public' ? '● public' : '○ private'}</button>
+                  )}
+                </div>
+              </td>
               <td className="py-2.5 px-4 text-right space-x-2 whitespace-nowrap">
                 {m.state === 'active' && (
                   <>
@@ -2335,6 +2353,7 @@ function ModelsTab({ status, onRefresh }) {
             size: onDisk ? `${onDisk.size_gb}GB` : m.param_count_b ? `~${(m.param_count_b * 0.5).toFixed(1)}GB` : '',
             hasFile: !!onDisk, filename: onDisk?.filename, filePath: onDisk?.path,
             features: m.features || m.tags || [],
+            scope: m.scope || 'home',
           })
         }
 

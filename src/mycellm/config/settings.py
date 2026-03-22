@@ -139,6 +139,9 @@ class MycellmSettings(BaseSettings):
     # When true, prompt/response content is never written to disk or logs
     no_log_inference: bool = True
 
+    # Fleet throttle — max public requests this node will serve per hour (0 = unlimited)
+    max_public_requests_per_hour: int = 0
+
     # Quality floor
     min_model_tier: str = ""  # Minimum model tier for this network
 
