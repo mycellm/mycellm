@@ -2422,10 +2422,10 @@ function ModelsTab({ status, onRefresh }) {
       <div className="border border-white/10 bg-[#111] rounded-xl overflow-hidden">
         <div className="flex border-b border-white/10">
           {[
-            { id: 'browse', label: 'Browse HuggingFace', icon: '\u{1F917}' },
+            { id: 'browse', label: 'HuggingFace', icon: '\u{1F917}' },
             { id: 'local', label: 'Local File', icon: '\u{1F4C1}' },
-            { id: 'api', label: 'Remote API', icon: '\u{1F517}' },
-            { id: 'relay', label: 'Relay Device', icon: '\u{1F4F1}' },
+            { id: 'api', label: 'API Provider', icon: '\u{1F517}' },
+            { id: 'relay', label: 'Device Relay', icon: '\u{1F4F1}' },
           ].map(tab => (
             <button key={tab.id} onClick={() => setAddMode(tab.id)}
               className={`flex items-center space-x-2 px-4 py-3 text-xs font-medium border-b-2 transition-all ${
@@ -2613,7 +2613,7 @@ function ModelsTab({ status, onRefresh }) {
 
           {addMode === 'local' && (
             <div className="space-y-3">
-              <p className="text-xs text-gray-500">Load a GGUF model file from the local filesystem.</p>
+              <p className="text-xs text-gray-500">Load a GGUF model already on this machine's disk.</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="md:col-span-2">
                   <label className="text-xs text-gray-500 block mb-1">Model path (.gguf)</label>
@@ -2637,7 +2637,7 @@ function ModelsTab({ status, onRefresh }) {
 
           {addMode === 'api' && (
             <div className="space-y-3">
-              <p className="text-xs text-gray-500">Connect to an OpenAI-compatible API endpoint (OpenRouter, Ollama, vLLM, etc.)</p>
+              <p className="text-xs text-gray-500">Connect to a cloud or self-hosted API. You choose the model and provide credentials. <span className="text-gray-600">OpenRouter, Together, Groq, vLLM...</span></p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Model name</label>
@@ -2781,8 +2781,8 @@ function RelayPanel({ nodeApi, onRefresh }) {
   return (
     <div className="space-y-4">
       <p className="text-xs text-gray-500">
-        Connect a device running an OpenAI-compatible API (iPad, phone, Ollama, LM Studio, etc.).
-        Models are auto-discovered and announced to the network.
+        Connect to a device on your network. Models are auto-discovered — no credentials needed.
+        <span className="text-gray-600"> Ollama, LM Studio, iPad, llama.cpp server...</span>
       </p>
 
       {/* Existing relays */}
