@@ -2805,39 +2805,62 @@ function ChatTab() {
     const controller = new AbortController()
     abortRef.current = controller
 
-    try {
-      const resp = await api('/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model === 'auto' ? '' : model,
-          messages: history.map(m => ({ role: m.role, content: m.content })),
-          max_tokens: 2048,
-          ...(model === 'auto' && (routingOpts.min_tier || routingOpts.required_tags.length > 0) ? {
-            mycellm: {
-              min_tier: routingOpts.min_tier || undefined,
-              required_tags: routingOpts.required_tags.length > 0 ? routingOpts.required_tags : undefined,
-              routing: routingOpts.routing,
-              fallback: routingOpts.fallback,
-            }
-          } : {}),
-        }),
-        signal: controller.signal,
-      })
-      const respText = resp.choices?.[0]?.message?.content || '[no response]'
-      const usage = resp.usage || {}
-      const routedTo = resp.model || 'unknown'
-      setMessages(prev => [...prev, {
-        role: 'assistant', content: respText, model: routedTo,
-        tokens: `${usage.prompt_tokens || 0}+${usage.completion_tokens || 0}`,
-      }])
-    } catch (e) {
-      if (e.name !== 'AbortError') {
+    const MAX_RETRIES = 5
+    const RETRY_DELAYS = [2, 4, 8, 15, 30]
+    const reqBody = JSON.stringify({
+      model: model === 'auto' ? '' : model,
+      messages: history.map(m => ({ role: m.role, content: m.content })),
+      max_tokens: 2048,
+      ...(model === 'auto' && (routingOpts.min_tier || routingOpts.required_tags.length > 0) ? {
+        mycellm: {
+          min_tier: routingOpts.min_tier || undefined,
+          required_tags: routingOpts.required_tags.length > 0 ? routingOpts.required_tags : undefined,
+          routing: routingOpts.routing,
+          fallback: routingOpts.fallback,
+        }
+      } : {}),
+    })
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const resp = await api('/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: reqBody,
+          signal: controller.signal,
+        })
+        const respText = resp.choices?.[0]?.message?.content || '[no response]'
+        const usage = resp.usage || {}
+        const routedTo = resp.model || 'unknown'
+        setMessages(prev => [...prev, {
+          role: 'assistant', content: respText, model: routedTo,
+          tokens: `${usage.prompt_tokens || 0}+${usage.completion_tokens || 0}`,
+        }])
+        break // success
+      } catch (e) {
+        if (e.name === 'AbortError') break
+
+        // Auto-retry on 429/503
+        const retryable = e.status === 429 || e.status === 503
+        if (retryable && attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)]
+          setMessages(prev => [...prev.filter(m => !m._retryIndicator), {
+            role: 'assistant', _retryIndicator: true,
+            content: `⏳ Models busy — retrying in ${delay}s (attempt ${attempt + 1}/${MAX_RETRIES})...`,
+            isCommand: true,
+          }])
+          await new Promise(r => setTimeout(r, delay * 1000))
+          // Remove retry indicator before next attempt
+          setMessages(prev => prev.filter(m => !m._retryIndicator))
+          continue
+        }
+
+        // Final failure
         let errContent
         if (e.status === 429) {
-          errContent = '⚠️ **Rate limit reached.** Please wait a moment and try again.'
+          errContent = '⚠️ **Rate limit reached.** Retries exhausted — please try again later.'
         } else if (e.status === 503) {
-          errContent = '⚠️ **All models are busy right now.** Your request was queued but timed out. Please try again in a moment.'
+          errContent = '⚠️ **All models are busy.** Retries exhausted — please try again shortly.'
         } else if (e.message?.includes('fetch') || e.message?.includes('Failed')) {
           errContent = '⚠️ **Cannot reach the node.** Check that `mycellm serve` is running.'
         } else {
@@ -2846,6 +2869,7 @@ function ChatTab() {
         setMessages(prev => [...prev, {
           role: 'assistant', content: errContent, isError: true, retryText: text,
         }])
+        break
       }
     }
     abortRef.current = null

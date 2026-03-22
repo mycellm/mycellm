@@ -69,6 +69,9 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
       return { contentEl: d.querySelector('.msg-content'), attrEl: d.querySelector('.msg-attr') };
     }
 
+    const MAX_RETRIES = 5;
+    const RETRY_DELAYS = [2, 4, 8, 15, 30]; // seconds, exponential backoff
+
     function showError(contentEl, attrEl, message, retryText) {
       contentEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" style="flex-shrink:0;"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
@@ -77,6 +80,23 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
       if (retryText && attrEl) {
         attrEl.innerHTML = `<button onclick="document.getElementById('chatInput').value='${escHtml(retryText).replace(/'/g,"\\'")}';this.closest('[style]').remove();messages.pop();messages.pop();sendMessage()" style="background:none;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:2px 10px;cursor:pointer;color:#737373;font-size:10px;font-family:JetBrains Mono,monospace;-webkit-appearance:none;">Retry</button>`;
       }
+    }
+
+    function showRetryStatus(contentEl, attempt, delay) {
+      contentEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;color:#737373;font-size:12px;">
+        <span class="typing-dot" style="width:6px;height:6px;border-radius:50%;background:#EAB308;"></span>
+        <span>Models busy — retrying in <span id="retryCountdown">${delay}</span>s (attempt ${attempt}/${MAX_RETRIES})</span>
+      </div>`;
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function tryFetch(msgPayload) {
+      return fetch(`${API_BASE}/v1/public/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(msgPayload),
+      });
     }
 
     async function sendMessage() {
@@ -88,21 +108,63 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
       const {contentEl, attrEl} = addMsg('assistant', '');
       isStreaming = true;
       const startTime = Date.now();
-      try {
-        const resp = await fetch(`${API_BASE}/v1/public/chat/completions`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({messages:messages.slice(0,-1).map(m=>({role:m.role,content:m.content})),stream:true}) });
-        if (!resp.ok) {
-          const e = await resp.json().catch(()=>({}));
-          const msg = e.error?.message || `Error: ${resp.status}`;
-          if (resp.status === 429) {
-            showError(contentEl, attrEl, 'Rate limit reached — please wait a moment and try again.', text);
-          } else if (resp.status === 503) {
-            showError(contentEl, attrEl, 'All models are busy right now. Your request will be served shortly — please try again.', text);
+      const msgPayload = { messages: messages.slice(0,-1).map(m=>({role:m.role,content:m.content})), stream: true };
+
+      let resp, attempt = 0;
+      while (attempt <= MAX_RETRIES) {
+        try {
+          resp = await tryFetch(msgPayload);
+
+          // Retryable errors: 429 (rate limit) and 503 (busy)
+          if ((resp.status === 429 || resp.status === 503) && attempt < MAX_RETRIES) {
+            attempt++;
+            const delay = RETRY_DELAYS[Math.min(attempt - 1, RETRY_DELAYS.length - 1)];
+            showRetryStatus(contentEl, attempt, delay);
+            // Countdown timer
+            for (let s = delay; s > 0; s--) {
+              const el = document.getElementById('retryCountdown');
+              if (el) el.textContent = s;
+              await sleep(1000);
+            }
+            continue;
+          }
+
+          if (!resp.ok) {
+            const e = await resp.json().catch(()=>({}));
+            const msg = e.error?.message || `Error: ${resp.status}`;
+            if (resp.status === 429) {
+              showError(contentEl, attrEl, 'Rate limit reached — please try again later.', text);
+            } else if (resp.status === 503) {
+              showError(contentEl, attrEl, 'All models are busy. Retries exhausted — please try again shortly.', text);
+            } else {
+              showError(contentEl, attrEl, msg, text);
+            }
+            isStreaming = false; return;
+          }
+          break; // success — proceed to streaming
+        } catch(e) {
+          if (attempt < MAX_RETRIES && !(e.name === 'TypeError' && e.message.includes('fetch'))) {
+            attempt++;
+            const delay = RETRY_DELAYS[Math.min(attempt - 1, RETRY_DELAYS.length - 1)];
+            showRetryStatus(contentEl, attempt, delay);
+            for (let s = delay; s > 0; s--) {
+              const el = document.getElementById('retryCountdown');
+              if (el) el.textContent = s;
+              await sleep(1000);
+            }
+            continue;
+          }
+          if (e.name === 'TypeError' && e.message.includes('fetch')) {
+            showError(contentEl, attrEl, 'Cannot reach the network. Check your connection.', text);
           } else {
-            showError(contentEl, attrEl, msg, text);
+            showError(contentEl, attrEl, 'Connection lost. Please try again.', text);
           }
           isStreaming = false; return;
         }
-        // Show "queued" indicator while waiting for first token
+      }
+
+      // Stream the response
+      try {
         contentEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;color:#737373;font-size:12px;"><span class="typing-dot" style="width:6px;height:6px;border-radius:50%;background:#22C55E;"></span><span class="typing-dot" style="width:6px;height:6px;border-radius:50%;background:#22C55E;"></span><span class="typing-dot" style="width:6px;height:6px;border-radius:50%;background:#22C55E;"></span></span>';
         let fullText='',model='',nodeId='',sLat=0,gotFirstToken=false;
         const reader=resp.body.getReader(), dec=new TextDecoder(); let buf='';
@@ -118,11 +180,7 @@ import ParticleCanvas from '../components/ParticleCanvas.astro';
           if(attrEl) attrEl.innerHTML=`<span style="color:#525252;">${model}</span> via node ${nodeId||'local'} · ${sLat||(Date.now()-startTime)}ms`;
         }
       } catch(e) {
-        if (e.name === 'TypeError' && e.message.includes('fetch')) {
-          showError(contentEl, attrEl, 'Cannot reach the network. Check your connection.', text);
-        } else {
-          showError(contentEl, attrEl, 'Connection lost. Please try again.', text);
-        }
+        showError(contentEl, attrEl, 'Connection lost during response. Please try again.', text);
       }
       isStreaming = false;
     }
