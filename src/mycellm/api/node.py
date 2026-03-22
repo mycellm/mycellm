@@ -285,7 +285,7 @@ async def model_load_status(request: Request):
     node = request.app.state.node
     statuses = []
     for name, s in node.inference._load_status.items():
-        entry = {**s}
+        entry = {k: v for k, v in s.items() if not k.startswith("_")}
         if s.get("status") == "loading":
             entry["elapsed"] = round(time.time() - s.get("started_at", 0), 1)
         statuses.append(entry)

@@ -30,26 +30,32 @@ class LlamaCppBackend(InferenceBackend):
     async def load_model(self, model_path: str, **kwargs) -> None:
         """Load a GGUF model (runs in thread to avoid blocking)."""
         from llama_cpp import Llama
+        import inspect
 
         model_name = kwargs.get("name", model_path.split("/")[-1])
         n_ctx = kwargs.get("n_ctx", 4096)
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)  # -1 = auto
         progress_callback = kwargs.get("progress_callback")
 
-        # Bridge llama.cpp's progress_callback (called from C thread) to our tracker
-        def _on_progress(progress: float) -> bool:
-            if progress_callback:
-                progress_callback(progress)
-            return True  # return True to continue loading
-
         logger.info(f"Loading model {model_name} from {model_path}")
+
+        # Use progress_callback if the installed llama-cpp-python supports it
+        extra_kwargs = {}
+        if progress_callback:
+            llama_params = inspect.signature(Llama.__init__).parameters
+            if "progress_callback" in llama_params:
+                def _on_progress(progress: float) -> bool:
+                    progress_callback(progress)
+                    return True
+                extra_kwargs["progress_callback"] = _on_progress
+
         llm = await asyncio.to_thread(
             Llama,
             model_path=model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             verbose=False,
-            progress_callback=_on_progress,
+            **extra_kwargs,
         )
         self._models[model_name] = llm
         logger.info(f"Model {model_name} loaded")

@@ -18,6 +18,23 @@ from mycellm.protocol.capabilities import ModelCapability
 logger = logging.getLogger("mycellm.inference")
 
 
+def _get_rss_bytes() -> int:
+    """Get current process RSS in bytes. Cross-platform."""
+    try:
+        import os
+        import platform
+        if platform.system() == "Linux":
+            with open(f"/proc/{os.getpid()}/statm") as f:
+                return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+        elif platform.system() == "Darwin":
+            import resource
+            # ru_maxrss is in bytes on macOS
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        pass
+    return 0
+
+
 class InferenceManager:
     """Manages loaded models, concurrency limits, and backend routing.
 
@@ -129,9 +146,15 @@ class InferenceManager:
                         self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
                         self._load_status[model_name]["size_gb"] = round(size_gb, 2)
 
-                # Progress callback — updates load status with % and ETA
+                # Progress tracking — uses llama.cpp callback if available,
+                # falls back to RSS-based estimation for older versions
                 load_start = _time.time()
+                file_bytes = Path(model_path).stat().st_size if Path(model_path).exists() else 0
+                _has_native_progress = False
+
                 def _progress_cb(progress: float):
+                    nonlocal _has_native_progress
+                    _has_native_progress = True
                     self._load_status[model_name]["progress"] = round(progress, 3)
                     elapsed = _time.time() - load_start
                     if progress > 0.01:
@@ -142,11 +165,45 @@ class InferenceManager:
                     self._load_status[model_name]["phase"] = f"loading {sz:.1f}GB — {pct}%"
 
                 kwargs["progress_callback"] = _progress_cb
+
+                # RSS-based progress monitor (fallback when native callback not available)
+                self._load_status[model_name]["_monitor"] = True
+                async def _rss_progress_monitor():
+                    try:
+                        rss_start = _get_rss_bytes()
+                        if rss_start <= 0 or file_bytes <= 0:
+                            return
+                        while self._load_status.get(model_name, {}).get("_monitor") and not _has_native_progress:
+                            await asyncio.sleep(1.0)
+                            if _has_native_progress:
+                                break
+                            rss_now = _get_rss_bytes()
+                            rss_delta = max(0, rss_now - rss_start)
+                            progress = min(0.99, rss_delta / file_bytes)
+                            self._load_status[model_name]["progress"] = round(progress, 3)
+                            elapsed = _time.time() - load_start
+                            if progress > 0.02:
+                                eta = (elapsed / progress) * (1.0 - progress)
+                                self._load_status[model_name]["eta_seconds"] = round(eta, 1)
+                            pct = int(progress * 100)
+                            sz = self._load_status[model_name].get("size_gb", 0)
+                            self._load_status[model_name]["phase"] = f"loading {sz:.1f}GB — {pct}%"
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+                rss_task = asyncio.ensure_future(_rss_progress_monitor())
             else:
                 self._load_status[model_name]["phase"] = "connecting to API"
 
             await backend.load_model(model_path, name=model_name, **kwargs)
 
+            # Stop RSS monitor if it was running
+            if backend_type == "llama.cpp":
+                self._load_status[model_name]["_monitor"] = False
+                rss_task.cancel()
+
+            self._load_status[model_name]["progress"] = 1.0
+            self._load_status[model_name]["eta_seconds"] = 0
             self._load_status[model_name]["phase"] = "registering"
             if model_path:
                 self._model_paths[model_name] = model_path
@@ -179,6 +236,13 @@ class InferenceManager:
             return model_name
 
         except Exception as e:
+            # Clean up RSS monitor on failure
+            if model_name in self._load_status:
+                self._load_status[model_name]["_monitor"] = False
+            try:
+                rss_task.cancel()
+            except (NameError, Exception):
+                pass
             self._load_status[model_name].update({"status": "failed", "phase": "error", "error": str(e)})
             logger.error(f"Failed to load {model_name}: {e}")
             raise
