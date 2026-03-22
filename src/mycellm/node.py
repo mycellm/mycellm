@@ -905,9 +905,10 @@ class MycellmNode:
         if self.enable_dht:
             await self._start_dht()
 
-        # Connect to bootstrap peers via PeerManager
-        peers = self._settings.get_bootstrap_list()
-        await self.peer_manager.start(peers)
+        # Connect to bootstrap peers via PeerManager (QUIC on port 8421)
+        raw_peers = self._settings.get_bootstrap_list()
+        quic_peers = [(h, 8421 if p == 8420 else p) for h, p in raw_peers]
+        await self.peer_manager.start(quic_peers)
 
         # Announce to bootstrap nodes via HTTP
         self._announce_task = asyncio.create_task(self._announce_to_bootstrap())

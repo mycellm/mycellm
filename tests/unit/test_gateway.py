@@ -77,11 +77,17 @@ def test_rate_limit_per_ip():
 
 # --- Model selection ---
 
+class _FakeRegistry:
+    def connected_peers(self):
+        return []
+
 def test_select_tier1_model():
     from mycellm.api.gateway import _select_tier1_model
 
     class FakeNode:
         node_registry = {}
+        registry = _FakeRegistry()
+        registry = _FakeRegistry()
         class inference:
             loaded_models = [
                 ModelCapability(name="llama-70b", param_count_b=70.0),
@@ -98,6 +104,7 @@ def test_select_tier1_no_models():
 
     class FakeNode:
         node_registry = {}
+        registry = _FakeRegistry()
         class inference:
             loaded_models = []
     name, addr = _select_tier1_model(FakeNode())
@@ -109,6 +116,7 @@ def test_select_tier1_fallback_unknown_params():
 
     class FakeNode:
         node_registry = {}
+        registry = _FakeRegistry()
         class inference:
             loaded_models = [
                 ModelCapability(name="mystery-model", param_count_b=0),
@@ -122,6 +130,7 @@ def test_select_tier1_from_fleet():
     from mycellm.api.gateway import _select_tier1_model
 
     class FakeNode:
+        registry = _FakeRegistry()
         node_registry = {
             "peer1": {
                 "status": "approved",
