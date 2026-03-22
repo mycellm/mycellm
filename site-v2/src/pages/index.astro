@@ -6,14 +6,14 @@ import Page from '../layouts/Page.astro';
   <!-- Hero -->
   <div class="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 py-10 sm:py-16">
     <div class="w-full max-w-xl text-center space-y-6">
-      <div class="flex justify-center mb-4">
+      <div class="flex justify-center mb-4 anim">
         <div class="relative w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28">
           <img id="heroShroom" src="/brand/logo-icon/svg/mycellm-red-logo-sans.svg" alt=""
                class="w-full h-full transition-all duration-700">
         </div>
       </div>
 
-      <div>
+      <div class="anim anim-d1">
         <h1 class="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white leading-tight">
           Free AI, <span class="text-spore-glow text-glow">powered by the crowd</span>
         </h1>
@@ -22,7 +22,7 @@ import Page from '../layouts/Page.astro';
         </p>
       </div>
 
-      <div class="relative flex items-stretch">
+      <div class="relative flex items-stretch anim anim-d2">
         <textarea id="heroInput" rows="2" placeholder="Ask anything..."
           class="w-full glass-green rounded-2xl rounded-r-none px-4 sm:px-5 py-3.5 sm:py-4 text-white text-base sm:text-lg resize-none transition-all focus:outline-none focus:border-spore/40 focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08)]"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sessionStorage.setItem('mycellm_initial_prompt',this.value);location.href='/chat'}"></textarea>
@@ -32,24 +32,24 @@ import Page from '../layouts/Page.astro';
         </button>
       </div>
 
-      <p class="text-[10px] sm:text-[11px] text-gray-600 flex items-center justify-center space-x-1 text-balance">
+      <p class="text-[10px] sm:text-[11px] text-gray-600 flex items-center justify-center space-x-1 text-balance anim anim-d3">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-600 shrink-0"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
         <span>Prompts are processed by distributed GPU nodes. Don't share passwords or API keys.</span>
       </p>
 
-      <div id="promptChips" class="flex flex-wrap justify-center gap-2 pt-1"></div>
+      <div id="promptChips" class="flex flex-wrap justify-center gap-2 pt-1 anim anim-d4"></div>
     </div>
   </div>
 
   <!-- Why distributed -->
   <section class="border-t border-white/5 bg-[#050505]">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-      <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-10">
+      <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-10 anim">
         Why <span class="text-compute">distributed</span> inference?
       </h2>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        <div class="glass rounded-xl p-5 space-y-2">
+        <div class="glass rounded-xl p-5 space-y-2 anim anim-d1">
           <div class="flex items-center space-x-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-spore shrink-0"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             <span class="text-spore font-semibold">No single point of failure</span>
@@ -58,7 +58,7 @@ import Page from '../layouts/Page.astro';
             Models run across multiple peers. If one node goes down, requests route to another automatically.
           </p>
         </div>
-        <div class="glass rounded-xl p-5 space-y-2">
+        <div class="glass rounded-xl p-5 space-y-2 anim anim-d2">
           <div class="flex items-center space-x-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-relay shrink-0"><circle cx="12" cy="12" r="10"/><path d="M16 8l-4 4-4-4"/><path d="M12 12v6"/></svg>
             <span class="text-relay font-semibold">Your GPU, your credits</span>
@@ -67,7 +67,7 @@ import Page from '../layouts/Page.astro';
             Contribute idle compute and earn credits. Spend them to run larger models. A fair exchange.
           </p>
         </div>
-        <div class="glass rounded-xl p-5 space-y-2">
+        <div class="glass rounded-xl p-5 space-y-2 anim anim-d3">
           <div class="flex items-center space-x-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-ledger shrink-0"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
             <span class="text-ledger font-semibold">No vendor lock-in</span>
@@ -76,7 +76,7 @@ import Page from '../layouts/Page.astro';
             OpenAI-compatible API. Switch providers with one env var. Your tools, your choice.
           </p>
         </div>
-        <div class="glass rounded-xl p-5 space-y-2">
+        <div class="glass rounded-xl p-5 space-y-2 anim anim-d4">
           <div class="flex items-center space-x-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-300 shrink-0"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
             <span class="text-gray-200 font-semibold">Private networks</span>
@@ -85,7 +85,7 @@ import Page from '../layouts/Page.astro';
             Run your own swarm for your team. Full control over membership, models, and data. Invite-only.
           </p>
         </div>
-        <div class="glass rounded-xl p-5 space-y-2">
+        <div class="glass rounded-xl p-5 space-y-2 anim anim-d5">
           <div class="flex items-center space-x-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-compute shrink-0"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
             <span class="text-compute font-semibold">Open source</span>
@@ -94,7 +94,7 @@ import Page from '../layouts/Page.astro';
             Apache 2.0 licensed. Audit the code, fork it, extend it. No black boxes.
           </p>
         </div>
-        <div class="glass rounded-xl p-5 space-y-2">
+        <div class="glass rounded-xl p-5 space-y-2 anim anim-d6">
           <div class="flex items-center space-x-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-spore-glow shrink-0"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
             <span class="text-spore-glow font-semibold">Scales with community</span>
@@ -110,7 +110,7 @@ import Page from '../layouts/Page.astro';
   <!-- Quick start -->
   <section class="border-t border-white/5">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-      <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-2">Get started in 60 seconds</h2>
+      <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-2 anim">Get started in 60 seconds</h2>
       <p class="text-gray-500 text-center text-sm mb-8">pip, Docker, or one-liner — your choice.</p>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -162,7 +162,7 @@ import Page from '../layouts/Page.astro';
   <!-- OpenAI compatible -->
   <section class="border-t border-white/5 bg-[#050505]">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-      <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-2">Drop-in OpenAI replacement</h2>
+      <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-2 anim">Drop-in OpenAI replacement</h2>
       <p class="text-gray-500 text-center text-sm mb-8">Change one env var. Everything else stays the same.</p>
 
       <div class="max-w-lg mx-auto glass rounded-xl p-5 font-mono text-sm space-y-2">
