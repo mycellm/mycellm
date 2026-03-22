@@ -157,6 +157,9 @@ class MycellmNode:
         # Encrypted secret store (initialized after identity load)
         self.secret_store = None
 
+        # Relay manager — auto-discovers models from external OpenAI-compatible APIs
+        self.relay_manager = None
+
         # API server ref for shutdown
         self._api_server = None
 
@@ -895,6 +898,25 @@ class MycellmNode:
             set_node_info(self.peer_id, self._settings.node_name, "0.1.0")
         except ImportError:
             pass
+
+        # Initialize relay manager and connect configured relays
+        from mycellm.inference.relay import RelayManager, parse_relay_backends
+        self.relay_manager = RelayManager(self.inference)
+        relay_urls = parse_relay_backends(self._settings.relay_backends)
+        if relay_urls:
+            for url in relay_urls:
+                try:
+                    relay = await self.relay_manager.add(url)
+                    if relay.online:
+                        logger.info(f"{styled_tag('RELAY')} Connected: {relay.name} ({len(relay.models)} models)")
+                    else:
+                        logger.warning(f"{styled_tag('RELAY')} Offline: {url} — {relay.error}")
+                except Exception as e:
+                    logger.warning(f"{styled_tag('RELAY')} Failed to add {url}: {e}")
+            if self.relay_manager.relays:
+                self.capabilities.models = self.inference.loaded_models
+                await self.announce_capabilities()
+            self.relay_manager.start_polling(interval=60)
 
         logger.info(f"{styled_tag('NODE')} Swarm connected. Awaiting inference tasks.")
 

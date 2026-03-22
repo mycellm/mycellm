@@ -15,6 +15,9 @@ Quick start:
 API usage (OpenAI-compatible):
     OPENAI_BASE_URL=http://localhost:8420/v1 python my_app.py
 
+Relay (use external devices as inference backends):
+    mycellm serve --relay http://ipad.lan:8080   Relay to an iPad/phone/Ollama
+
 Management:
     mycellm account create          Create account identity
     mycellm device create           Create device certificate
@@ -59,6 +62,7 @@ app = typer.Typer(
       MYCELLM_DB_URL          Database URL (default: SQLite)
       MYCELLM_TELEMETRY       Opt-in anonymous usage stats (true/false)
       MYCELLM_LOG_LEVEL       Log verbosity (DEBUG/INFO/WARNING/ERROR)
+      MYCELLM_RELAY_BACKENDS  Relay endpoints (comma-separated OpenAI-compatible URLs)
       MYCELLM_MODEL_DIR       Model download directory
       MYCELLM_DATA_DIR        Data directory (~/.local/share/mycellm)
       MYCELLM_CONFIG_DIR      Config directory (~/.config/mycellm)

@@ -889,6 +889,97 @@ async def public_stats(request: Request):
     }
 
 
+@router.get("/relay")
+async def list_relays(request: Request):
+    """List all relay backends and their status."""
+    node = request.app.state.node
+    if not hasattr(node, "relay_manager") or not node.relay_manager:
+        return {"relays": []}
+    return {"relays": node.relay_manager.get_status()}
+
+
+@router.post("/relay/add")
+async def add_relay(request: Request):
+    """Add a relay backend (OpenAI-compatible API endpoint).
+
+    Discovers models from the endpoint and registers them on the network.
+
+    Example:
+        {"url": "http://ipad.lan:8080", "name": "iPad Pro", "api_key": ""}
+    """
+    node = request.app.state.node
+    if not hasattr(node, "relay_manager") or not node.relay_manager:
+        return {"error": "Relay manager not initialized"}
+
+    body = await request.json()
+    url = body.get("url", "")
+    if not url:
+        return {"error": "url required"}
+
+    api_key = body.get("api_key", "")
+    if api_key and hasattr(node, "secret_store") and node.secret_store:
+        api_key = node.secret_store.resolve(api_key)
+
+    relay = await node.relay_manager.add(
+        url=url,
+        api_key=api_key,
+        name=body.get("name", ""),
+    )
+
+    # Announce new models to the network
+    node.capabilities.models = node.inference.loaded_models
+    await node.announce_capabilities()
+
+    node.activity.record(EventType.MODEL_LOADED, model=f"relay:{relay.name}", backend="relay")
+
+    return {
+        "status": "added",
+        "relay": {
+            "url": relay.url,
+            "name": relay.name,
+            "online": relay.online,
+            "error": relay.error,
+            "models": [m.get("id", m) if isinstance(m, dict) else m for m in relay.models],
+        },
+    }
+
+
+@router.post("/relay/remove")
+async def remove_relay(request: Request):
+    """Remove a relay backend and unload its models."""
+    node = request.app.state.node
+    if not hasattr(node, "relay_manager") or not node.relay_manager:
+        return {"error": "Relay manager not initialized"}
+
+    body = await request.json()
+    url = body.get("url", "")
+    if not url:
+        return {"error": "url required"}
+
+    removed = await node.relay_manager.remove(url)
+    if removed:
+        node.capabilities.models = node.inference.loaded_models
+        await node.announce_capabilities()
+
+    return {"status": "removed" if removed else "not_found", "url": url}
+
+
+@router.post("/relay/refresh")
+async def refresh_relays(request: Request):
+    """Re-discover models from all relay backends."""
+    node = request.app.state.node
+    if not hasattr(node, "relay_manager") or not node.relay_manager:
+        return {"error": "Relay manager not initialized"}
+
+    total = await node.relay_manager.refresh_all()
+
+    if total > 0:
+        node.capabilities.models = node.inference.loaded_models
+        await node.announce_capabilities()
+
+    return {"models_discovered": total, "relays": node.relay_manager.get_status()}
+
+
 @router.get("/activity")
 async def node_activity(request: Request, limit: int = 50, type: str = None):
     """Get recent activity events and rolling stats."""

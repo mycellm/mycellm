@@ -31,6 +31,7 @@ export default defineConfig({
           { label: 'Public Gateway', slug: 'api/gateway' },
         ]},
         { label: 'Integrations', items: [
+          { label: 'Relay Backends', slug: 'integrations/relay' },
           { label: 'OpenAI SDK', slug: 'integrations/openai' },
           { label: 'OpenCode', slug: 'integrations/opencode' },
           { label: 'OpenClaw', slug: 'integrations/openclaw' },

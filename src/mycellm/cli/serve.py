@@ -21,6 +21,7 @@ def serve(
     dht_port: int = typer.Option(8422, "--dht-port", help="DHT discovery port"),
     device: str = typer.Option("default", "--device", "-d", help="Device certificate name"),
     no_dht: bool = typer.Option(False, "--no-dht", help="Disable DHT discovery"),
+    relay: list[str] = typer.Option([], "--relay", "-r", help="Relay backend URL (OpenAI-compatible API endpoint, repeatable)"),
     priority: str = typer.Option("normal", "--priority", help="Process priority: low, normal, high"),
     watchdog: bool = typer.Option(False, "--watchdog", help="Auto-restart on crash"),
     install_service: bool = typer.Option(False, "--install-service", help="Install as system service (launchd/systemd)"),
@@ -48,6 +49,16 @@ def serve(
                 console.print(f"[yellow]Cannot set high priority (needs root). Running at normal.[/yellow]")
             else:
                 os.nice(nice_val)  # low priority should always work
+
+    # Merge --relay CLI args into settings
+    if relay:
+        from mycellm.config import get_settings
+        settings = get_settings()
+        existing = settings.relay_backends
+        merged = set(existing.split(",")) if existing else set()
+        merged.update(relay)
+        merged.discard("")
+        object.__setattr__(settings, "relay_backends", ",".join(merged))
 
     print_banner(console)
 

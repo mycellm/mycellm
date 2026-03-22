@@ -29,6 +29,10 @@ Type `/` followed by a command name:
 | `/credits` | Balance, earned, spent |
 | `/fleet` | Fleet nodes with online status and models |
 | `/config` | Runtime configuration values |
+| `/relay` | List relay backends |
+| `/relay add <url>` | Add a relay (e.g., `/relay add http://ipad:8080`) |
+| `/relay remove <url>` | Remove a relay |
+| `/relay refresh` | Re-discover models from all relays |
 | `/use <model>` | Switch active model mid-conversation |
 | `/clear` | Reset conversation history |
 | `/help` | List all commands |

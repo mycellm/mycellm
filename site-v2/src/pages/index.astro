@@ -113,64 +113,77 @@ import Page from '../layouts/Page.astro';
       <h2 class="text-xl sm:text-2xl font-bold text-white text-center mb-2 anim">Get started in 60 seconds</h2>
       <p class="text-gray-500 text-center text-sm mb-8">pip, Docker, or one-liner — your choice.</p>
 
-      <div class="max-w-lg mx-auto glass rounded-xl overflow-hidden anim anim-d1">
-        <!-- Tabs -->
-        <div class="flex border-b border-white/5" id="installTabs">
-          <button onclick="switchTab('pip')" class="install-tab flex-1 px-4 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors text-spore border-b-2 border-spore" data-tab="pip">pip</button>
-          <button onclick="switchTab('docker')" class="install-tab flex-1 px-4 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors text-gray-500 border-b-2 border-transparent hover:text-gray-300" data-tab="docker">Docker</button>
-          <button onclick="switchTab('curl')" class="install-tab flex-1 px-4 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors text-gray-500 border-b-2 border-transparent hover:text-gray-300" data-tab="curl">One-liner</button>
+      <!-- Tabbed install card — all inline styles -->
+      <div class="anim anim-d1" style="max-width:32rem;margin:0 auto;background:rgba(17,17,17,0.7);border:1px solid rgba(255,255,255,0.06);border-radius:0.75rem;overflow:hidden;backdrop-filter:blur(16px);">
+        <div style="display:flex;border-bottom:1px solid rgba(255,255,255,0.05);">
+          <button onclick="switchTab('curl')" data-tab="curl" style="flex:1;padding:0.625rem 1rem;font-family:'JetBrains Mono',monospace;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.08em;background:none;border:none;border-bottom:2px solid #22C55E;color:#22C55E;cursor:pointer;transition:all 0.15s;-webkit-appearance:none;">Install</button>
+          <button onclick="switchTab('pip')" data-tab="pip" style="flex:1;padding:0.625rem 1rem;font-family:'JetBrains Mono',monospace;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.08em;background:none;border:none;border-bottom:2px solid transparent;color:#737373;cursor:pointer;transition:all 0.15s;-webkit-appearance:none;">pip</button>
+          <button onclick="switchTab('docker')" data-tab="docker" style="flex:1;padding:0.625rem 1rem;font-family:'JetBrains Mono',monospace;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.08em;background:none;border:none;border-bottom:2px solid transparent;color:#737373;cursor:pointer;transition:all 0.15s;-webkit-appearance:none;">Docker</button>
         </div>
-        <!-- Panels -->
-        <div class="p-5 relative">
-          <button id="installCopy" onclick="copyInstall()" style="position:absolute;top:12px;right:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 8px;cursor:pointer;display:flex;align-items:center;gap:4px;color:#737373;font-size:10px;transition:all 0.15s;" onmouseover="this.style.color='#22C55E';this.style.borderColor='rgba(34,197,94,0.3)'" onmouseout="this.style.color='#737373';this.style.borderColor='rgba(255,255,255,0.1)'">
+        <div style="padding:1.25rem;position:relative;">
+          <button onclick="copyInstall()" style="position:absolute;top:12px;right:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 8px;cursor:pointer;display:flex;align-items:center;gap:4px;color:#737373;font-size:10px;transition:all 0.15s;-webkit-appearance:none;" onmouseover="this.style.color='#22C55E';this.style.borderColor='rgba(34,197,94,0.3)'" onmouseout="this.style.color='#737373';this.style.borderColor='rgba(255,255,255,0.1)'">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
             <span id="copyLabel"></span>
           </button>
-          <div id="panel-pip" class="install-panel">
-            <div class="font-mono text-sm space-y-1.5">
-              <div><span class="text-gray-600">$</span> <span class="text-spore-glow">pip install mycellm</span></div>
-              <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm init</span></div>
-              <div><span class="text-gray-600">$</span> <span class="text-spore-glow">mycellm serve</span></div>
+          <div id="panel-curl">
+            <div style="display:flex;gap:0;margin-bottom:0.75rem;">
+              <button onclick="switchPlatform('unix')" data-plat="unix" style="padding:0.25rem 0.75rem;font-family:'JetBrains Mono',monospace;font-size:0.625rem;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:4px 0 0 4px;color:#22C55E;cursor:pointer;-webkit-appearance:none;">macOS / Linux</button>
+              <button onclick="switchPlatform('win')" data-plat="win" style="padding:0.25rem 0.75rem;font-family:'JetBrains Mono',monospace;font-size:0.625rem;background:none;border:1px solid rgba(255,255,255,0.08);border-left:none;border-radius:0 4px 4px 0;color:#525252;cursor:pointer;-webkit-appearance:none;">Windows</button>
             </div>
+            <div id="plat-unix" style="font-family:'JetBrains Mono',monospace;font-size:0.875rem;color:#4ADE80;word-break:break-all;">curl -fsSL mycellm.dev/install.sh | sh</div>
+            <div id="plat-win" style="display:none;font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:#4ADE80;word-break:break-all;">irm mycellm.dev/install.ps1 | iex</div>
+            <p style="font-size:0.75rem;color:#525252;margin-top:0.75rem;">Installs, initializes, prints next steps.</p>
           </div>
-          <div id="panel-docker" class="install-panel hidden">
-            <div class="font-mono text-xs sm:text-sm text-spore-glow break-all leading-relaxed">
-              docker run -d --name mycellm \<br>
-              &nbsp;&nbsp;-p 8420:8420 \<br>
-              &nbsp;&nbsp;-v mycellm-data:/data/mycellm \<br>
-              &nbsp;&nbsp;ghcr.io/mycellm/mycellm
-            </div>
+          <div id="panel-pip" style="display:none;font-family:'JetBrains Mono',monospace;font-size:0.875rem;">
+            <div style="margin-bottom:6px;"><span style="color:#525252;">$</span> <span style="color:#4ADE80;">pip install mycellm</span></div>
+            <div style="margin-bottom:6px;"><span style="color:#525252;">$</span> <span style="color:#4ADE80;">mycellm init</span></div>
+            <div><span style="color:#525252;">$</span> <span style="color:#4ADE80;">mycellm serve</span></div>
           </div>
-          <div id="panel-curl" class="install-panel hidden">
-            <div class="font-mono text-sm text-spore-glow break-all">
-              curl -fsSL mycellm.dev/install.sh | sh
-            </div>
-            <p class="text-xs text-gray-600 mt-3">Installs, initializes, prints next steps.</p>
+          <div id="panel-docker" style="display:none;font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:#4ADE80;word-break:break-all;line-height:1.6;">
+            docker run -d --name mycellm \<br>
+            &nbsp;&nbsp;-p 8420:8420 \<br>
+            &nbsp;&nbsp;-v mycellm-data:/data/mycellm \<br>
+            &nbsp;&nbsp;ghcr.io/mycellm/mycellm
           </div>
         </div>
       </div>
 
-      <script>
+      <script is:inline>
         const cmds = {
+          curl: 'curl -fsSL https://mycellm.dev/install.sh | sh',
+          'curl-win': 'irm https://mycellm.dev/install.ps1 | iex',
           pip: 'pip install mycellm && mycellm init && mycellm serve',
           docker: 'docker run -d --name mycellm -p 8420:8420 -v mycellm-data:/data/mycellm ghcr.io/mycellm/mycellm',
-          curl: 'curl -fsSL https://mycellm.dev/install.sh | sh',
         };
-        let activeTab = 'pip';
+        let activeTab = 'curl', activePlat = 'unix';
         function switchTab(tab) {
           activeTab = tab;
-          document.querySelectorAll('.install-tab').forEach(t => {
-            const isActive = t.dataset.tab === tab;
-            t.style.color = isActive ? '#22C55E' : '#737373';
-            t.style.borderBottomColor = isActive ? '#22C55E' : 'transparent';
+          document.querySelectorAll('[data-tab]').forEach(t => {
+            const a = t.dataset.tab === tab;
+            t.style.color = a ? '#22C55E' : '#737373';
+            t.style.borderBottomColor = a ? '#22C55E' : 'transparent';
           });
-          document.querySelectorAll('.install-panel').forEach(p => p.classList.add('hidden'));
-          document.getElementById('panel-' + tab)?.classList.remove('hidden');
+          ['curl','pip','docker'].forEach(t => {
+            const el = document.getElementById('panel-' + t);
+            if (el) el.style.display = t === tab ? 'block' : 'none';
+          });
           const cl = document.getElementById('copyLabel');
           if (cl) cl.textContent = '';
         }
+        function switchPlatform(plat) {
+          activePlat = plat;
+          document.querySelectorAll('[data-plat]').forEach(b => {
+            const a = b.dataset.plat === plat;
+            b.style.background = a ? 'rgba(34,197,94,0.08)' : 'none';
+            b.style.borderColor = a ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.08)';
+            b.style.color = a ? '#22C55E' : '#525252';
+          });
+          document.getElementById('plat-unix').style.display = plat === 'unix' ? 'block' : 'none';
+          document.getElementById('plat-win').style.display = plat === 'win' ? 'block' : 'none';
+        }
         function copyInstall() {
-          navigator.clipboard.writeText(cmds[activeTab]);
+          const key = activeTab === 'curl' && activePlat === 'win' ? 'curl-win' : activeTab;
+          navigator.clipboard.writeText(cmds[key]);
           const cl = document.getElementById('copyLabel');
           if (cl) { cl.textContent = 'Copied!'; setTimeout(() => cl.textContent = '', 2000); }
         }

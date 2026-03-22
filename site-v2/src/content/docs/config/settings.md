@@ -19,6 +19,7 @@ All settings are configured via environment variables prefixed with `MYCELLM_`. 
 | `MYCELLM_DB_URL` | SQLite | Database URL (`postgresql+asyncpg://user:pass@host/db`) |
 | `MYCELLM_TELEMETRY` | `false` | Opt-in anonymous usage stats |
 | `MYCELLM_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `MYCELLM_RELAY_BACKENDS` | *(none)* | Relay endpoints (comma-separated OpenAI-compatible URLs) |
 | `MYCELLM_MODEL_DIR` | `~/.local/share/mycellm/models` | GGUF model download directory |
 | `MYCELLM_DATA_DIR` | `~/.local/share/mycellm` | All persistent data |
 | `MYCELLM_CONFIG_DIR` | `~/.config/mycellm` | Configuration directory |

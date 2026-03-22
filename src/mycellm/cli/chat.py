@@ -130,6 +130,64 @@ async def _cmd_clear(client, endpoint, headers, args):
     return "__clear__"
 
 
+@cmd("relay", "Manage relays: /relay [add|remove|refresh] [url]")
+async def _cmd_relay(client, endpoint, headers, args):
+    parts = args.strip().split(None, 1) if args else []
+    action = parts[0].lower() if parts else ""
+    url = parts[1].strip() if len(parts) > 1 else ""
+
+    if action == "add" and url:
+        resp = await client.post(
+            f"{endpoint}/v1/node/relay/add",
+            json={"url": url},
+            headers=headers,
+        )
+        d = resp.json()
+        if d.get("error"):
+            console.print(f"  [red]{d['error']}[/red]")
+        else:
+            r = d.get("relay", {})
+            status = "[green]online[/green]" if r.get("online") else f"[red]offline[/red] ({r.get('error', '')})"
+            console.print(f"\n  {status} — {r.get('name', url)}")
+            for m in r.get("models", []):
+                console.print(f"    [green]relay:{m}[/green]")
+            console.print()
+        return
+
+    if action == "remove" and url:
+        resp = await client.post(
+            f"{endpoint}/v1/node/relay/remove",
+            json={"url": url},
+            headers=headers,
+        )
+        d = resp.json()
+        console.print(f"  [dim]{d.get('status', 'error')}[/dim]\n")
+        return
+
+    if action == "refresh":
+        resp = await client.post(
+            f"{endpoint}/v1/node/relay/refresh", json={}, headers=headers,
+        )
+        d = resp.json()
+        console.print(f"\n  Discovered {d.get('models_discovered', 0)} new model(s)\n")
+        return
+
+    # Default: list relays
+    resp = await client.get(f"{endpoint}/v1/node/relay", headers=headers)
+    relays = resp.json().get("relays", [])
+    if not relays:
+        console.print("\n  [dim]No relay backends configured.[/dim]")
+        console.print("  [dim]Add one: /relay add http://device.lan:8080[/dim]\n")
+        return
+    console.print(f"\n[bold]{len(relays)} relay(s):[/bold]")
+    for r in relays:
+        status = "[green]●[/green]" if r["online"] else "[red]●[/red]"
+        console.print(f"  {status} [bold]{r['name']}[/bold] [dim]{r['url']}[/dim]")
+        for m in r.get("models", []):
+            console.print(f"      [green]relay:{m}[/green]")
+    console.print()
+
+
 @cmd("config", "Show node configuration")
 async def _cmd_config(client, endpoint, headers, args):
     resp = await client.get(f"{endpoint}/v1/node/debug/config", headers=headers)

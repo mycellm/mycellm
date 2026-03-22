@@ -95,6 +95,11 @@ class MycellmSettings(BaseSettings):
     model_dir: Optional[Path] = None
     max_concurrent_inferences: int = 2
 
+    # Relay backends — comma-separated OpenAI-compatible API endpoints
+    # Format: "http://ipad.lan:8080,http://ollama.lan:11434"
+    # Models from these endpoints are auto-discovered and announced to the network.
+    relay_backends: str = ""
+
     # Bootstrap peers (comma-separated host:port)
     bootstrap_peers: str = ""
 

@@ -33,6 +33,8 @@ Start the node daemon.
 mycellm serve                         # Start on localhost:8420
 mycellm serve --host 0.0.0.0          # Listen on all interfaces
 mycellm serve --port 9000             # Custom API port
+mycellm serve --relay http://ipad:8080  # Relay to external device
+mycellm serve --relay http://a:80 --relay http://b:80  # Multiple relays
 mycellm serve --no-dht                # Disable DHT discovery
 mycellm serve --priority low          # Run at nice +15
 mycellm serve --watchdog              # Auto-restart on crash

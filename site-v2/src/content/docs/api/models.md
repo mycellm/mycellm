@@ -12,10 +12,13 @@ List all available models across the network (local + QUIC peers + fleet).
   "object": "list",
   "data": [
     {"id": "Qwen2.5-3B-Instruct-Q8_0", "object": "model", "owned_by": "local"},
-    {"id": "Mistral-Small-24B-Q4_K_M", "object": "model", "owned_by": "fleet:aurora"}
+    {"id": "Mistral-Small-24B-Q4_K_M", "object": "model", "owned_by": "fleet:aurora"},
+    {"id": "relay:llama3.2:3b", "object": "model", "owned_by": "relay:ipad"}
   ]
 }
 ```
+
+Models prefixed with `relay:` are served by external devices connected via [relay backends](/integrations/relay/).
 
 ## `POST /v1/node/models/load`
 
