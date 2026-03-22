@@ -975,6 +975,7 @@ class MycellmNode:
                     "uptime_seconds": round(self.uptime),
                     "credits_earned": stats.get("credits_earned", 0),
                 }
+            any_ok = False
             for host, port in peers:
                 # LAN IPs: use http://host:api_port
                 # Public domains: use https://host (Caddy on 443)
@@ -989,16 +990,17 @@ class MycellmNode:
                     async with httpx.AsyncClient(timeout=10, transport=transport) as client:
                         resp = await client.post(url, json=payload, headers=headers)
                         if resp.status_code == 200:
-                            logger.info(f"{styled_tag('NODE')} Announced to bootstrap {host}:{api_port}")
-                            self.activity.record(EventType.ANNOUNCE_OK, bootstrap=f"{host}:{api_port}")
-                            return True
+                            logger.info(f"{styled_tag('NODE')} Announced to bootstrap {url}")
+                            self.activity.record(EventType.ANNOUNCE_OK, bootstrap=url)
+                            any_ok = True
                         elif resp.status_code == 401:
-                            logger.warning(f"{styled_tag('SECURITY')} Bootstrap rejected announce (bad API key)")
-                            self.activity.record(EventType.ANNOUNCE_FAILED, bootstrap=f"{host}:{api_port}", reason="auth_rejected")
+                            logger.warning(f"{styled_tag('SECURITY')} Bootstrap {url} rejected announce (bad API key)")
+                        else:
+                            logger.warning(f"{styled_tag('NODE')} Announce to {url}: HTTP {resp.status_code}")
                 except Exception as e:
-                    logger.warning(f"{styled_tag('NODE')} Announce to {host}:{api_port} failed: {e}")
-                    self.activity.record(EventType.ANNOUNCE_FAILED, bootstrap=f"{host}:{api_port}", reason=str(e))
-            return False
+                    logger.warning(f"{styled_tag('NODE')} Announce to {url} failed: {e}")
+                    self.activity.record(EventType.ANNOUNCE_FAILED, bootstrap=url, reason=str(e))
+            return any_ok
 
         # Initial announce
         await _do_announce()
