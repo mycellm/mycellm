@@ -976,8 +976,17 @@ class MycellmNode:
                     "credits_earned": stats.get("credits_earned", 0),
                 }
             for host, port in peers:
-                api_port = port - 1
-                url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
+                # If port is the QUIC port (8421), derive API port (8420)
+                # If port is already the API port (8420, 80, 443), use directly
+                if port == 8421:
+                    api_port = 8420
+                else:
+                    api_port = port
+                # Use HTTPS for public domains, HTTP for LAN IPs
+                is_public = not host.startswith("10.") and not host.startswith("192.168.") and not host.startswith("127.") and "." in host
+                scheme = "https" if is_public and api_port in (443, 8420) else "http"
+                port_suffix = "" if (scheme == "https" and api_port == 443) else f":{api_port}"
+                url = f"{scheme}://{host}{port_suffix}/v1/admin/nodes/announce"
                 try:
                     transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
                     async with httpx.AsyncClient(timeout=10, transport=transport) as client:
