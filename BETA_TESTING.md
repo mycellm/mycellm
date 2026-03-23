@@ -12,7 +12,7 @@ mycellm serve
 ```
 
 ### iOS (iPad/iPhone)
-1. Install from TestFlight: *(link TBD)*
+1. iOS app coming soon — currently in development.
 2. Launch — app auto-connects to public network
 3. Go to **Models** tab → download a suggested model
 4. Chat in **On-Device** mode (local) or **Network** mode (public)

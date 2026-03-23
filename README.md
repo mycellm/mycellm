@@ -130,7 +130,7 @@ The mycellm iOS app makes any iPhone or iPad a first-class network node.
 - **Sensitive Data Guard** — auto-routes sensitive prompts to local model
 - **OLED screensaver** — brand-colored mushroom with spore particles
 
-Requires iOS 17.0+. Available on TestFlight.
+Requires iOS 17.0+. Coming soon to TestFlight.
 
 ## Configuration
 
