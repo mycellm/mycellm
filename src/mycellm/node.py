@@ -1128,22 +1128,16 @@ class MycellmNode:
                 }
             any_ok = False
             for host, port in peers:
-                # LAN IPs: use http://host:api_port, send real hostname
-                # Public domains: use https://host, send anonymized name
                 is_lan = host.startswith("10.") or host.startswith("192.168.") or host.startswith("172.") or host.startswith("127.") or host == "localhost"
+                # Only HTTP-announce to LAN bootstraps (fleet management).
+                # Public bootstraps discover peers via QUIC — no fleet registration.
+                if not is_lan:
+                    continue
                 payload = {**base_payload}
-                if is_lan:
-                    api_port = port if port != 8421 else 8420
-                    url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
-                    payload["node_name"] = self._settings.node_name
-                    payload["system"] = sys_info
-                else:
-                    url = f"https://{host}/v1/admin/nodes/announce"
-                    payload["node_name"] = public_name
-                    # Public: only share GPU type + model count, not full system info
-                    payload["system"] = {
-                        "gpu": sys_info.get("gpu", {}),
-                    }
+                api_port = port if port != 8421 else 8420
+                url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
+                payload["node_name"] = self._settings.node_name
+                payload["system"] = sys_info
                 try:
                     transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
                     async with httpx.AsyncClient(timeout=10, transport=transport) as client:
