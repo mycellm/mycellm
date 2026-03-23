@@ -673,15 +673,10 @@ class MycellmNode:
                 from mycellm.accounting.pricing import compute_reward
                 reward = compute_reward(max(tokens, 1))
 
-                if self.receipt_validator.check_credit_rate(self.peer_id):
-                    await self.ledger.credit(self.peer_id, reward, "inference_served",
-                                             counterparty_id=msg.from_peer)
-                else:
-                    logger.warning(f"Credit rate limit reached, skipping self-credit")
-
-                # Send signed credit receipt to consumer (with request_id binding)
+                # Generate signed receipt
+                sig = ""
+                ts = time.time()
                 if not stream:
-                    ts = time.time()
                     receipt_data = build_receipt_data(
                         consumer_id=msg.from_peer,
                         seeder_id=self.peer_id,
@@ -692,6 +687,16 @@ class MycellmNode:
                         timestamp=ts,
                     )
                     sig = sign_receipt(self.device_key, receipt_data)
+
+                if self.receipt_validator.check_credit_rate(self.peer_id):
+                    await self.ledger.credit(self.peer_id, reward, "inference_served",
+                                             counterparty_id=msg.from_peer,
+                                             receipt_signature=sig)
+                else:
+                    logger.warning(f"Credit rate limit reached, skipping self-credit")
+
+                # Send signed receipt to consumer
+                if sig:
                     from mycellm.transport.messages import signed_credit_receipt
                     receipt_msg = signed_credit_receipt(
                         self.peer_id, msg.from_peer, self.peer_id,
