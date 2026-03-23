@@ -44,10 +44,23 @@ _PATTERNS: list[tuple[str, str, str, str]] = [
     ("ssn", "Social Security Number", r"\b\d{3}-\d{2}-\d{4}\b", "high"),
 
     # Connection strings
-    ("connection_string", "Database connection string", r"(?:postgresql|mysql|mongodb|redis)://[^\s]{10,}", "high"),
+    ("connection_string", "Database connection string", r"(?:postgresql|mysql|mongodb|redis|amqp)://[^\s]{10,}", "high"),
+
+    # New patterns
+    ("api_key", "Stripe key", r"sk_(?:live|test)_[a-zA-Z0-9]{20,}", "high"),
+    ("api_key", "Google API key", r"AIza[a-zA-Z0-9_\-]{30,}", "high"),
+    ("jwt", "JSON Web Token", r"eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}", "high"),
+
+    # PII — medium
+    ("pii", "Email address", r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b", "medium"),
+    ("pii", "Phone number", r"\b(?:\+1|1)?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "medium"),
+    ("pii", "Private IP address", r"\b(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}\b", "medium"),
 ]
 
 _COMPILED = [(t, l, re.compile(p, re.IGNORECASE), s) for t, l, p, s in _PATTERNS]
+
+
+_CONTEXT_EXCLUSIONS = ["example", "sample", "placeholder", "dummy", "test", "fake", "demo"]
 
 
 def scan_sensitive(text: str) -> list[SensitiveMatch]:
@@ -59,6 +72,12 @@ def scan_sensitive(text: str) -> list[SensitiveMatch]:
     for type_, label, pattern, severity in _COMPILED:
         for m in pattern.finditer(text):
             matched = m.group(0)
+            # Context exclusion: skip if preceded by example/test/dummy within 30 chars
+            start = max(0, m.start() - 30)
+            prefix = text[start:m.start()].lower()
+            if any(exc in prefix for exc in _CONTEXT_EXCLUSIONS):
+                continue
+
             # Redact: show first 4 and last 2 chars
             if len(matched) > 10:
                 redacted = matched[:4] + "..." + matched[-2:]
@@ -71,6 +90,31 @@ def scan_sensitive(text: str) -> list[SensitiveMatch]:
                 severity=severity,
             ))
     return matches
+
+
+def scan_with_policy(text: str, trust_level: str = "untrusted") -> dict:
+    """Scan with trust-aware routing recommendation.
+
+    Returns {"matches": [...], "action": "allow|warn|block", "highest_severity": "high|medium|low|none"}.
+    """
+    if trust_level in ("local", "full"):
+        return {"matches": [], "action": "allow", "highest_severity": "none"}
+
+    matches = scan_sensitive(text)
+    if not matches:
+        return {"matches": matches, "action": "allow", "highest_severity": "none"}
+
+    severities = [m.severity for m in matches]
+    highest = "high" if "high" in severities else "medium" if "medium" in severities else "low"
+
+    if trust_level == "untrusted":
+        action = "block" if highest == "high" else "warn" if highest == "medium" else "allow"
+    elif trust_level == "trusted":
+        action = "warn" if highest == "high" else "allow"
+    else:
+        action = "allow"
+
+    return {"matches": matches, "action": action, "highest_severity": highest}
 
 
 def format_warning(matches: list[SensitiveMatch]) -> str:
