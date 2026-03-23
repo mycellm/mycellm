@@ -819,20 +819,30 @@ async def public_stats(request: Request):
         network_name = node.federation.identity.network_name
         is_public = node.federation.identity.public
 
-    # Node counts
+    # Node counts — combine QUIC peers + fleet registry (deduplicated)
+    quic_peers = node.registry.connected_peers()
     approved_nodes = [n for n in node.node_registry.values() if n.get("status") == "approved"]
     online_nodes = [n for n in approved_nodes if time.time() - n.get("last_seen", 0) < 120]
-    seeding_nodes = [n for n in online_nodes if n.get("role") == "seeder"]
 
-    # Compute aggregates
+    # Deduplicate: QUIC peers may also be in fleet registry
+    quic_peer_ids = {p.peer_id for p in quic_peers}
+    fleet_only = [n for n in online_nodes if n.get("peer_id") not in quic_peer_ids]
+
+    total_peers = len(quic_peers) + len(fleet_only)
+    seeding_count = sum(1 for p in quic_peers if p.capabilities.role == "seeder")
+    seeding_count += sum(1 for n in fleet_only if n.get("role") == "seeder")
+
+    # Compute aggregates from QUIC peers
     total_vram_gb = 0.0
     total_ram_gb = 0.0
-    for entry in approved_nodes:
+    for entry in quic_peers:
+        total_vram_gb += entry.capabilities.hardware.vram_gb
+
+    # Fleet-only nodes
+    for entry in fleet_only:
         sys = entry.get("system", {})
         hw = sys.get("gpu", entry.get("capabilities", {}).get("hardware", {}))
-        mem = sys.get("memory", {})
         total_vram_gb += hw.get("vram_gb", 0)
-        total_ram_gb += mem.get("total_gb", 0)
 
     # Add self
     sys_info = node.get_system_info()
@@ -855,7 +865,17 @@ async def public_stats(request: Request):
             })
             seen_models.add(m.name)
 
-    for entry in approved_nodes:
+    # QUIC-connected peers
+    for entry in quic_peers:
+        for m in entry.capabilities.models:
+            model_names.add(m.name)
+            if m.name not in seen_models:
+                tier = classify_tier(m.param_count_b)
+                models_by_tier[tier].append({"name": m.name, "tier": tier, "param_b": m.param_count_b})
+                seen_models.add(m.name)
+
+    # Fleet-only nodes
+    for entry in fleet_only:
         for m in entry.get("capabilities", {}).get("models", []):
             name = m.get("name", m) if isinstance(m, dict) else m
             model_names.add(name)
@@ -898,9 +918,10 @@ async def public_stats(request: Request):
     return {
         "network_name": network_name,
         "nodes": {
-            "total": 1 + len(approved_nodes),
-            "online": 1 + len(online_nodes),
-            "seeding": 1 + len(seeding_nodes),
+            "total": 1 + total_peers,
+            "online": 1 + total_peers,
+            "seeders": seeding_count,
+            "consumers": total_peers - seeding_count,
         },
         "compute": {
             "total_tps": round(network_tps, 1),
