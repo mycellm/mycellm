@@ -118,7 +118,7 @@ class SecretStore:
         secrets without storing raw keys:
 
             {"api_key": "secret:openrouter"}  → resolves to the stored secret
-            {"api_key": "sk-or-abc123"}       → returned as-is
+            {"api_key": "sk-or-EXAMPLE123"}       → returned as-is
         """
         if value.startswith("secret:"):
             secret_name = value[7:]

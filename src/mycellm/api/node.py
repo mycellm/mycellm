@@ -196,7 +196,7 @@ async def load_model(request: Request):
     For remote OpenAI-compatible APIs (backend=openai):
         {"name": "claude-sonnet", "backend": "openai",
          "api_base": "https://openrouter.ai/api/v1",
-         "api_key": "sk-or-...", "api_model": "anthropic/claude-sonnet-4"}
+         "api_key": "sk-or-EXAMPLE", "api_model": "anthropic/claude-sonnet-4"}
     """
     node = request.app.state.node
     body = await request.json()

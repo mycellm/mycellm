@@ -36,7 +36,7 @@ def set_secret(
 
     \b
     Examples:
-      mycellm secret set openrouter -v sk-or-abc123
+      mycellm secret set openrouter -v sk-or-EXAMPLE123
       mycellm secret set hf-token              # prompts for value
     """
     if not value:
