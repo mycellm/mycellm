@@ -263,6 +263,10 @@ async def public_chat(request: Request):
                     last_error = str(e)
                     logger.info(f"Gateway QUIC failover: {model_name}@{peer_id[:8]} failed: {e}")
                     continue
+                # route_inference returned None/falsy — skip to next candidate
+                last_error = f"QUIC route to {peer_id[:8]} returned empty"
+                logger.info(f"Gateway QUIC: {model_name}@{peer_id[:8]} returned no result")
+                continue
 
             # HTTP fleet proxy
             if fleet_addr:
