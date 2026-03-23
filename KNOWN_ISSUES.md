@@ -7,7 +7,7 @@
 ### Prompts are visible to seeder nodes
 When you send a message on the public network, the seeder node that runs inference sees your full prompt. This is inherent to the distributed architecture — the node needs the prompt to generate a response.
 
-**Mitigation**: The [Sensitive Data Guard](https://mycellm.ai/docs/config/privacy-guard/) scans for API keys, passwords, and PII before sending. Use on-device inference for sensitive content.
+**Mitigation**: The [Sensitive Data Guard](https://docs.mycellm.dev/config/privacy-guard/) scans for API keys, passwords, and PII before sending. Use on-device inference for sensitive content.
 
 ### Credit system is not Sybil-resistant
 New node identities receive 100 seed credits. An attacker could generate unlimited credits by creating new identities. Receipt validation is enforced locally — the bootstrap does not verify receipt signatures server-side.

@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://mycellm.ai">Website</a> ·
-  <a href="https://mycellm.ai/docs/quickstart/install">Docs</a> ·
+  <a href="https://docs.mycellm.dev/quickstart/install">Docs</a> ·
   <a href="https://mycellm.ai/chat">Try it</a> ·
   <a href="https://mycellm.ai/join">Join the network</a>
 </p>
@@ -144,7 +144,7 @@ MYCELLM_FLEET_ADMIN_KEY=...      # Fleet management key (optional)
 MYCELLM_NO_DHT=true              # Disable Kademlia DHT
 ```
 
-See [docs/config](https://mycellm.ai/config/settings/) for full reference.
+See [docs/config](https://docs.mycellm.dev/config/settings/) for full reference.
 
 ## API
 
@@ -174,7 +174,7 @@ print(response.choices[0].message.content)
 | POST | `/v1/node/federation/invite` | Create network invite |
 | POST | `/v1/node/federation/join` | Join a network |
 
-See [API docs](https://mycellm.ai/api/overview/) for the full reference.
+See [API docs](https://docs.mycellm.dev/api/overview/) for the full reference.
 
 ## Private Networks
 
