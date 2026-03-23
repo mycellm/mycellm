@@ -502,6 +502,7 @@ class MycellmNode:
             if info:
                 info.scope = scope
             self.capabilities.models = self.inference.loaded_models
+            self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
             await self.announce_capabilities()
             return {"status": "loaded", "model": loaded_name}
 
@@ -511,6 +512,7 @@ class MycellmNode:
                 raise ValueError("model name required")
             await self.inference.unload_model(model_name)
             self.capabilities.models = self.inference.loaded_models
+            self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
             await self.announce_capabilities()
             return {"status": "unloaded", "model": model_name}
 
@@ -526,6 +528,7 @@ class MycellmNode:
                 raise ValueError(f"Model not found: {model_name}")
             info.scope = scope
             self.capabilities.models = self.inference.loaded_models
+            self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
             await self.announce_capabilities()
             return {"status": "updated", "model": model_name, "scope": scope}
 
@@ -928,6 +931,7 @@ class MycellmNode:
             restored = await self.inference.restore_models(self._settings.data_dir)
             if restored:
                 self.capabilities.models = self.inference.loaded_models
+            self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
                 logger.info(f"{styled_tag('BOOT')} Restored {restored} model(s)")
                 await self.announce_capabilities()
         except Exception as e:
@@ -948,6 +952,7 @@ class MycellmNode:
                     logger.warning(f"{styled_tag('RELAY')} Failed to add {url}: {e}")
             if relay_urls and self.relay_manager.relays:
                 self.capabilities.models = self.inference.loaded_models
+            self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
                 await self.announce_capabilities()
                 self.relay_manager.start_polling(interval=60)
         except Exception as e:
@@ -1016,7 +1021,7 @@ class MycellmNode:
         self.capabilities = Capabilities(
             models=self.inference.loaded_models,
             hardware=hw,
-            role=self.device_cert.role if self.device_cert else "seeder",
+            role="seeder" if self.inference.loaded_models else "consumer",
             version="0.1.0",
             network_ids=self.federation.network_ids if self.federation else [],
         )
