@@ -191,7 +191,11 @@ def create_app(node: MycellmNode) -> FastAPI:
         import os
 
         web_dir = files("mycellm.web")
-        web_path = str(web_dir)
+        # MultiplexedPath.__str__ wraps in class name; extract real path
+        if hasattr(web_dir, '_paths') and web_dir._paths:
+            web_path = str(web_dir._paths[0])
+        else:
+            web_path = str(web_dir)
         if os.path.isdir(web_path) and os.listdir(web_path):
             index_html = os.path.join(web_path, "index.html")
 
