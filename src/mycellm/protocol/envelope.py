@@ -56,6 +56,16 @@ class MessageType(str, Enum):
     FLEET_COMMAND = "fleet_command"
     FLEET_RESPONSE = "fleet_response"
 
+    # NAT traversal (hole punching coordination)
+    PUNCH_REQUEST = "punch_request"
+    PUNCH_INITIATE = "punch_initiate"
+    PUNCH_RESPONSE = "punch_response"
+    PUNCH_RESULT = "punch_result"
+
+    # DHT gateway (iOS queries bootstrap's DHT)
+    DHT_QUERY = "dht_query"
+    DHT_RESPONSE = "dht_response"
+
     # Error
     ERROR = "error"
 
