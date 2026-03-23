@@ -931,7 +931,7 @@ class MycellmNode:
             restored = await self.inference.restore_models(self._settings.data_dir)
             if restored:
                 self.capabilities.models = self.inference.loaded_models
-            self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
+                self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
                 logger.info(f"{styled_tag('BOOT')} Restored {restored} model(s)")
                 await self.announce_capabilities()
         except Exception as e:
@@ -952,7 +952,7 @@ class MycellmNode:
                     logger.warning(f"{styled_tag('RELAY')} Failed to add {url}: {e}")
             if relay_urls and self.relay_manager.relays:
                 self.capabilities.models = self.inference.loaded_models
-            self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
+                self.capabilities.role = "seeder" if self.inference.loaded_models else "consumer"
                 await self.announce_capabilities()
                 self.relay_manager.start_polling(interval=60)
         except Exception as e:

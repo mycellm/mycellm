@@ -179,6 +179,28 @@ async def public_chat(request: Request):
                 "error": {"message": f"Message too long (max {_MAX_MESSAGE_LENGTH} chars)"}
             })
 
+    # Sensitive data guard (server-side enforcement)
+    # Bypass with X-Privacy-Override: acknowledged header (explicit opt-out)
+    privacy_override = request.headers.get("x-privacy-override", "") == "acknowledged"
+    if not privacy_override:
+        from mycellm.privacy import scan_with_policy
+        all_content = " ".join(msg.get("content", "") for msg in messages)
+        guard_result = scan_with_policy(all_content, trust_level="untrusted")
+    else:
+        guard_result = {"action": "allow", "matches": [], "highest_severity": "none"}
+    if guard_result["action"] == "block":
+        high_matches = [m for m in guard_result["matches"] if m.severity == "high"]
+        labels = [f"{m.label}: {m.pattern}" for m in high_matches[:3]]
+        return JSONResponse(status_code=422, content={
+            "error": {
+                "message": "Sensitive data detected in prompt. For privacy, this request was blocked.",
+                "type": "sensitive_data_guard",
+                "details": labels,
+                "hint": "Use a local model or private network for sensitive prompts. "
+                        "Set X-Privacy-Override: acknowledged to bypass (not recommended).",
+            }
+        })
+
     # Rate limit check
     allowed, reason = _check_rate(client_ip)
     if not allowed:
