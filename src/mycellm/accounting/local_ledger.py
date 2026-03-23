@@ -39,8 +39,15 @@ class LocalLedger:
         reason: str,
         counterparty_id: str = "",
         receipt_signature: str = "",
+        network_id: str = "",
     ) -> str:
-        """Add credits to an account. Returns transaction ID."""
+        """Add credits to an account. Returns transaction ID.
+
+        Args:
+            network_id: Optional network identifier for per-network credit isolation.
+                         When set, the transaction is tagged with this network so credits
+                         can be tracked and queried per-network.
+        """
         tx_id = uuid.uuid4().hex[:16]
         now = time.time()
 
@@ -50,8 +57,8 @@ class LocalLedger:
                 (amount, amount, now, peer_id),
             )
             await db.execute(
-                "INSERT INTO transactions (id, peer_id, counterparty_id, amount, direction, reason, receipt_signature, timestamp) VALUES (?, ?, ?, ?, 'credit', ?, ?, ?)",
-                (tx_id, peer_id, counterparty_id, amount, reason, receipt_signature, now),
+                "INSERT INTO transactions (id, peer_id, counterparty_id, amount, direction, reason, receipt_signature, network_id, timestamp) VALUES (?, ?, ?, ?, 'credit', ?, ?, ?, ?)",
+                (tx_id, peer_id, counterparty_id, amount, reason, receipt_signature, network_id, now),
             )
             await db.commit()
         return tx_id
@@ -63,8 +70,14 @@ class LocalLedger:
         reason: str,
         counterparty_id: str = "",
         receipt_signature: str = "",
+        network_id: str = "",
     ) -> str:
         """Deduct credits from an account. Returns transaction ID.
+
+        Args:
+            network_id: Optional network identifier for per-network credit isolation.
+                         When set, the transaction is tagged with this network so credits
+                         can be tracked and queried per-network.
 
         Raises ValueError if balance would go negative.
         """
@@ -85,8 +98,8 @@ class LocalLedger:
                 (amount, amount, now, peer_id),
             )
             await db.execute(
-                "INSERT INTO transactions (id, peer_id, counterparty_id, amount, direction, reason, receipt_signature, timestamp) VALUES (?, ?, ?, ?, 'debit', ?, ?, ?)",
-                (tx_id, peer_id, counterparty_id, amount, reason, receipt_signature, now),
+                "INSERT INTO transactions (id, peer_id, counterparty_id, amount, direction, reason, receipt_signature, network_id, timestamp) VALUES (?, ?, ?, ?, 'debit', ?, ?, ?, ?)",
+                (tx_id, peer_id, counterparty_id, amount, reason, receipt_signature, network_id, now),
             )
             await db.commit()
         return tx_id

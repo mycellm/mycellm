@@ -82,8 +82,18 @@ class InferenceManager:
         backend_type: str = "llama.cpp",
         **kwargs,
     ) -> str:
-        """Load a model and return its name."""
+        """Load a model and return its name.
+
+        If model_path starts with "hf:", auto-downloads from HuggingFace first.
+        Format: "hf:org/repo:filename.gguf"
+        Example: "hf:TheBloke/Llama-2-7B-GGUF:llama-2-7b.Q4_K_M.gguf"
+        """
         import time as _time
+
+        # Auto-download from HuggingFace if path starts with "hf:"
+        if model_path.startswith("hf:"):
+            model_path = await self._resolve_hf_path(model_path)
+
         model_name = name or (Path(model_path).stem if model_path else "remote-model")
 
         if model_name in self._backends:
@@ -466,6 +476,76 @@ class InferenceManager:
         """Permanently remove a saved config (on delete)."""
         self._saved_configs.pop(model_name, None)
         await self.save_model_configs(data_dir)
+
+    async def _resolve_hf_path(self, hf_spec: str) -> str:
+        """Resolve an hf: path to a local file, downloading if needed.
+
+        Format: "hf:org/repo:filename.gguf"
+        Returns the local file path after download.
+        """
+        import httpx
+
+        spec = hf_spec[3:]  # strip "hf:"
+        parts = spec.split(":", 1)
+        if len(parts) != 2 or "/" not in parts[0] or not parts[1]:
+            raise ValueError(
+                f"Invalid hf: path format. Expected 'hf:org/repo:filename.gguf', got '{hf_spec}'"
+            )
+
+        repo_id = parts[0]
+        filename = parts[1]
+
+        from mycellm.config import get_settings
+        settings = get_settings()
+        model_dir = settings.model_dir or settings.data_dir / "models"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = model_dir / filename
+
+        if dest_path.exists():
+            logger.info(f"HF model already downloaded: {dest_path}")
+            return str(dest_path)
+
+        logger.info(f"Downloading {filename} from HuggingFace ({repo_id})...")
+        url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+        headers = {}
+        if settings.hf_token:
+            headers["Authorization"] = f"Bearer {settings.hf_token}"
+
+        tmp_path = dest_path.with_suffix(".tmp")
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, read=3600.0),
+                follow_redirects=True,
+                headers=headers,
+            ) as client:
+                async with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    total = int(resp.headers.get("content-length", 0))
+                    downloaded = 0
+                    last_log = 0.0
+                    import time as _t
+
+                    with open(tmp_path, "wb") as f:
+                        async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            now = _t.time()
+                            if now - last_log >= 5.0:
+                                pct = (downloaded / total * 100) if total > 0 else 0
+                                logger.info(
+                                    f"Downloading {filename}: {downloaded / 1024**3:.1f}GB"
+                                    f" / {total / 1024**3:.1f}GB ({pct:.0f}%)"
+                                )
+                                last_log = now
+
+            tmp_path.rename(dest_path)
+            logger.info(f"Downloaded {filename} ({downloaded / 1024**3:.1f}GB) to {dest_path}")
+            return str(dest_path)
+
+        except Exception:
+            if tmp_path.exists():
+                tmp_path.unlink()
+            raise
 
     def _create_backend(self, backend_type: str) -> InferenceBackend:
         if backend_type == "llama.cpp":

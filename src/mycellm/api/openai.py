@@ -95,8 +95,9 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     if body.stream:
         return await _stream_response(node, body, messages)
 
-    # Use ModelResolver when model is empty or not found locally
-    model_name = node.inference.resolve_model_name(body.model) if body.model else ""
+    # Use ModelResolver when model is empty, "auto", or not found locally
+    requested_model = body.model if body.model != "auto" else ""
+    model_name = node.inference.resolve_model_name(requested_model) if requested_model else ""
     routed_to = ""
 
     # Build quality constraints from mycellm routing params
@@ -118,7 +119,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         if node.ledger:
             _balance = await node.ledger.balance(node.peer_id)
         resolved = node.model_resolver.resolve(
-            body.model,
+            requested_model,
             node.inference.loaded_models,
             fleet_registry=node.node_registry,
             constraints=constraints,
@@ -139,7 +140,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             elif body.mycellm.fallback == "downgrade":
                 # Retry without constraints
                 resolved = node.model_resolver.resolve(
-                    body.model,
+                    requested_model,
                     node.inference.loaded_models,
                     fleet_registry=node.node_registry,
                 )
@@ -198,7 +199,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
 
     # Try local inference
     if not model_name:
-        model_name = node.inference.resolve_model_name(body.model)
+        model_name = node.inference.resolve_model_name(requested_model)
 
     if model_name:
         from mycellm.inference.base import InferenceRequest
@@ -340,7 +341,8 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
 
     async def generate():
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-        model_name = node.inference.resolve_model_name(body.model)
+        _requested = body.model if body.model != "auto" else ""
+        model_name = node.inference.resolve_model_name(_requested)
 
         if model_name:
             from mycellm.inference.base import InferenceRequest

@@ -157,7 +157,7 @@ def create_app(node: MycellmNode) -> FastAPI:
     app.include_router(models_router, prefix="/v1/node/models")
     app.include_router(gateway_router, prefix="/v1/public")
 
-    # Health check (always public — includes auth_required flag for clients)
+    # Health check (always public — includes auth posture for clients)
     @app.get("/health")
     async def health():
         from mycellm import __version__
@@ -166,6 +166,11 @@ def create_app(node: MycellmNode) -> FastAPI:
             "version": __version__,
             "peer_id": node.peer_id,
             "auth_required": bool(settings.api_key),
+            "auth": {
+                "enabled": bool(settings.api_key),
+                "protected": ["/v1/node/*", "/v1/admin/*", "/v1/chat/*", "/v1/models"],
+                "public": ["/health", "/metrics", "/v1/public/*", "/v1/admin/nodes/announce"],
+            },
         }
 
     # Prometheus metrics endpoint (always public)

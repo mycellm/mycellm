@@ -475,9 +475,13 @@ class MycellmNode:
             }
 
         elif command == "model.list":
-            return {
-                "models": [m.to_dict() for m in self.inference.loaded_models],
-            }
+            models = []
+            for m in self.inference.loaded_models:
+                d = m.to_dict()
+                # Always include scope in fleet responses (to_dict omits it when "home")
+                d["scope"] = m.scope
+                models.append(d)
+            return {"models": models}
 
         elif command == "model.load":
             model_path = params.get("model_path", "")

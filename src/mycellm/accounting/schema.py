@@ -20,12 +20,14 @@ CREATE TABLE IF NOT EXISTS transactions (
     direction TEXT NOT NULL CHECK (direction IN ('credit', 'debit')),
     reason TEXT NOT NULL,
     receipt_signature TEXT,
+    network_id TEXT DEFAULT '',
     timestamp REAL NOT NULL,
     FOREIGN KEY (peer_id) REFERENCES accounts(peer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_peer ON transactions(peer_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_ts ON transactions(timestamp);
+CREATE INDEX IF NOT EXISTS idx_transactions_network ON transactions(network_id);
 
 CREATE TABLE IF NOT EXISTS receipts (
     tx_id TEXT PRIMARY KEY,
