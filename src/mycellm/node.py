@@ -1041,6 +1041,16 @@ class MycellmNode:
         self.node_registry = await self.node_registry_repo.load_as_dict()
         await self._start_transport()
 
+        # Start NAT discovery (non-blocking background)
+        try:
+            from mycellm.nat.discovery import NATDiscovery
+            self.nat_discovery = NATDiscovery()
+            await self.nat_discovery.start(local_port=self.quic_port)
+            logger.info(f"{styled_tag('NAT')} Discovery started ({self.nat_discovery.info.nat_type.value})")
+        except Exception as e:
+            logger.debug(f"NAT discovery failed to start: {e}")
+            self.nat_discovery = None
+
         if self.enable_dht:
             await self._start_dht()
 
@@ -1420,6 +1430,7 @@ class MycellmNode:
                 "active": self.inference.active_count,
                 "max_concurrent": self.inference._max_concurrent,
             },
+            "nat": self.nat_discovery.info.to_dict() if hasattr(self, 'nat_discovery') and self.nat_discovery else {},
         }
 
     def get_system_info(self) -> dict:
