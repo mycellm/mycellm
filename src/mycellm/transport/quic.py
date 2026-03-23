@@ -59,10 +59,13 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
                 return
 
             if event.end_stream:
+                # Standard path: entire message in one stream
                 self._buffers.pop(stream_id, None)
                 self._dispatch_message(buf, stream_id)
             else:
+                # Try length-prefixed framing (iOS NWConnection sends on stream 0)
                 self._buffers[stream_id] = buf
+                self._try_framed_dispatch(stream_id)
 
         elif isinstance(event, ConnectionTerminated):
             self._is_closed = True
@@ -75,6 +78,26 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
                 if not fut.done():
                     fut.cancel()
             self._response_futures.clear()
+
+    def _try_framed_dispatch(self, stream_id: int) -> None:
+        """Try to parse length-prefixed framed messages from buffer.
+
+        iOS Network.framework sends on a single bidirectional stream with
+        4-byte big-endian length prefix per message (MessageEnvelope.to_framed()).
+        """
+        buf = self._buffers.get(stream_id, b"")
+        while len(buf) >= 4:
+            length = int.from_bytes(buf[:4], "big")
+            if length > 10 * 1024 * 1024:
+                logger.warning(f"Framed message too large: {length}")
+                self._buffers.pop(stream_id, None)
+                return
+            if len(buf) < 4 + length:
+                break  # incomplete frame
+            frame_data = buf[4:4 + length]
+            buf = buf[4 + length:]
+            self._dispatch_message(frame_data, stream_id)
+        self._buffers[stream_id] = buf
 
     def _dispatch_message(self, data: bytes, stream_id: int) -> None:
         try:
@@ -124,13 +147,17 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
             self._response_futures.pop(msg.id, None)
 
     async def reply_on_stream(self, stream_id: int, msg: MessageEnvelope) -> None:
-        """Send a reply as a new message (uses sender's unidirectional stream).
-
-        Despite the name, replies are sent on a new stream because
-        QUIC unidirectional streams are one-way. The message ID matches
-        the request for correlation.
+        """Send a reply. Uses framed format on bidirectional streams (iOS),
+        or a new unidirectional stream for standard clients.
         """
-        await self.send_message(msg)
+        # Bidirectional streams (client-initiated: 0, 4, 8, ...) — send framed on same stream
+        if stream_id % 4 == 0:
+            data = msg.to_framed()
+            self._quic.send_stream_data(stream_id, data)
+            self.transmit()
+        else:
+            # Unidirectional — reply on a new stream
+            await self.send_message(msg)
 
     def close(self) -> None:
         if not self._is_closed:
