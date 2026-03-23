@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict
 
 from fastapi import APIRouter, Request
+
+from mycellm.transport.messages import fleet_command
 
 logger = logging.getLogger("mycellm.admin")
 
@@ -153,3 +156,66 @@ async def remove_node(peer_id: str, request: Request):
         return {"error": "node not found"}
     await _remove_from_db(node, peer_id)
     return {"status": "removed", "peer_id": peer_id}
+
+
+# ── Fleet management relay ──
+
+
+@router.post("/fleet/command")
+async def fleet_relay_command(request: Request):
+    """Relay a fleet command to a QUIC-connected peer node.
+
+    The bootstrap acts as a relay — the fleet_admin_key is verified on the
+    target node, not here. The bootstrap never stores or inspects the key.
+    """
+    node = request.app.state.node
+    body = await request.json()
+    target_peer_id = body.get("node_peer_id", "")
+    command = body.get("command", "")
+    params = body.get("params", {})
+    admin_key = body.get("fleet_admin_key", "")
+
+    if not target_peer_id:
+        return {"error": "node_peer_id required"}
+    if not command:
+        return {"error": "command required"}
+
+    # Find QUIC connection to target peer
+    conn = node._peer_connections.get(target_peer_id)
+    if not conn or not conn.protocol:
+        return {"error": "No QUIC connection to target peer", "peer_id": target_peer_id}
+
+    # Build and relay the fleet command
+    msg = fleet_command(
+        from_peer=node.peer_id,
+        command=command,
+        params=params,
+        fleet_admin_key=admin_key,
+    )
+
+    try:
+        response = await conn.protocol.send_and_wait(msg, timeout=30.0)
+        return {
+            "success": response.payload.get("success", False),
+            "data": response.payload.get("data", {}),
+            "error": response.payload.get("error", ""),
+        }
+    except asyncio.TimeoutError:
+        return {"error": "Fleet command timed out (30s)", "peer_id": target_peer_id}
+    except Exception as e:
+        logger.error(f"Fleet relay error for {target_peer_id[:16]}: {e}")
+        return {"error": f"Relay failed: {e}"}
+
+
+@router.get("/fleet/peers")
+async def fleet_peers(request: Request):
+    """List QUIC-connected peers available for fleet management."""
+    node = request.app.state.node
+    peers = []
+    for peer_id, conn in node._peer_connections.items():
+        peers.append({
+            "peer_id": peer_id,
+            "state": conn.state.value if hasattr(conn.state, "value") else str(conn.state),
+            "connected": conn.protocol is not None and not getattr(conn.protocol, "_is_closed", True),
+        })
+    return {"peers": peers}

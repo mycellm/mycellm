@@ -39,6 +39,7 @@ from mycellm.transport.messages import (
     pong_message,
     inference_stream_chunk,
     inference_done,
+    fleet_response,
 )
 from mycellm.transport.connection import PeerConnection, PeerState
 from mycellm.transport.peer_manager import PeerManager
@@ -390,7 +391,11 @@ class MycellmNode:
             )
             logger.info(f"{styled_tag('DHT')} Peer announced: {msg.from_peer[:16]}...")
 
+        elif msg.type == MessageType.FLEET_COMMAND:
+            await self._handle_fleet_command(protocol, msg, stream_id)
+
         elif msg.type in (
+            MessageType.FLEET_RESPONSE,
             MessageType.INFERENCE_RESP,
             MessageType.INFERENCE_STREAM,
             MessageType.INFERENCE_DONE,
@@ -401,6 +406,126 @@ class MycellmNode:
             conn = self._peer_connections.get(msg.from_peer)
             if conn:
                 conn.handle_response(msg)
+
+    # ── Fleet admin command handling ──
+
+    # Allowlisted fleet commands (restricted scope — no secrets, no key changes)
+    _FLEET_COMMANDS = {
+        "node.status", "node.config",
+        "model.list", "model.load", "model.unload", "model.scope",
+    }
+
+    async def _handle_fleet_command(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
+        """Handle a fleet management command relayed via bootstrap."""
+        import hmac
+
+        command = msg.payload.get("command", "")
+        params = msg.payload.get("params", {})
+        incoming_key = msg.payload.get("fleet_admin_key", "")
+
+        # Reject if no fleet admin key configured on this node
+        if not self._settings.fleet_admin_key:
+            logger.warning(f"{styled_tag('FLEET')} Fleet command rejected: no fleet_admin_key configured")
+            reply = fleet_response(self.peer_id, msg.id, False, error="Fleet admin key not configured on this node")
+            await protocol.reply_on_stream(stream_id, reply)
+            return
+
+        # Constant-time key comparison
+        if not hmac.compare_digest(incoming_key, self._settings.fleet_admin_key):
+            logger.warning(f"{styled_tag('FLEET')} Fleet command rejected: invalid key")
+            reply = fleet_response(self.peer_id, msg.id, False, error="Invalid fleet admin key")
+            await protocol.reply_on_stream(stream_id, reply)
+            return
+
+        # Check command allowlist
+        if command not in self._FLEET_COMMANDS:
+            logger.warning(f"{styled_tag('FLEET')} Fleet command rejected: disallowed command '{command}'")
+            reply = fleet_response(self.peer_id, msg.id, False, error=f"Command not allowed: {command}")
+            await protocol.reply_on_stream(stream_id, reply)
+            return
+
+        try:
+            data = await self._execute_fleet_command(command, params)
+            reply = fleet_response(self.peer_id, msg.id, True, data=data)
+            logger.info(f"{styled_tag('FLEET')} Fleet command executed: {command}")
+        except Exception as e:
+            logger.error(f"{styled_tag('FLEET')} Fleet command failed: {command}: {e}")
+            reply = fleet_response(self.peer_id, msg.id, False, error=str(e))
+        await protocol.reply_on_stream(stream_id, reply)
+
+    async def _execute_fleet_command(self, command: str, params: dict) -> dict:
+        """Execute an allowlisted fleet command and return result data."""
+        if command == "node.status":
+            status = self.get_status()
+            status["credits"] = await self.get_credits()
+            return status
+
+        elif command == "node.config":
+            # Redacted config — no secrets, no keys
+            return {
+                "node_name": self._settings.node_name,
+                "bootstrap_peers": self._settings.bootstrap_peers,
+                "log_level": self._settings.log_level,
+                "no_log_inference": self._settings.no_log_inference,
+                "telemetry": self._settings.telemetry,
+                "max_public_requests_per_hour": self._settings.max_public_requests_per_hour,
+                "relay_backends": bool(self._settings.relay_backends),
+                "api_key_set": bool(self._settings.api_key),
+                "hf_token_set": bool(self._settings.hf_token),
+            }
+
+        elif command == "model.list":
+            return {
+                "models": [m.to_dict() for m in self.inference.loaded_models],
+            }
+
+        elif command == "model.load":
+            model_path = params.get("model_path", "")
+            name = params.get("name")
+            backend_type = params.get("backend", "llama.cpp")
+            if backend_type == "llama.cpp" and not model_path:
+                raise ValueError("model_path required for llama.cpp backend")
+            loaded_name = await self.inference.load_model(
+                model_path, name=name, backend_type=backend_type,
+                ctx_len=params.get("ctx_len", 4096),
+                timeout=params.get("timeout", 120),
+                api_base=params.get("api_base", ""),
+                api_key=params.get("api_key", ""),
+                api_model=params.get("api_model", ""),
+            )
+            scope = params.get("scope", "home")
+            info = self.inference._model_info.get(loaded_name)
+            if info:
+                info.scope = scope
+            self.capabilities.models = self.inference.loaded_models
+            await self.announce_capabilities()
+            return {"status": "loaded", "model": loaded_name}
+
+        elif command == "model.unload":
+            model_name = params.get("model", "")
+            if not model_name:
+                raise ValueError("model name required")
+            await self.inference.unload_model(model_name)
+            self.capabilities.models = self.inference.loaded_models
+            await self.announce_capabilities()
+            return {"status": "unloaded", "model": model_name}
+
+        elif command == "model.scope":
+            model_name = params.get("model", "")
+            scope = params.get("scope", "home")
+            if not model_name:
+                raise ValueError("model name required")
+            if scope not in ("home", "public"):
+                raise ValueError("scope must be 'home' or 'public'")
+            info = self.inference._model_info.get(model_name)
+            if not info:
+                raise ValueError(f"Model not found: {model_name}")
+            info.scope = scope
+            self.capabilities.models = self.inference.loaded_models
+            await self.announce_capabilities()
+            return {"status": "updated", "model": model_name, "scope": scope}
+
+        raise ValueError(f"Unknown command: {command}")
 
     def _resolve_peer_trust(self, peer_id: str) -> str:
         """Determine the highest trust level for a peer based on shared networks.

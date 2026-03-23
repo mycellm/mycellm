@@ -19,6 +19,7 @@ class ErrorCode(str, Enum):
     INSUFFICIENT_CREDIT = "insufficient_credit"
     PROTOCOL_VERSION_MISMATCH = "protocol_version_mismatch"
     INVALID_MESSAGE = "invalid_message"
+    FLEET_KEY_DENIED = "fleet_key_denied"
     UNKNOWN = "unknown"
 
 

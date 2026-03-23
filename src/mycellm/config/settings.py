@@ -145,6 +145,10 @@ class MycellmSettings(BaseSettings):
     # Quality floor
     min_model_tier: str = ""  # Minimum model tier for this network
 
+    # Fleet admin key — opt-in remote fleet management via QUIC relay
+    # When set, allows a fleet admin to manage this node through the bootstrap
+    fleet_admin_key: str = ""  # MYCELLM_FLEET_ADMIN_KEY env var
+
     @property
     def keys_dir(self) -> Path:
         return self.data_dir / "keys"

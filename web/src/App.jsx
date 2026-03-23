@@ -2073,12 +2073,23 @@ function ModelsTab({ status, onRefresh }) {
 
       let fleet = []
       try {
-        const resp = await api('/v1/admin/nodes')
-        fleet = (resp.nodes || []).filter(n => n.status === 'approved').map(n => {
+        // Fetch fleet nodes and QUIC-connected peers in parallel
+        const [nodesResp, peersResp] = await Promise.all([
+          api('/v1/admin/nodes').catch(() => ({ nodes: [] })),
+          api('/v1/admin/fleet/peers').catch(() => ({ peers: [] })),
+        ])
+        const quicPeerIds = new Set(
+          (peersResp.peers || []).filter(p => p.connected).map(p => p.peer_id)
+        )
+        const hasFleetKey = !!localStorage.getItem('mycellm_fleet_admin_key')
+
+        fleet = (nodesResp.nodes || []).filter(n => n.status === 'approved').map(n => {
           const hw = n.system?.gpu || n.capabilities?.hardware || {}
           const mem = n.system?.memory || {}
           const models = n.capabilities?.models || []
           const pid = n.peer_id || ''
+          const hasQuic = quicPeerIds.has(pid)
+          const fleetManaged = hasFleetKey && hasQuic
           return {
             id: pid, name: n.node_name || `node-${pid.slice(0,8)}`, peerId: pid,
             addr: pid.slice(0,12),  // use peer_id prefix as unique key, not api_addr
@@ -2086,7 +2097,9 @@ function ModelsTab({ status, onRefresh }) {
             ram: mem.total_gb || hw.vram_gb || 0,
             models: models.map(m => typeof m === 'string' ? { name: m } : m),
             online: n.online, role: n.role || 'seeder',
-            readOnly: true,  // can't manage models on remote fleet nodes
+            readOnly: !fleetManaged,  // fleet-managed nodes are writable via QUIC relay
+            fleetManaged,
+            hasQuic,
           }
         })
       } catch {}
@@ -2098,19 +2111,46 @@ function ModelsTab({ status, onRefresh }) {
     return () => clearInterval(iv)
   }, [status])
 
+  // Fleet API helper — relay commands through bootstrap via QUIC
+  const fleetApi = async (peerId, command, params = {}) => {
+    const resp = await api('/v1/admin/fleet/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        node_peer_id: peerId,
+        command,
+        params,
+        fleet_admin_key: localStorage.getItem('mycellm_fleet_admin_key') || '',
+      }),
+    })
+    if (resp.error) throw new Error(resp.error)
+    if (!resp.success) throw new Error(resp.error || 'Fleet command failed')
+    return resp.data
+  }
+
   // Fetch selected remote node's live models
   const selectedDevice = devices.find(d => d.id === selected || d.addr === selected)
   const isRemote = selected !== 'local' && !selectedDevice?.isSelf
   const isReadOnly = selectedDevice?.readOnly || false
+  const isFleetManaged = selectedDevice?.fleetManaged || false
 
   useEffect(() => {
-    if (!isRemote || !selectedDevice?.addr) { setRemoteStatus(null); return }
-    const fetch_ = () => remoteApi(selectedDevice.addr, '/v1/node/status')
-      .then(setRemoteStatus).catch(() => setRemoteStatus(null))
+    if (!isRemote || !selectedDevice?.peerId) { setRemoteStatus(null); return }
+    const fetch_ = () => {
+      if (isFleetManaged) {
+        fleetApi(selectedDevice.peerId, 'node.status')
+          .then(setRemoteStatus).catch(() => setRemoteStatus(null))
+      } else if (selectedDevice?.addr) {
+        remoteApi(selectedDevice.addr, '/v1/node/status')
+          .then(setRemoteStatus).catch(() => setRemoteStatus(null))
+      } else {
+        setRemoteStatus(null)
+      }
+    }
     fetch_()
     const iv = setInterval(fetch_, 5000)
     return () => clearInterval(iv)
-  }, [selected, isRemote, selectedDevice?.addr])
+  }, [selected, isRemote, isFleetManaged, selectedDevice?.addr, selectedDevice?.peerId])
 
   const models = isRemote ? (remoteStatus?.models || selectedDevice?.models || []) : (status?.models || [])
 
@@ -2131,7 +2171,20 @@ function ModelsTab({ status, onRefresh }) {
   })
 
   // API helpers for selected device
+  // Maps dashboard API paths to fleet commands for fleet-managed nodes
+  const _fleetCommandMap = {
+    '/v1/node/models/unload': (body) => ['model.unload', { model: body.model }],
+    '/v1/node/models/load': (body) => ['model.load', body],
+    '/v1/node/models/scope': (body) => ['model.scope', body],
+  }
   const doApi = async (path, body) => {
+    if (isFleetManaged && selectedDevice?.peerId) {
+      const mapper = _fleetCommandMap[path]
+      if (mapper) {
+        const [cmd, params] = mapper(body)
+        return fleetApi(selectedDevice.peerId, cmd, params)
+      }
+    }
     const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     return isRemote ? remoteApi(selectedDevice.addr, path, opts) : api(path, opts)
   }
@@ -2719,11 +2772,26 @@ function ModelsTab({ status, onRefresh }) {
         </div>
       </div>}
 
+      {/* Fleet-managed indicator */}
+      {isFleetManaged && (
+        <div className="border border-ledger/20 bg-ledger/5 rounded-xl p-4 text-center">
+          <div className="flex items-center justify-center space-x-2 mb-1">
+            <Zap size={14} className="text-ledger" />
+            <p className="text-sm text-ledger font-medium">Fleet Managed via QUIC</p>
+          </div>
+          <p className="text-xs text-gray-500">Commands are relayed through the bootstrap to this node.</p>
+        </div>
+      )}
+
       {/* Read-only fleet node indicator */}
-      {isReadOnly && (
+      {isReadOnly && !isFleetManaged && (
         <div className="border border-white/10 bg-[#111] rounded-xl p-5 text-center">
           <p className="text-sm text-gray-500">This node is managed by its operator. Models shown are from its last announce.</p>
-          <p className="text-xs text-gray-600 mt-1">Connect to the node's dashboard directly to manage its models.</p>
+          <p className="text-xs text-gray-600 mt-1">
+            {selectedDevice?.hasQuic
+              ? 'This node has a QUIC connection. Set a fleet admin key in Settings to manage it remotely.'
+              : 'Connect to the node\'s dashboard directly to manage its models.'}
+          </p>
         </div>
       )}
     </div>
@@ -3628,6 +3696,47 @@ function SettingsTab() {
         <p className="text-xs text-gray-600 mt-1">
           Status: <span className={config?.telemetry ? 'text-spore' : 'text-gray-500'}>{config?.telemetry ? 'Enabled' : 'Disabled'}</span>
           {config?.telemetry && ' — stats included in bootstrap announce every 60s'}
+        </p>
+      </div>
+
+      {/* Fleet Admin Key */}
+      <div className="border border-white/10 bg-[#111] rounded-xl p-5">
+        <div className="flex items-center space-x-2 mb-4">
+          <Shield size={16} className="text-ledger" />
+          <h3 className="text-white font-medium text-sm">Fleet Admin Key</h3>
+          <span className="text-xs text-gray-600">Manage remote fleet nodes via QUIC relay</span>
+        </div>
+        <div className="flex items-end space-x-2">
+          <div className="flex-1">
+            <input
+              type="password"
+              value={localStorage.getItem('mycellm_fleet_admin_key') || ''}
+              onChange={e => {
+                const v = e.target.value
+                if (v) localStorage.setItem('mycellm_fleet_admin_key', v)
+                else localStorage.removeItem('mycellm_fleet_admin_key')
+                setResult({ success: v ? 'Fleet admin key saved' : 'Fleet admin key cleared' })
+                setTimeout(() => setResult(null), 3000)
+              }}
+              placeholder="Enter fleet admin key..."
+              className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white focus:border-ledger/50 focus:outline-none"
+            />
+          </div>
+          <button
+            onClick={() => {
+              localStorage.removeItem('mycellm_fleet_admin_key')
+              setResult({ success: 'Fleet admin key cleared' })
+              setTimeout(() => setResult(null), 3000)
+            }}
+            className="text-gray-500 hover:text-gray-300 pb-2"
+            title="Clear fleet admin key"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <p className="text-xs text-gray-600 mt-3">
+          This key is never sent to the bootstrap — it's included in fleet command payloads and verified on each node.
+          Nodes must have <code className="text-gray-400">MYCELLM_FLEET_ADMIN_KEY</code> set to accept commands.
         </p>
       </div>
 

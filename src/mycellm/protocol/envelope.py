@@ -52,6 +52,10 @@ class MessageType(str, Enum):
     # Peer exchange
     PEER_EXCHANGE = "peer_exchange"
 
+    # Fleet management (relayed via bootstrap)
+    FLEET_COMMAND = "fleet_command"
+    FLEET_RESPONSE = "fleet_response"
+
     # Error
     ERROR = "error"
 

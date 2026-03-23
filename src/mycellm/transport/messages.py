@@ -214,3 +214,41 @@ def peer_exchange(
         from_peer=from_peer,
         payload={"peers": known_peers},
     )
+
+
+def fleet_command(
+    from_peer: str,
+    command: str,
+    params: dict[str, Any] | None = None,
+    fleet_admin_key: str = "",
+) -> MessageEnvelope:
+    """Build a fleet management command (relayed via bootstrap to a node)."""
+    return MessageEnvelope(
+        type=MessageType.FLEET_COMMAND,
+        from_peer=from_peer,
+        payload={
+            "command": command,
+            "params": params or {},
+            "fleet_admin_key": fleet_admin_key,
+        },
+    )
+
+
+def fleet_response(
+    from_peer: str,
+    request_id: str,
+    success: bool,
+    data: dict[str, Any] | None = None,
+    error: str = "",
+) -> MessageEnvelope:
+    """Build a fleet management response."""
+    return MessageEnvelope(
+        type=MessageType.FLEET_RESPONSE,
+        from_peer=from_peer,
+        id=request_id,
+        payload={
+            "success": success,
+            "data": data or {},
+            "error": error,
+        },
+    )
