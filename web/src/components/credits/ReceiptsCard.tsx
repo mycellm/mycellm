@@ -12,7 +12,7 @@ export function ReceiptsCard() {
   return (
     <div className="border border-white/10 bg-surface rounded-xl p-5">
       <h3 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3">
-        {t('receipts', 'Receipts')}
+        {t('receipts.title', 'Receipts')}
       </h3>
 
       <div className="grid grid-cols-3 gap-3 text-center">

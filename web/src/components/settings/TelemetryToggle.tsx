@@ -41,7 +41,7 @@ export function TelemetryToggle({ enabled, onToggle }: TelemetryToggleProps) {
         <div className="flex items-center space-x-2">
           <Activity size={16} className="text-spore" />
           <h3 className="text-console font-medium text-sm">
-            {t('telemetry', 'Telemetry')}
+            {t('telemetry.title', 'Telemetry')}
           </h3>
         </div>
         <button

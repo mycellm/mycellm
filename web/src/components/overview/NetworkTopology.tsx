@@ -153,7 +153,7 @@ function NodeDetailModal({
           {node.system && (
             <div className="bg-black rounded-lg p-3">
               <div className="text-xs text-gray-500 mb-2">
-                {t('hardware', 'Hardware')}
+                {t('hardware.cpu', 'Hardware')}
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
                 {node.system.cpu?.name && (
@@ -229,7 +229,7 @@ export function NetworkTopology() {
       <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
         <Network size={12} />
         <span>
-          {t('topology', 'Topology')} ({allNodes.length}{' '}
+          {t('topology.title', 'Topology')} ({allNodes.length}{' '}
           {t('nodes', 'nodes')})
         </span>
       </h2>

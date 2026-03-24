@@ -43,7 +43,7 @@ export function IntegrationLinks() {
       <div className="flex items-center space-x-2 mb-4">
         <ExternalLink size={16} className="text-spore" />
         <h3 className="text-console font-medium text-sm">
-          {t('integrations', 'Integrations')}
+          {t('integrations.title', 'Integrations')}
         </h3>
       </div>
 

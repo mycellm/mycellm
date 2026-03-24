@@ -106,7 +106,7 @@ export function ActivityFeed() {
     <div className="border border-white/10 bg-surface rounded-xl p-5">
       <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-2">
         <Activity size={12} />
-        <span>{t('activity', 'Activity')}</span>
+        <span>{t('activity.title', 'Activity')}</span>
         {(stats?.requests_1m ?? 0) > 0 && (
           <span className="text-compute animate-pulse">
             &bull; {stats?.requests_1m}/min
