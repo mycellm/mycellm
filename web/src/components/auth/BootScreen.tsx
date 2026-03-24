@@ -1,28 +1,35 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuthStore } from '@/stores/auth'
+import { useNodeStore } from '@/stores/node'
 
-const BOOT_LINES = [
-  'Initializing mycellm-node daemon (v0.1.2)...',
-  'Loading Ed25519 identity...',
-  'Binding QUIC transport on :8421...',
-  'Connecting to bootstrap peers...',
-  'Node online — ready to serve.',
-]
+function getBootLines(version: string) {
+  const v = version ? `v${version}` : ''
+  return [
+    `Initializing mycellm-node daemon${v ? ` (${v})` : ''}...`,
+    'Loading Ed25519 identity...',
+    'Binding QUIC transport on :8421...',
+    'Connecting to bootstrap peers...',
+    'Node online — ready to serve.',
+  ]
+}
 
 export function BootScreen() {
   const setAppState = useAuthStore((s) => s.setAppState)
+  const version = useNodeStore((s) => s.versionInfo?.current ?? '')
+  const bootLines = getBootLines(version)
   const [logs, setLogs] = useState<string[]>([])
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let idx = 0
     const iv = setInterval(() => {
-      if (idx < BOOT_LINES.length) {
-        setLogs((prev) => [...prev, BOOT_LINES[idx]])
+      if (idx < bootLines.length) {
+        setLogs((prev) => [...prev, bootLines[idx]])
         idx++
       } else {
         clearInterval(iv)
         setTimeout(() => setAppState('dashboard'), 600)
+        return
       }
     }, 250)
     return () => clearInterval(iv)
