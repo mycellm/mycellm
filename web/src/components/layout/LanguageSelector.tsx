@@ -1,18 +1,18 @@
 import { useTranslation } from 'react-i18next'
 import { Globe } from 'lucide-react'
-import { supportedLanguages } from '@/i18n'
 
-const languageLabels: Record<string, string> = {
-  en: 'EN',
-  es: 'ES',
-  ja: 'JA',
-  zh: 'ZH',
-  de: 'DE',
-  fr: 'FR',
-}
+// Only show languages we have full translations for
+const availableLanguages = [
+  { code: 'en', label: 'English' },
+]
 
 export function LanguageSelector() {
   const { i18n } = useTranslation()
+
+  // Don't show selector if only one language
+  if (availableLanguages.length <= 1) {
+    return null
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     i18n.changeLanguage(e.target.value)
@@ -29,13 +29,13 @@ export function LanguageSelector() {
           hover:border-white/20 focus:outline-none focus:border-spore/50
           transition-colors"
       >
-        {supportedLanguages.map((lng) => (
+        {availableLanguages.map(({ code, label }) => (
           <option
-            key={lng}
-            value={lng}
+            key={code}
+            value={code}
             className="bg-surface text-console"
           >
-            {languageLabels[lng] ?? lng.toUpperCase()}
+            {label}
           </option>
         ))}
       </select>

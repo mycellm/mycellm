@@ -70,7 +70,7 @@ export function NetworkHealthBar() {
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-mono text-xs text-gray-500 uppercase tracking-widest flex items-center gap-2">
           <Heart size={12} />
-          <span>{t('networkHealth', 'Network Health')}</span>
+          <span>{t('networkHealth.title', 'Network Health')}</span>
         </h2>
         <div className="flex items-center gap-2">
           <span className={cn('font-mono text-2xl font-bold', labelColor)}>
