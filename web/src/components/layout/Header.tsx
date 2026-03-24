@@ -19,11 +19,13 @@ export function Header() {
     <header className="border-b border-white/10 px-4 py-3">
       {/* Desktop layout */}
       <div className="flex items-center justify-between gap-4">
-        {/* Left: Logo + node name */}
+        {/* Left: Lockup logo + node name */}
         <div className="flex items-center gap-3 min-w-0">
-          <span className="font-mono font-bold text-spore text-lg shrink-0">
-            mycellm_
-          </span>
+          <img
+            src="/brand/mycellm-h-R.svg"
+            alt="mycellm"
+            className="h-6 sm:h-7 shrink-0"
+          />
           {nodeName && (
             <span className="text-gray-500 text-sm truncate hidden sm:inline max-w-[200px]">
               {nodeName}

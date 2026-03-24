@@ -34,8 +34,15 @@ export function BootScreen() {
   }, [visibleCount, setAppState])
 
   return (
-    <div className="min-h-screen flex items-start justify-start bg-void p-6 sm:p-12">
-      <div className="font-mono text-spore text-sm sm:text-base space-y-1">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-void p-6 sm:p-12">
+      {/* Mushroom logo */}
+      <img
+        src="/brand/mycellm-red-logo-sans.svg"
+        alt=""
+        className="w-16 h-16 sm:w-20 sm:h-20 mb-8 opacity-80"
+      />
+
+      <div className="font-mono text-spore text-sm sm:text-base space-y-1 w-full max-w-md">
         {BOOT_LINES.slice(0, visibleCount).map((line, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="text-gray-600 select-none">{'>'}</span>

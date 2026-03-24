@@ -45,10 +45,12 @@ export function AuthGate() {
         className="w-full max-w-sm bg-surface border border-white/10 rounded-xl p-8 space-y-6"
       >
         {/* Logo */}
-        <div className="text-center space-y-2">
-          <h1 className="font-mono font-bold text-spore text-3xl">
-            mycellm_
-          </h1>
+        <div className="flex flex-col items-center space-y-4">
+          <img
+            src="/brand/mycellm-h-R.svg"
+            alt="mycellm"
+            className="h-10"
+          />
           <p className="text-gray-500 text-sm">
             {t('auth.subtitle', 'Enter your API key to access the dashboard')}
           </p>
