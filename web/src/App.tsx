@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, Component } from 'react'
+import type { ReactNode, ErrorInfo } from 'react'
 import { useAuthStore } from '@/stores/auth'
 import { useNodeStatus } from '@/hooks/useNodeStatus'
 import { useCredits } from '@/hooks/useCredits'
@@ -27,16 +28,20 @@ function DashboardLayout() {
   useCredits()
 
   return (
-    <div className="min-h-screen flex flex-col bg-void relative">
+    <div className="min-h-screen flex flex-col bg-void">
       <NetworkCanvas />
-      <Header />
-      <TabNav tab={tab} onTabChange={setTab} />
+      <div className="relative z-10 min-h-screen flex flex-col">
+        <Header />
+        <TabNav tab={tab} onTabChange={setTab} />
 
-      <main className="flex-1 overflow-y-auto custom-scrollbar p-4">
-        <TabContent tab={tab} />
-      </main>
+        <main className="flex-1 overflow-y-auto custom-scrollbar p-4">
+          <ErrorBoundary>
+            <TabContent tab={tab} />
+          </ErrorBoundary>
+        </main>
 
-      <Footer />
+        <Footer />
+      </div>
     </div>
   )
 }
@@ -139,6 +144,30 @@ function CheckingState() {
       </div>
     </div>
   )
+}
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Tab render error:', error, info)
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[200px] gap-3">
+          <p className="text-compute font-mono text-sm">Component error: {this.state.error.message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="text-xs text-spore border border-spore/30 px-3 py-1 rounded hover:bg-spore/10"
+          >
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 export default function App() {
