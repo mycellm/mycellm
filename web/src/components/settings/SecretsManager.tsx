@@ -116,6 +116,9 @@ export function SecretsManager({ secrets, onSecretsChange }: SecretsManagerProps
             value={newSecret.name}
             onChange={(e) => setNewSecret((s) => ({ ...s, name: e.target.value }))}
             placeholder="openrouter"
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
             className={cn(
               'w-full bg-void border border-white/10 rounded-lg px-3 py-2',
               'text-sm font-mono text-console',
@@ -131,6 +134,9 @@ export function SecretsManager({ secrets, onSecretsChange }: SecretsManagerProps
             onChange={(e) => setNewSecret((s) => ({ ...s, value: e.target.value }))}
             placeholder="sk-or-..."
             onKeyDown={(e) => e.key === 'Enter' && addSecret()}
+            autoComplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
             className={cn(
               'w-full bg-void border border-white/10 rounded-lg px-3 py-2',
               'text-sm font-mono text-console',
