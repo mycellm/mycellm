@@ -42,6 +42,15 @@ body {
   color: black;
 }
 
+/* ── Dark inputs: override browser autofill ── */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 30px #0A0A0A inset !important;
+  -webkit-text-fill-color: #E5E5E5 !important;
+  caret-color: #E5E5E5;
+}
+
 /* ── Custom Scrollbar ── */
 .custom-scrollbar::-webkit-scrollbar {
   width: 8px;
