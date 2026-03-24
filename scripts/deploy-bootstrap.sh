@@ -74,9 +74,11 @@ rsync -az --delete \
 REMOTE_VERSION=$(ssh "$HOST" "grep '__version__' ${REMOTE_DIR}/app/src/mycellm/__init__.py | grep -oP '\"[^\"]+\"'")
 log "Remote source: ${REMOTE_VERSION}"
 
-# ── Step 4: Build Docker image ──
+# ── Step 4: Build Docker image (via compose to avoid cache mismatch) ──
 log "Building Docker image..."
-ssh "$HOST" "cd ${REMOTE_DIR} && docker build --no-cache -t mycellm:${GIT_HASH} -t mycellm:latest -f app/docker/Dockerfile app/" 2>&1 | tail -3
+ssh "$HOST" "cd ${REMOTE_DIR} && docker compose build --no-cache mycellm" 2>&1 | tail -3
+# Also tag for green instance
+ssh "$HOST" "docker tag mycellm-mycellm:latest mycellm:${GIT_HASH}" 2>/dev/null || true
 
 # ── Step 5: Start green instance ──
 log "Starting green instance on :${GREEN_PORT}..."
@@ -92,7 +94,7 @@ ssh "$HOST" "docker run -d --name mycellm-green \
     -v mycellm_mycellm-data:/data/mycellm \
     ${BLUE_ENV} \
     -e MYCELLM_API_PORT=8420 \
-    mycellm:${GIT_HASH}"
+    mycellm-mycellm:latest"
 
 # ── Step 6: Health check green ──
 log "Health checking green on :${GREEN_PORT}..."
