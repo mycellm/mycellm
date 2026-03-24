@@ -12,16 +12,16 @@ export function useFleetNodes(): { isLoading: boolean } {
   const appState = useAuthStore((s) => s.appState);
   const setFleetNodes = useFleetStore((s) => s.setFleetNodes);
 
-  const { data, isLoading } = useQuery<FleetNode[]>({
+  const { data, isLoading } = useQuery<{ nodes: FleetNode[] }>({
     queryKey: QUERY_KEY,
-    queryFn: () => api.get<FleetNode[]>(API.admin.nodes),
+    queryFn: () => api.get<{ nodes: FleetNode[] }>(API.admin.nodes),
     refetchInterval: 5000,
     enabled: appState === 'dashboard',
     retry: false,
   });
 
   useEffect(() => {
-    if (data) setFleetNodes(data);
+    if (data?.nodes) setFleetNodes(data.nodes);
   }, [data, setFleetNodes]);
 
   return { isLoading };

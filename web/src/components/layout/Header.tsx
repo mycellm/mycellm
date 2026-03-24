@@ -12,7 +12,7 @@ export function Header() {
   const fleetNodes = useFleetStore((s) => s.fleetNodes)
 
   const peerCount = status?.peers?.length ?? 0
-  const fleetCount = fleetNodes.filter((n) => n.online).length
+  const fleetCount = Array.isArray(fleetNodes) ? fleetNodes.filter((n) => n.online).length : 0
   const nodeName = status?.node_name ?? ''
   const peerId = status?.peer_id ?? ''
   const isOnline = !!status

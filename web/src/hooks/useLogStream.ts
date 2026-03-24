@@ -19,11 +19,11 @@ export function useLogStream(): void {
 
     async function fetchInitialLogs() {
       try {
-        const entries = await api.get<LogEntry[]>(
+        const resp = await api.get<{ logs: LogEntry[] }>(
           `${API.node.logs}?limit=200`,
         );
         if (mounted) {
-          setEntries(entries);
+          setEntries(resp.logs ?? []);
         }
       } catch {
         // Initial fetch failed; stream will still attempt to connect

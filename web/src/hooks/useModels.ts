@@ -30,9 +30,9 @@ export function useModels(): {
   const {
     data: savedData,
     isLoading: isSavedLoading,
-  } = useQuery<SavedModel[]>({
+  } = useQuery<{ configs: SavedModel[] }>({
     queryKey: ['models', 'saved'],
-    queryFn: () => api.get<SavedModel[]>(API.models.saved),
+    queryFn: () => api.get<{ configs: SavedModel[] }>(API.models.saved),
     refetchInterval: 5000,
     enabled: appState === 'dashboard',
     retry: false,
@@ -40,7 +40,7 @@ export function useModels(): {
 
   return {
     models: modelsData?.data ?? [],
-    savedModels: savedData ?? [],
+    savedModels: savedData?.configs ?? [],
     isLoading,
     isSavedLoading,
   };

@@ -49,7 +49,9 @@ export function ChatTab() {
   const setSending = useChatStore((s) => s.setSending)
 
   const nodeStatus = useNodeStore((s) => s.status)
-  const credits = useCreditsStore((s) => ({ balance: s.balance, earned: s.earned, spent: s.spent }))
+  const creditBalance = useCreditsStore((s) => s.balance)
+  const creditEarned = useCreditsStore((s) => s.earned)
+  const creditSpent = useCreditsStore((s) => s.spent)
 
   const [showRouting, setShowRouting] = useState(false)
   const [sensitiveWarning, setSensitiveWarning] = useState<{
@@ -214,7 +216,7 @@ export function ChatTab() {
       return true
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [addMessage, clearMessages, setSending, nodeStatus, credits, models]
+    [addMessage, clearMessages, setSending, nodeStatus, creditBalance, creditEarned, creditSpent, models]
   )
 
   const sendChatMessage = useCallback(
