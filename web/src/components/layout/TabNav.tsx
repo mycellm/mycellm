@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { LanguageSelector } from '@/components/layout/LanguageSelector'
 import type { Tab } from '@/hooks/useTabRouter'
 
 interface TabNavProps {
@@ -37,6 +38,8 @@ export function TabNav({ tab, onTabChange }: TabNavProps) {
     onTabChange(id)
     setDrawerOpen(false)
   }
+
+  const activeTab = tabs.find((tb) => tb.id === tab)
 
   return (
     <>
@@ -65,11 +68,14 @@ export function TabNav({ tab, onTabChange }: TabNavProps) {
         </div>
       </nav>
 
-      {/* Mobile: hamburger button in header area */}
+      {/* Mobile: current tab + hamburger */}
       <div className="md:hidden border-b border-white/10 px-4 py-2 flex items-center justify-between">
-        <span className="font-mono text-sm text-gray-400">
-          {t(tabs.find((tb) => tb.id === tab)?.labelKey ?? 'nav.overview', tab)}
-        </span>
+        <div className="flex items-center gap-2 text-gray-300">
+          {activeTab && <activeTab.icon className="w-4 h-4 text-spore" />}
+          <span className="font-mono text-sm">
+            {t(activeTab?.labelKey ?? 'nav.overview', tab)}
+          </span>
+        </div>
         <button
           onClick={() => setDrawerOpen(true)}
           className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
@@ -104,6 +110,7 @@ export function TabNav({ tab, onTabChange }: TabNavProps) {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
             {/* Nav items */}
             <nav className="flex-1 py-2 overflow-y-auto">
               {tabs.map(({ id, icon: Icon, labelKey }) => {
@@ -125,6 +132,11 @@ export function TabNav({ tab, onTabChange }: TabNavProps) {
                 )
               })}
             </nav>
+
+            {/* Drawer footer: language selector */}
+            <div className="border-t border-white/10 px-5 py-3">
+              <LanguageSelector />
+            </div>
           </div>
         </div>
       )}

@@ -41,23 +41,21 @@ export function Header() {
           </div>
         </div>
 
-        {/* Right: Stats + status */}
-        <div className="flex items-center space-x-3 sm:space-x-5 font-mono text-xs sm:text-sm shrink-0">
-          {/* Stats — hidden on mobile (shown as page context instead) */}
-          <div className="hidden sm:flex items-center space-x-1.5 text-relay">
+        {/* Right: Stats — always visible, compact on mobile */}
+        <div className="flex items-center space-x-2 sm:space-x-5 font-mono text-xs sm:text-sm shrink-0">
+          <div className="flex items-center space-x-1 sm:space-x-1.5 text-relay">
             <Activity size={12} />
-            <span>{peerCount} {t('header.peers', 'peers')}</span>
+            <span className="hidden sm:inline">{peerCount} {t('header.peers', 'peers')}</span>
+            <span className="sm:hidden">{peerCount}</span>
           </div>
           <div className="hidden md:flex items-center space-x-1.5 text-relay">
             <Radio size={12} />
             <span>{fleetCount} fleet</span>
           </div>
-          <div className="hidden sm:flex items-center space-x-1.5 text-ledger">
+          <div className="flex items-center space-x-1 sm:space-x-1.5 text-ledger">
             <Key size={12} />
             <span>{balance.toFixed(0)}</span>
           </div>
-
-          {/* Online status — always visible */}
           <div
             className={`flex items-center space-x-1 ${isOnline ? 'text-spore' : 'text-gray-600'}`}
           >
@@ -67,7 +65,10 @@ export function Header() {
             </span>
           </div>
 
-          <LanguageSelector />
+          {/* Language selector — desktop only (mobile in drawer) */}
+          <div className="hidden md:block">
+            <LanguageSelector />
+          </div>
         </div>
       </div>
     </header>
