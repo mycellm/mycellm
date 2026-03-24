@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard,
@@ -7,6 +8,8 @@ import {
   Coins,
   ScrollText,
   Settings,
+  Menu,
+  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Tab } from '@/hooks/useTabRouter'
@@ -28,33 +31,103 @@ const tabs: { id: Tab; icon: typeof LayoutDashboard; labelKey: string }[] = [
 
 export function TabNav({ tab, onTabChange }: TabNavProps) {
   const { t } = useTranslation('common')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
+  const handleSelect = (id: Tab) => {
+    onTabChange(id)
+    setDrawerOpen(false)
+  }
 
   return (
-    <nav className="border-b border-white/10 px-2">
-      <div className="flex overflow-x-auto scrollbar-none">
-        {tabs.map(({ id, icon: Icon, labelKey }) => {
-          const isActive = tab === id
+    <>
+      {/* Desktop: horizontal tab bar */}
+      <nav className="hidden md:block border-b border-white/10 px-2">
+        <div className="max-w-7xl mx-auto flex">
+          {tabs.map(({ id, icon: Icon, labelKey }) => {
+            const isActive = tab === id
+            return (
+              <button
+                key={id}
+                onClick={() => onTabChange(id)}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap',
+                  'border-b-2 -mb-px',
+                  isActive
+                    ? 'border-spore text-spore'
+                    : 'border-transparent text-gray-500 hover:text-gray-300'
+                )}
+              >
+                <Icon className="w-4 h-4" />
+                <span>{t(labelKey, id)}</span>
+              </button>
+            )
+          })}
+        </div>
+      </nav>
 
-          return (
-            <button
-              key={id}
-              onClick={() => onTabChange(id)}
-              className={cn(
-                'flex items-center gap-2 px-3 py-2.5 text-sm font-medium transition-colors whitespace-nowrap shrink-0',
-                'border-b-2 -mb-px',
-                isActive
-                  ? 'border-spore text-spore'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
-              )}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span className="hidden md:inline">
-                {t(labelKey, id)}
-              </span>
-            </button>
-          )
-        })}
+      {/* Mobile: hamburger button in header area */}
+      <div className="md:hidden border-b border-white/10 px-4 py-2 flex items-center justify-between">
+        <span className="font-mono text-sm text-gray-400">
+          {t(tabs.find((tb) => tb.id === tab)?.labelKey ?? 'nav.overview', tab)}
+        </span>
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+          aria-label="Open menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
       </div>
-    </nav>
+
+      {/* Mobile drawer overlay */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-[100] md:hidden">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/70"
+            onClick={() => setDrawerOpen(false)}
+          />
+          {/* Drawer panel */}
+          <div className="absolute right-0 top-0 bottom-0 w-64 bg-void border-l border-white/10 flex flex-col">
+            {/* Drawer header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <img
+                src="/brand/mycellm-h-R.svg"
+                alt="mycellm"
+                className="h-5"
+              />
+              <button
+                onClick={() => setDrawerOpen(false)}
+                className="p-1 text-gray-500 hover:text-white"
+                aria-label="Close menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Nav items */}
+            <nav className="flex-1 py-2 overflow-y-auto">
+              {tabs.map(({ id, icon: Icon, labelKey }) => {
+                const isActive = tab === id
+                return (
+                  <button
+                    key={id}
+                    onClick={() => handleSelect(id)}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-5 py-3 text-sm font-medium transition-colors',
+                      isActive
+                        ? 'text-spore bg-spore/5 border-r-2 border-spore'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    )}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{t(labelKey, id)}</span>
+                  </button>
+                )
+              })}
+            </nav>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

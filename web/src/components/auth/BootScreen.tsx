@@ -35,21 +35,18 @@ export function BootScreen() {
   return (
     <div className="min-h-screen bg-void text-console font-mono flex items-center justify-center p-6">
       <div className="max-w-2xl w-full border border-spore/20 bg-black/50 p-6 rounded-lg shadow-[0_0_30px_rgba(34,197,94,0.05)]">
-        <div className="flex items-center space-x-4 mb-8">
+        {/* Lockup logo */}
+        <div className="mb-8">
           <img
-            src="/brand/mycellm-red-logo-sans.svg"
-            alt=""
-            className="h-12 drop-shadow-[0_0_8px_rgba(239,68,68,0.3)]"
+            src="/brand/mycellm-h-R.svg"
+            alt="mycellm"
+            className="h-10 sm:h-12"
           />
-          <div>
-            <h1 className="text-2xl font-bold tracking-tighter text-white">
-              mycellm<span className="text-spore">_</span>
-            </h1>
-            <p className="text-xs text-gray-500 uppercase tracking-widest">
-              Boot Sequence
-            </p>
-          </div>
+          <p className="text-xs text-gray-500 uppercase tracking-widest mt-2">
+            Boot Sequence
+          </p>
         </div>
+        {/* Terminal output */}
         <div className="space-y-2 text-sm text-gray-400 h-64 overflow-y-auto pr-2 custom-scrollbar">
           {logs.map((log, i) => (
             <div key={i} className="flex">
