@@ -1,0 +1,1 @@
+import{t as e,u as t}from"./utils-DaTkp41F.js";var n=t();function r({icon:t,message:r,className:i}){return(0,n.jsxs)(`div`,{className:e(`flex flex-col items-center justify-center py-12`,i),children:[t&&(0,n.jsx)(t,{className:`w-12 h-12 text-gray-600 mb-3`}),(0,n.jsx)(`p`,{className:`text-gray-500 text-sm text-center`,children:r})]})}export{r as t};

@@ -1,0 +1,57 @@
+{
+  "title": "Chat",
+  "input": {
+    "placeholder": "Escribe un mensaje o /help para comandos...",
+    "send": "Enviar",
+    "stop": "Detener generación"
+  },
+  "model": {
+    "auto": "Automático (mejor disponible)",
+    "local": "Local",
+    "fleet": "Flota",
+    "peers": "Pares"
+  },
+  "routing": {
+    "title": "Opciones de Enrutamiento",
+    "minQuality": "Calidad mínima",
+    "tags": "Etiquetas",
+    "mode": "Modo",
+    "fallback": "Si no está disponible",
+    "bestQuality": "Mejor calidad",
+    "fastest": "Más rápido",
+    "useNextBest": "Usar siguiente mejor",
+    "reject": "Rechazar solicitud"
+  },
+  "tiers": {
+    "any": "Cualquiera",
+    "tiny": "Pequeño (1B+)",
+    "fast": "Rápido (3B+)",
+    "capable": "Capaz (13B+)",
+    "frontier": "Frontera (65B+)"
+  },
+  "tags": {
+    "code": "código",
+    "reasoning": "razonamiento",
+    "vision": "visión"
+  },
+  "sensitive": {
+    "title": "Contenido Sensible Detectado",
+    "message": "Tu mensaje puede contener datos sensibles ({{types}}). Los prompts pueden ser procesados por pares remotos.",
+    "cancel": "Cancelar",
+    "sendAnyway": "Enviar de todos modos"
+  },
+  "retry": {
+    "retrying": "Reintentando en {{seconds}}s (intento {{attempt}}/{{max}})...",
+    "exhausted": "Reintentos agotados — inténtalo de nuevo más tarde.",
+    "busy": "Todos los modelos están ocupados."
+  },
+  "slash": {
+    "help": "Mostrar comandos disponibles",
+    "status": "Mostrar estado del nodo",
+    "models": "Listar modelos cargados",
+    "credits": "Mostrar saldo de créditos",
+    "fleet": "Mostrar nodos de flota",
+    "config": "Mostrar configuración del nodo",
+    "clear": "Limpiar conversación"
+  }
+}

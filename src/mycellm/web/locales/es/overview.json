@@ -1,0 +1,53 @@
+{
+  "title": "Resumen",
+  "networkHealth": {
+    "title": "Estado de la Red",
+    "quic": "QUIC",
+    "fleet": "flota",
+    "peers": "pares"
+  },
+  "identity": {
+    "mode": "Modo",
+    "role": "Rol",
+    "network": "Red",
+    "nodeId": "ID del Nodo"
+  },
+  "api": {
+    "title": "API Compatible con OpenAI",
+    "endpoint": "Endpoint",
+    "usage": "Compatible directamente con cualquier cliente OpenAI"
+  },
+  "fleet": {
+    "title": "Hardware de la Flota",
+    "nodes": "nodos",
+    "throughput": "Rendimiento",
+    "requests": "Solicitudes",
+    "tokens": "Tokens"
+  },
+  "stats": {
+    "requests": "Solicitudes",
+    "tokens": "Tokens",
+    "latency": "Latencia",
+    "dataSize": "Tamaño de Datos",
+    "perMin": "/min",
+    "avg": "prom"
+  },
+  "activity": {
+    "title": "Actividad Reciente",
+    "noActivity": "Sin actividad aún. Envía una solicitud de inferencia para ver eventos."
+  },
+  "topology": {
+    "title": "Topología de Red",
+    "thisNode": "Este nodo"
+  },
+  "hardware": {
+    "cpu": "CPU",
+    "ram": "RAM",
+    "gpu": "GPU",
+    "disk": "Disco",
+    "os": "SO",
+    "vram": "VRAM",
+    "backend": "Backend",
+    "tps": "TPS"
+  }
+}

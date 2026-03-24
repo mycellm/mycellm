@@ -1,0 +1,27 @@
+{
+  "title": "Red",
+  "registry": {
+    "title": "Registro de Flota",
+    "addNode": "Agregar Nodo",
+    "address": "Dirección",
+    "label": "Etiqueta",
+    "noNodes": "No hay nodos de flota registrados."
+  },
+  "models": {
+    "title": "Modelos en la Red",
+    "source": "Origen",
+    "noModels": "No hay modelos disponibles en la red."
+  },
+  "peers": {
+    "title": "Pares QUIC",
+    "noPeers": "No hay pares QUIC conectados."
+  },
+  "nodeDetail": {
+    "title": "Detalles del Nodo",
+    "role": "Rol",
+    "status": "Estado",
+    "transport": "Transporte",
+    "models": "Modelos",
+    "hardware": "Hardware"
+  }
+}

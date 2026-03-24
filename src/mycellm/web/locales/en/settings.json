@@ -1,0 +1,47 @@
+{
+  "title": "Settings",
+  "secrets": {
+    "title": "Encrypted Secrets",
+    "name": "Name",
+    "value": "Value",
+    "add": "Add Secret",
+    "noSecrets": "No secrets stored.",
+    "hint": "Use in models as secret:name",
+    "stored": "Secret '{{name}}' stored",
+    "deleted": "Secret '{{name}}' deleted"
+  },
+  "config": {
+    "title": "Node Configuration",
+    "apiKey": "API Key",
+    "bootstrapPeers": "Bootstrap Peers",
+    "announce": "Bootstrap Announce",
+    "hfToken": "HuggingFace Token",
+    "database": "Database",
+    "logLevel": "Log Level",
+    "configured": "Configured",
+    "notSet": "Not set",
+    "active": "Active",
+    "inactive": "Inactive",
+    "rateLimited": "Not set — rate limited"
+  },
+  "telemetry": {
+    "title": "Telemetry",
+    "description": "Anonymous usage stats (request counts, TPS, model names, uptime)",
+    "privacy": "No prompts, IPs, or user data",
+    "enabled": "Enabled — stats included in bootstrap announce every 60s",
+    "disabled": "Disabled"
+  },
+  "fleetKey": {
+    "title": "Fleet Admin Key",
+    "placeholder": "Enter fleet admin key",
+    "saved": "Fleet admin key saved",
+    "cleared": "Fleet admin key cleared",
+    "note": "Key is never sent to bootstrap, verified on each node"
+  },
+  "integrations": {
+    "title": "Integrations",
+    "prometheus": "Prometheus Metrics",
+    "health": "Health Check",
+    "docs": "API Documentation"
+  }
+}

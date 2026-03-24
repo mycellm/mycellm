@@ -1,0 +1,1 @@
+import{s as e}from"./utils-DaTkp41F.js";var t=e()(e=>({balance:0,earned:0,spent:0,tier:null,history:[],setCredits:({balance:t,earned:n,spent:r})=>e({balance:t,earned:n,spent:r}),setTier:t=>e({tier:t}),setHistory:t=>e({history:t})}));export{t};

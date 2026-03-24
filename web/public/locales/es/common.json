@@ -1,0 +1,96 @@
+{
+  "nav": {
+    "overview": "Resumen",
+    "network": "Red",
+    "models": "Modelos",
+    "chat": "Chat",
+    "credits": "Créditos",
+    "logs": "Registros",
+    "settings": "Ajustes"
+  },
+  "auth": {
+    "title": "mycellm_",
+    "subtitle": "Este nodo requiere una clave de API.",
+    "placeholder": "Ingresa la clave de API",
+    "submit": "Autenticar",
+    "invalid": "Clave de API inválida",
+    "checking": "Verificando..."
+  },
+  "header": {
+    "peers": "pares",
+    "models": "modelos",
+    "credits": "créditos"
+  },
+  "footer": {
+    "version": "Versión",
+    "updateAvailable": "Actualización disponible",
+    "metrics": "Métricas",
+    "health": "Estado",
+    "apiDocs": "Docs de API"
+  },
+  "status": {
+    "online": "En línea",
+    "offline": "Fuera de línea",
+    "healthy": "Saludable",
+    "degraded": "Degradado",
+    "limited": "Limitado",
+    "pending": "Pendiente",
+    "approved": "Aprobado",
+    "rejected": "Rechazado"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "copy": "Copiar",
+    "copied": "¡Copiado!",
+    "add": "Agregar",
+    "remove": "Quitar",
+    "approve": "Aprobar",
+    "refresh": "Actualizar",
+    "close": "Cerrar",
+    "retry": "Reintentar",
+    "clear": "Limpiar",
+    "send": "Enviar",
+    "stop": "Detener",
+    "loading": "Cargando...",
+    "confirm": "Confirmar"
+  },
+  "units": {
+    "seconds": "s",
+    "milliseconds": "ms",
+    "tokensPerSec": "T/s",
+    "bytes": "B",
+    "credits": "créditos"
+  },
+  "time": {
+    "days": "d",
+    "hours": "h",
+    "minutes": "m",
+    "justNow": "justo ahora"
+  },
+  "empty": {
+    "noData": "No hay datos disponibles",
+    "noResults": "No se encontraron resultados"
+  },
+  "errors": {
+    "networkError": "No se puede conectar al nodo. Verifica que `mycellm serve` esté ejecutándose.",
+    "unknownError": "Ocurrió un error inesperado."
+  },
+  "language": {
+    "en": "English",
+    "es": "Español",
+    "ja": "日本語",
+    "zh": "中文",
+    "de": "Deutsch",
+    "fr": "Français",
+    "select": "Idioma"
+  },
+  "theme": {
+    "dark": "Oscuro",
+    "light": "Claro",
+    "system": "Sistema",
+    "select": "Tema"
+  }
+}

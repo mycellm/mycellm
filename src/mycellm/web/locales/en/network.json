@@ -1,0 +1,27 @@
+{
+  "title": "Network",
+  "registry": {
+    "title": "Fleet Registry",
+    "addNode": "Add Node",
+    "address": "Address",
+    "label": "Label",
+    "noNodes": "No fleet nodes registered."
+  },
+  "models": {
+    "title": "Network Models",
+    "source": "Source",
+    "noModels": "No models available on the network."
+  },
+  "peers": {
+    "title": "QUIC Peers",
+    "noPeers": "No QUIC peers connected."
+  },
+  "nodeDetail": {
+    "title": "Node Details",
+    "role": "Role",
+    "status": "Status",
+    "transport": "Transport",
+    "models": "Models",
+    "hardware": "Hardware"
+  }
+}

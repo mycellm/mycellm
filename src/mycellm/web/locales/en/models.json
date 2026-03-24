@@ -1,0 +1,67 @@
+{
+  "title": "Models",
+  "device": {
+    "title": "Devices",
+    "thisNode": "This node (local)"
+  },
+  "table": {
+    "name": "Model",
+    "backend": "Backend",
+    "state": "State",
+    "scope": "Scope",
+    "actions": "Actions",
+    "noModels": "No models loaded."
+  },
+  "states": {
+    "loaded": "Loaded",
+    "loading": "Loading",
+    "unloaded": "On disk",
+    "api": "API",
+    "relay": "Relay"
+  },
+  "add": {
+    "title": "Add Model",
+    "browse": "Browse",
+    "local": "Local File",
+    "api": "API Provider",
+    "relay": "Device Relay"
+  },
+  "browser": {
+    "search": "Search HuggingFace models...",
+    "suggested": "Suggested Models",
+    "noResults": "No models found.",
+    "downloads": "downloads",
+    "params": "params",
+    "compatible": "Compatible only"
+  },
+  "variant": {
+    "filename": "File",
+    "size": "Size",
+    "quant": "Quantization",
+    "ramNeeded": "RAM Needed",
+    "download": "Download",
+    "downloading": "Downloading...",
+    "downloaded": "Downloaded"
+  },
+  "apiForm": {
+    "backend": "Backend",
+    "apiBase": "API Base URL",
+    "apiKey": "API Key",
+    "apiModel": "Model Name",
+    "ctxLen": "Context Length",
+    "maxConcurrent": "Max Concurrent",
+    "connect": "Connect"
+  },
+  "relayForm": {
+    "title": "Device Relays",
+    "url": "Relay URL",
+    "name": "Display Name",
+    "addRelay": "Add Relay",
+    "noRelays": "No relays configured.",
+    "refreshModels": "Refresh Models"
+  },
+  "scope": {
+    "home": "Private",
+    "public": "Public"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "title": "Chat",
+  "input": {
+    "placeholder": "Type a message or /help for commands...",
+    "send": "Send",
+    "stop": "Stop generation"
+  },
+  "model": {
+    "auto": "Automatic (best available)",
+    "local": "Local",
+    "fleet": "Fleet",
+    "peers": "Peers"
+  },
+  "routing": {
+    "title": "Routing Options",
+    "minQuality": "Min quality",
+    "tags": "Tags",
+    "mode": "Mode",
+    "fallback": "If unavailable",
+    "bestQuality": "Best quality",
+    "fastest": "Fastest",
+    "useNextBest": "Use next best",
+    "reject": "Reject request"
+  },
+  "tiers": {
+    "any": "Any",
+    "tiny": "Tiny (1B+)",
+    "fast": "Fast (3B+)",
+    "capable": "Capable (13B+)",
+    "frontier": "Frontier (65B+)"
+  },
+  "tags": {
+    "code": "code",
+    "reasoning": "reasoning",
+    "vision": "vision"
+  },
+  "sensitive": {
+    "title": "Sensitive Content Detected",
+    "message": "Your message may contain sensitive data ({{types}}). Prompts may be processed by remote peers.",
+    "cancel": "Cancel",
+    "sendAnyway": "Send anyway"
+  },
+  "retry": {
+    "retrying": "Retrying in {{seconds}}s (attempt {{attempt}}/{{max}})...",
+    "exhausted": "Retries exhausted — please try again later.",
+    "busy": "All models are busy."
+  },
+  "slash": {
+    "help": "Show available commands",
+    "status": "Show node status",
+    "models": "List loaded models",
+    "credits": "Show credit balance",
+    "fleet": "Show fleet nodes",
+    "config": "Show node configuration",
+    "clear": "Clear conversation"
+  }
+}

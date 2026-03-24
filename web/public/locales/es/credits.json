@@ -1,0 +1,35 @@
+{
+  "title": "Créditos",
+  "summary": {
+    "balance": "Saldo",
+    "earned": "Total Ganado",
+    "spent": "Total Gastado"
+  },
+  "tier": {
+    "title": "Nivel de Acceso",
+    "free": "Gratis",
+    "contributor": "Contribuidor",
+    "power": "Power Seeder",
+    "progress": "{{current}} / {{target}} para el siguiente nivel",
+    "access": {
+      "tier1": "Solo Nivel 1",
+      "tier12": "Nivel 1 + 2",
+      "all": "Todos los niveles"
+    }
+  },
+  "receipts": {
+    "title": "Recibos",
+    "total": "Total",
+    "verified": "Verificados",
+    "fleet": "Flota",
+    "description": "Los recibos verificados están firmados con Ed25519 por nodos seeders. Los recibos de flota se generan mediante proxy HTTP."
+  },
+  "history": {
+    "title": "Historial de Transacciones",
+    "time": "Hora",
+    "type": "Tipo",
+    "counterparty": "Contraparte",
+    "amount": "Monto",
+    "noTransactions": "Aún no hay transacciones."
+  }
+}

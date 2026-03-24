@@ -1,0 +1,53 @@
+{
+  "title": "Overview",
+  "networkHealth": {
+    "title": "Network Health",
+    "quic": "QUIC",
+    "fleet": "fleet",
+    "peers": "peers"
+  },
+  "identity": {
+    "mode": "Mode",
+    "role": "Role",
+    "network": "Network",
+    "nodeId": "Node ID"
+  },
+  "api": {
+    "title": "OpenAI-Compatible API",
+    "endpoint": "Endpoint",
+    "usage": "Drop-in compatible with any OpenAI client"
+  },
+  "fleet": {
+    "title": "Fleet Hardware",
+    "nodes": "nodes",
+    "throughput": "Throughput",
+    "requests": "Requests",
+    "tokens": "Tokens"
+  },
+  "stats": {
+    "requests": "Requests",
+    "tokens": "Tokens",
+    "latency": "Latency",
+    "dataSize": "Data Size",
+    "perMin": "/min",
+    "avg": "avg"
+  },
+  "activity": {
+    "title": "Activity Feed",
+    "noActivity": "No activity yet. Send an inference request to see events."
+  },
+  "topology": {
+    "title": "Network Topology",
+    "thisNode": "This node"
+  },
+  "hardware": {
+    "cpu": "CPU",
+    "ram": "RAM",
+    "gpu": "GPU",
+    "disk": "Disk",
+    "os": "OS",
+    "vram": "VRAM",
+    "backend": "Backend",
+    "tps": "TPS"
+  }
+}

@@ -1,0 +1,167 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme Variables ── */
+:root {
+  --color-void: #0A0A0A;
+  --color-spore: #22C55E;
+  --color-compute: #EF4444;
+  --color-relay: #3B82F6;
+  --color-ledger: #FACC15;
+  --color-poison: #A855F7;
+  --color-console: #E5E5E5;
+  --color-dimmed: #333333;
+  --color-surface: #111111;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+/* Light mode overrides (future) */
+:root.light {
+  --color-void: #FAFAFA;
+  --color-console: #1A1A1A;
+  --color-dimmed: #CCCCCC;
+  --color-surface: #FFFFFF;
+}
+
+/* ── Base ── */
+body {
+  margin: 0;
+  background: var(--color-void);
+  color: var(--color-console);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Selection ── */
+::selection {
+  background: var(--color-spore);
+  color: black;
+}
+
+/* ── Custom Scrollbar ── */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #000;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Firefox scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #333 #000;
+}
+
+/* ── Hidden Scrollbar ── */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ── Chat Markdown ── */
+.chat-md p {
+  margin: 0.4em 0;
+}
+.chat-md p:first-child {
+  margin-top: 0;
+}
+.chat-md p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-md pre {
+  margin: 0.5em 0;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.5) !important;
+  font-size: 0.8rem;
+}
+
+.chat-md code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+.chat-md :not(pre) > code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.15em 0.35em;
+  border-radius: 0.25rem;
+}
+
+.chat-md ul,
+.chat-md ol {
+  margin: 0.3em 0;
+  padding-left: 1.5em;
+}
+.chat-md ul {
+  list-style-type: disc;
+}
+.chat-md ol {
+  list-style-type: decimal;
+}
+.chat-md li {
+  margin: 0.15em 0;
+}
+
+.chat-md h1,
+.chat-md h2,
+.chat-md h3 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.chat-md h1 {
+  font-size: 1.15em;
+}
+.chat-md h2 {
+  font-size: 1.05em;
+}
+.chat-md h3 {
+  font-size: 1em;
+}
+
+.chat-md blockquote {
+  border-left: 2px solid rgba(34, 197, 94, 0.3);
+  padding-left: 0.75em;
+  margin: 0.4em 0;
+  color: #9ca3af;
+}
+
+.chat-md table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.85em;
+}
+.chat-md th,
+.chat-md td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.3em 0.6em;
+}
+
+.chat-md strong {
+  color: #fff;
+}
+
+.chat-md a {
+  color: var(--color-spore);
+  text-decoration: underline;
+}
+
+/* ── Animations ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

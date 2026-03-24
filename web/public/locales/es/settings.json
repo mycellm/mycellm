@@ -1,0 +1,47 @@
+{
+  "title": "Ajustes",
+  "secrets": {
+    "title": "Secretos Cifrados",
+    "name": "Nombre",
+    "value": "Valor",
+    "add": "Agregar Secreto",
+    "noSecrets": "No hay secretos almacenados.",
+    "hint": "Úsalo en modelos como secret:nombre",
+    "stored": "Secreto '{{name}}' almacenado",
+    "deleted": "Secreto '{{name}}' eliminado"
+  },
+  "config": {
+    "title": "Configuración del Nodo",
+    "apiKey": "Clave de API",
+    "bootstrapPeers": "Pares de Bootstrap",
+    "announce": "Anuncio de Bootstrap",
+    "hfToken": "Token de HuggingFace",
+    "database": "Base de Datos",
+    "logLevel": "Nivel de Registro",
+    "configured": "Configurado",
+    "notSet": "No configurado",
+    "active": "Activo",
+    "inactive": "Inactivo",
+    "rateLimited": "No configurado — con límite de tasa"
+  },
+  "telemetry": {
+    "title": "Telemetría",
+    "description": "Estadísticas anónimas de uso (conteo de solicitudes, TPS, nombres de modelos, tiempo activo)",
+    "privacy": "Sin prompts, IPs ni datos de usuario",
+    "enabled": "Habilitado — estadísticas incluidas en el anuncio de bootstrap cada 60s",
+    "disabled": "Deshabilitado"
+  },
+  "fleetKey": {
+    "title": "Clave de Administrador de Flota",
+    "placeholder": "Ingresa la clave de administrador de flota",
+    "saved": "Clave de administrador de flota guardada",
+    "cleared": "Clave de administrador de flota eliminada",
+    "note": "La clave nunca se envía al bootstrap, se verifica en cada nodo"
+  },
+  "integrations": {
+    "title": "Integraciones",
+    "prometheus": "Métricas de Prometheus",
+    "health": "Verificación de Estado",
+    "docs": "Documentación de API"
+  }
+}

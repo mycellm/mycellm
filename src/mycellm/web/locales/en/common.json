@@ -1,0 +1,96 @@
+{
+  "nav": {
+    "overview": "Overview",
+    "network": "Network",
+    "models": "Models",
+    "chat": "Chat",
+    "credits": "Credits",
+    "logs": "Logs",
+    "settings": "Settings"
+  },
+  "auth": {
+    "title": "mycellm_",
+    "subtitle": "This node requires an API key.",
+    "placeholder": "Enter API key",
+    "submit": "Authenticate",
+    "invalid": "Invalid API key",
+    "checking": "Checking..."
+  },
+  "header": {
+    "peers": "peers",
+    "models": "models",
+    "credits": "credits"
+  },
+  "footer": {
+    "version": "Version",
+    "updateAvailable": "Update available",
+    "metrics": "Metrics",
+    "health": "Health",
+    "apiDocs": "API Docs"
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "limited": "Limited",
+    "pending": "Pending",
+    "approved": "Approved",
+    "rejected": "Rejected"
+  },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "add": "Add",
+    "remove": "Remove",
+    "approve": "Approve",
+    "refresh": "Refresh",
+    "close": "Close",
+    "retry": "Retry",
+    "clear": "Clear",
+    "send": "Send",
+    "stop": "Stop",
+    "loading": "Loading...",
+    "confirm": "Confirm"
+  },
+  "units": {
+    "seconds": "s",
+    "milliseconds": "ms",
+    "tokensPerSec": "T/s",
+    "bytes": "B",
+    "credits": "credits"
+  },
+  "time": {
+    "days": "d",
+    "hours": "h",
+    "minutes": "m",
+    "justNow": "just now"
+  },
+  "empty": {
+    "noData": "No data available",
+    "noResults": "No results found"
+  },
+  "errors": {
+    "networkError": "Cannot reach the node. Check that `mycellm serve` is running.",
+    "unknownError": "An unexpected error occurred."
+  },
+  "language": {
+    "en": "English",
+    "es": "Español",
+    "ja": "日本語",
+    "zh": "中文",
+    "de": "Deutsch",
+    "fr": "Français",
+    "select": "Language"
+  },
+  "theme": {
+    "dark": "Dark",
+    "light": "Light",
+    "system": "System",
+    "select": "Theme"
+  }
+}

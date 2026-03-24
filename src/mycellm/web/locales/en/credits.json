@@ -1,0 +1,35 @@
+{
+  "title": "Credits",
+  "summary": {
+    "balance": "Balance",
+    "earned": "Total Earned",
+    "spent": "Total Spent"
+  },
+  "tier": {
+    "title": "Access Tier",
+    "free": "Free",
+    "contributor": "Contributor",
+    "power": "Power Seeder",
+    "progress": "{{current}} / {{target}} for next tier",
+    "access": {
+      "tier1": "Tier 1 only",
+      "tier12": "Tier 1 + 2",
+      "all": "All tiers"
+    }
+  },
+  "receipts": {
+    "title": "Receipts",
+    "total": "Total",
+    "verified": "Verified",
+    "fleet": "Fleet",
+    "description": "Verified receipts are Ed25519-signed by seeder nodes. Fleet receipts are generated via HTTP proxy."
+  },
+  "history": {
+    "title": "Transaction History",
+    "time": "Time",
+    "type": "Type",
+    "counterparty": "Counterparty",
+    "amount": "Amount",
+    "noTransactions": "No transactions yet."
+  }
+}

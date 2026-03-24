@@ -1,0 +1,67 @@
+{
+  "title": "Modelos",
+  "device": {
+    "title": "Dispositivos",
+    "thisNode": "Este nodo (local)"
+  },
+  "table": {
+    "name": "Modelo",
+    "backend": "Backend",
+    "state": "Estado",
+    "scope": "Alcance",
+    "actions": "Acciones",
+    "noModels": "No hay modelos cargados."
+  },
+  "states": {
+    "loaded": "Cargado",
+    "loading": "Cargando",
+    "unloaded": "En disco",
+    "api": "API",
+    "relay": "Relay"
+  },
+  "add": {
+    "title": "Agregar Modelo",
+    "browse": "Explorar",
+    "local": "Archivo Local",
+    "api": "Proveedor de API",
+    "relay": "Relay de Dispositivo"
+  },
+  "browser": {
+    "search": "Buscar modelos en HuggingFace...",
+    "suggested": "Modelos Sugeridos",
+    "noResults": "No se encontraron modelos.",
+    "downloads": "descargas",
+    "params": "parámetros",
+    "compatible": "Solo compatibles"
+  },
+  "variant": {
+    "filename": "Archivo",
+    "size": "Tamaño",
+    "quant": "Cuantización",
+    "ramNeeded": "RAM Necesaria",
+    "download": "Descargar",
+    "downloading": "Descargando...",
+    "downloaded": "Descargado"
+  },
+  "apiForm": {
+    "backend": "Backend",
+    "apiBase": "URL Base de API",
+    "apiKey": "Clave de API",
+    "apiModel": "Nombre del Modelo",
+    "ctxLen": "Longitud de Contexto",
+    "maxConcurrent": "Máx. Concurrentes",
+    "connect": "Conectar"
+  },
+  "relayForm": {
+    "title": "Relays de Dispositivo",
+    "url": "URL del Relay",
+    "name": "Nombre Visible",
+    "addRelay": "Agregar Relay",
+    "noRelays": "No hay relays configurados.",
+    "refreshModels": "Actualizar Modelos"
+  },
+  "scope": {
+    "home": "Privado",
+    "public": "Público"
+  }
+}
