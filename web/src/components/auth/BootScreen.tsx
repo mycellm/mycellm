@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuthStore } from '@/stores/auth'
 import { useNodeStore } from '@/stores/node'
 
-const BOOT_TEMPLATES = [
-  (v: string) => `Initializing mycellm-node daemon${v ? ` (v${v})` : ''}...`,
+const BOOT_TEMPLATES: Array<(v: string) => string> = [
+  (v) => `Initializing mycellm-node daemon${v ? ` (v${v})` : ''}...`,
   () => 'Loading Ed25519 identity...',
   () => 'Binding QUIC transport on :8421...',
   () => 'Connecting to bootstrap peers...',
@@ -14,20 +14,27 @@ export function BootScreen() {
   const setAppState = useAuthStore((s) => s.setAppState)
   const [logs, setLogs] = useState<string[]>([])
   const endRef = useRef<HTMLDivElement>(null)
+  const idxRef = useRef(0)
+  const startedRef = useRef(false)
 
   useEffect(() => {
-    let idx = 0
+    // Guard against double-invocation (StrictMode or dep changes)
+    if (startedRef.current) return
+    startedRef.current = true
+
     const iv = setInterval(() => {
+      const idx = idxRef.current
       if (idx < BOOT_TEMPLATES.length) {
-        // Read version fresh from store each tick (not stale closure)
         const version = useNodeStore.getState().versionInfo?.current ?? ''
-        setLogs((prev) => [...prev, BOOT_TEMPLATES[idx](version)])
-        idx++
+        const line = BOOT_TEMPLATES[idx](version)
+        setLogs((prev) => [...prev, line])
+        idxRef.current = idx + 1
       } else {
         clearInterval(iv)
         setTimeout(() => setAppState('dashboard'), 600)
       }
     }, 250)
+
     return () => clearInterval(iv)
   }, [setAppState])
 
