@@ -98,10 +98,18 @@ function CheckingState() {
             return
           }
 
-          // If we have a stored key and it worked, boot
+          // Auth is required — validate stored key if we have one
           if (apiKey) {
-            setAppState('booting')
-            return
+            const testResp = await fetch(`${window.location.origin}/v1/node/status`, {
+              headers: { Authorization: `Bearer ${apiKey}` },
+            })
+            if (cancelled) return
+            if (testResp.ok) {
+              setAppState('booting')
+              return
+            }
+            // Stored key is invalid — clear it and show auth
+            useAuthStore.getState().setApiKey('')
           }
         }
 
