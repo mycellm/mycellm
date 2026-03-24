@@ -32,13 +32,16 @@ class ApiClient {
     })
 
     if (response.status === 401) {
-      // Debounce logout — only trigger once, not on every polling 401
+      // Trigger logout once — use queueMicrotask to avoid calling
+      // logout() synchronously during a React render cycle.
+      // logoutPending stays true permanently; hooks with
+      // enabled: appState === 'dashboard' stop polling after logout,
+      // so no further 401s arrive. Flag resets on next successful request.
       if (!logoutPending) {
         logoutPending = true
-        setTimeout(() => {
+        queueMicrotask(() => {
           useAuthStore.getState().logout()
-          logoutPending = false
-        }, 100)
+        })
       }
       throw new Error('Unauthorized')
     }
@@ -51,6 +54,9 @@ class ApiClient {
       const body = await response.text().catch(() => '')
       throw new Error(`API error ${response.status}: ${body}`)
     }
+
+    // Reset logout flag on successful request (allows logout on future 401s after re-login)
+    logoutPending = false
 
     const text = await response.text()
     if (!text) return undefined as T

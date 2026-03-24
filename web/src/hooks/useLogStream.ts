@@ -3,14 +3,18 @@ import { api } from '@/api/client';
 import { API } from '@/api/endpoints';
 import type { LogEntry } from '@/api/types';
 import { useLogsStore } from '@/stores/logs';
+import { useAuthStore } from '@/stores/auth';
 
 export function useLogStream(): void {
+  const appState = useAuthStore((s) => s.appState);
   const setEntries = useLogsStore((s) => s.setEntries);
   const addEntry = useLogsStore((s) => s.addEntry);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (appState !== 'dashboard') return;
+
     let mounted = true;
 
     async function fetchInitialLogs() {
@@ -62,5 +66,5 @@ export function useLogStream(): void {
         reconnectTimerRef.current = null;
       }
     };
-  }, [setEntries, addEntry]);
+  }, [appState, setEntries, addEntry]);
 }

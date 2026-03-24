@@ -15,6 +15,7 @@ export function useNodeStatus(): { isLoading: boolean; error: Error | null } {
     queryFn: () => api.get<NodeStatus>(API.node.status),
     refetchInterval: 3000,
     enabled: appState === 'dashboard',
+    retry: false,
   });
 
   useEffect(() => {

@@ -4,8 +4,10 @@ import { api } from '@/api/client';
 import { API } from '@/api/endpoints';
 import type { ActivityData, ActivityEvent } from '@/api/types';
 import { useActivityStore } from '@/stores/activity';
+import { useAuthStore } from '@/stores/auth';
 
 export function useActivityStream(): void {
+  const appState = useAuthStore((s) => s.appState);
   const setActivityData = useActivityStore((s) => s.setActivityData);
   const addLiveEvent = useActivityStore((s) => s.addLiveEvent);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -16,6 +18,8 @@ export function useActivityStream(): void {
     queryKey: ['node', 'activity'],
     queryFn: () => api.get<ActivityData>(`${API.node.activity}?limit=100`),
     refetchInterval: 3000,
+    enabled: appState === 'dashboard',
+    retry: false,
   });
 
   useEffect(() => {
@@ -24,6 +28,8 @@ export function useActivityStream(): void {
 
   // SSE for live events
   useEffect(() => {
+    if (appState !== 'dashboard') return;
+
     let mounted = true;
 
     async function fetchInitial() {
@@ -75,5 +81,5 @@ export function useActivityStream(): void {
         reconnectTimerRef.current = null;
       }
     };
-  }, [setActivityData, addLiveEvent]);
+  }, [appState, setActivityData, addLiveEvent]);
 }
