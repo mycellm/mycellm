@@ -2,34 +2,30 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuthStore } from '@/stores/auth'
 import { useNodeStore } from '@/stores/node'
 
-function getBootLines(version: string) {
-  const v = version ? `v${version}` : ''
-  return [
-    `Initializing mycellm-node daemon${v ? ` (${v})` : ''}...`,
-    'Loading Ed25519 identity...',
-    'Binding QUIC transport on :8421...',
-    'Connecting to bootstrap peers...',
-    'Node online — ready to serve.',
-  ]
-}
+const BOOT_TEMPLATES = [
+  (v: string) => `Initializing mycellm-node daemon${v ? ` (v${v})` : ''}...`,
+  () => 'Loading Ed25519 identity...',
+  () => 'Binding QUIC transport on :8421...',
+  () => 'Connecting to bootstrap peers...',
+  () => 'Node online — ready to serve.',
+]
 
 export function BootScreen() {
   const setAppState = useAuthStore((s) => s.setAppState)
-  const version = useNodeStore((s) => s.versionInfo?.current ?? '')
-  const bootLines = getBootLines(version)
   const [logs, setLogs] = useState<string[]>([])
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let idx = 0
     const iv = setInterval(() => {
-      if (idx < bootLines.length) {
-        setLogs((prev) => [...prev, bootLines[idx]])
+      if (idx < BOOT_TEMPLATES.length) {
+        // Read version fresh from store each tick (not stale closure)
+        const version = useNodeStore.getState().versionInfo?.current ?? ''
+        setLogs((prev) => [...prev, BOOT_TEMPLATES[idx](version)])
         idx++
       } else {
         clearInterval(iv)
         setTimeout(() => setAppState('dashboard'), 600)
-        return
       }
     }, 250)
     return () => clearInterval(iv)
@@ -42,7 +38,6 @@ export function BootScreen() {
   return (
     <div className="min-h-screen bg-void text-console font-mono flex items-center justify-center p-6">
       <div className="max-w-2xl w-full border border-spore/20 bg-black/50 p-6 rounded-lg shadow-[0_0_30px_rgba(34,197,94,0.05)]">
-        {/* Lockup logo */}
         <div className="mb-8">
           <img
             src="/brand/mycellm-h-R.svg"
@@ -53,7 +48,6 @@ export function BootScreen() {
             Boot Sequence
           </p>
         </div>
-        {/* Terminal output */}
         <div className="space-y-2 text-sm text-gray-400 h-64 overflow-y-auto pr-2 custom-scrollbar">
           {logs.map((log, i) => (
             <div key={i} className="flex">
