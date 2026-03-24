@@ -1,17 +1,8 @@
-# Multi-stage build: build web dashboard → package Python app
+# Python application with pre-built web dashboard
+# Dashboard is built locally (npm run build in web/) before docker build.
+# The build output at src/mycellm/web/ is copied directly into the image.
 
-# Stage 1: Build web dashboard
-FROM node:22-slim AS web-builder
-WORKDIR /build
-COPY web/package*.json web/
-RUN cd web && npm ci --no-audit 2>/dev/null || true
-COPY web/ web/
-COPY src/mycellm/web/ src/mycellm/web/
-RUN cd web && if [ -f package.json ]; then npm run build; fi
-# Output lands at /build/src/mycellm/web/ (vite outDir: ../src/mycellm/web)
-
-# Stage 2: Python application
-FROM python:3.13-slim AS runtime
+FROM python:3.13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
@@ -27,9 +18,6 @@ RUN pip install --no-cache-dir hatchling && \
     asyncpg sqlalchemy aiosqlite typer rich pydantic pydantic-settings \
     pyyaml httpx prometheus-client && \
     pip install --no-cache-dir -e .
-
-# Copy built web dashboard (overwrites placeholder in src/mycellm/web/)
-COPY --from=web-builder /build/src/mycellm/web/ src/mycellm/web/
 
 # Copy entrypoint
 COPY docker/entrypoint.sh /entrypoint.sh
