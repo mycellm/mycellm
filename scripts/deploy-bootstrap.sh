@@ -16,7 +16,7 @@
 #
 # Requirements:
 #   - SSH access: ssh docker-box (root@96.126.98.204)
-#   - Caddy running as Docker container (dodecki-caddy) on docker-box
+#   - Caddy running as system service on docker-box
 #   - Source code at ~/projects/mycellm/app/ on local machine
 
 set -euo pipefail
@@ -44,7 +44,7 @@ fail() { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
 # ── Rollback ──
 if [[ "${1:-}" == "--rollback" ]]; then
     log "Rolling back Caddy to blue (port $BLUE_PORT)..."
-    ssh "$HOST" "sed -i 's|reverse_proxy localhost:$GREEN_PORT|reverse_proxy localhost:$BLUE_PORT|' $CADDY_CONFIG && docker exec dodecki-caddy caddy reload --config $CADDY_CONFIG"
+    ssh "$HOST" "sed -i 's|reverse_proxy localhost:$GREEN_PORT|reverse_proxy localhost:$BLUE_PORT|' $CADDY_CONFIG && caddy reload --config $CADDY_CONFIG"
     log "Stopping green instance..."
     ssh "$HOST" "docker stop mycellm-green 2>/dev/null; docker rm mycellm-green 2>/dev/null" || true
     log "Rollback complete. Blue is live on :$BLUE_PORT"
@@ -113,7 +113,7 @@ done
 
 # ── Step 7: Swap Caddy upstream ──
 log "Swapping Caddy: ${DOMAIN} → :${GREEN_PORT}"
-ssh "$HOST" "sed -i 's|reverse_proxy localhost:${BLUE_PORT}|reverse_proxy localhost:${GREEN_PORT}|' ${CADDY_CONFIG} && docker exec dodecki-caddy caddy reload --config ${CADDY_CONFIG}"
+ssh "$HOST" "sed -i 's|reverse_proxy localhost:${BLUE_PORT}|reverse_proxy localhost:${GREEN_PORT}|' ${CADDY_CONFIG} && caddy reload --config ${CADDY_CONFIG}"
 
 # Verify swap
 sleep 2
@@ -121,7 +121,7 @@ if ssh "$HOST" "curl -sf http://localhost:${GREEN_PORT}/health" >/dev/null 2>&1;
     log "Caddy swapped successfully"
 else
     warn "Green not responding after swap — rolling back!"
-    ssh "$HOST" "sed -i 's|reverse_proxy localhost:${GREEN_PORT}|reverse_proxy localhost:${BLUE_PORT}|' ${CADDY_CONFIG} && docker exec dodecki-caddy caddy reload --config ${CADDY_CONFIG}"
+    ssh "$HOST" "sed -i 's|reverse_proxy localhost:${GREEN_PORT}|reverse_proxy localhost:${BLUE_PORT}|' ${CADDY_CONFIG} && caddy reload --config ${CADDY_CONFIG}"
     fail "Rollback complete. Blue is still live."
 fi
 
@@ -141,7 +141,7 @@ ssh "$HOST" "docker stop mycellm-green; docker rm mycellm-green" 2>/dev/null || 
 ssh "$HOST" "cd ${REMOTE_DIR} && docker compose up -d mycellm" 2>&1 | tail -3
 
 # Reload Caddy to point back to blue port
-ssh "$HOST" "docker exec dodecki-caddy caddy reload --config ${CADDY_CONFIG}"
+ssh "$HOST" "caddy reload --config ${CADDY_CONFIG}"
 
 # Final health check
 sleep 8
