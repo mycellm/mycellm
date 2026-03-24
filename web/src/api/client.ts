@@ -1,5 +1,7 @@
 import { useAuthStore } from '../stores/auth'
 
+let logoutPending = false
+
 class ApiClient {
   private getBaseUrl(): string {
     return window.location.origin
@@ -30,8 +32,19 @@ class ApiClient {
     })
 
     if (response.status === 401) {
-      useAuthStore.getState().logout()
+      // Debounce logout — only trigger once, not on every polling 401
+      if (!logoutPending) {
+        logoutPending = true
+        setTimeout(() => {
+          useAuthStore.getState().logout()
+          logoutPending = false
+        }, 100)
+      }
       throw new Error('Unauthorized')
+    }
+
+    if (response.status === 429) {
+      throw new Error('Rate limited')
     }
 
     if (!response.ok) {

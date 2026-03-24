@@ -5,7 +5,6 @@ import { useNodeStatus } from '@/hooks/useNodeStatus'
 import { useCredits } from '@/hooks/useCredits'
 import { useTabRouter } from '@/hooks/useTabRouter'
 import { useTheme } from '@/hooks/useTheme'
-import { lazy, Suspense } from 'react'
 import { AuthGate } from '@/components/auth/AuthGate'
 import { BootScreen } from '@/components/auth/BootScreen'
 import { Header } from '@/components/layout/Header'
@@ -13,13 +12,13 @@ import { TabNav } from '@/components/layout/TabNav'
 import { Footer } from '@/components/layout/Footer'
 import NetworkCanvas from '@/components/canvas/NetworkCanvas'
 
-const OverviewTab = lazy(() => import('@/components/overview/OverviewTab').then(m => ({ default: m.OverviewTab })))
-const NetworkTab = lazy(() => import('@/components/network/NetworkTab').then(m => ({ default: m.default ?? m.NetworkTab })))
-const ModelsTab = lazy(() => import('@/components/models/ModelsTab').then(m => ({ default: m.default ?? m.ModelsTab })))
-const ChatTab = lazy(() => import('@/components/chat/ChatTab').then(m => ({ default: m.default ?? m.ChatTab })))
-const CreditsTab = lazy(() => import('@/components/credits/CreditsTab').then(m => ({ default: m.default ?? m.CreditsTab })))
-const LogsTab = lazy(() => import('@/components/logs/LogsTab').then(m => ({ default: m.default ?? m.LogsTab })))
-const SettingsTab = lazy(() => import('@/components/settings/SettingsTab').then(m => ({ default: m.default ?? m.SettingsTab })))
+import { OverviewTab } from '@/components/overview/OverviewTab'
+import { NetworkTab } from '@/components/network/NetworkTab'
+import { ModelsTab } from '@/components/models/ModelsTab'
+import { ChatTab } from '@/components/chat/ChatTab'
+import { CreditsTab } from '@/components/credits/CreditsTab'
+import { LogsTab } from '@/components/logs/LogsTab'
+import { SettingsTab } from '@/components/settings/SettingsTab'
 
 function DashboardLayout() {
   const { tab, setTab } = useTabRouter()
@@ -34,8 +33,8 @@ function DashboardLayout() {
         <Header />
         <TabNav tab={tab} onTabChange={setTab} />
 
-        <main className="flex-1 overflow-y-auto custom-scrollbar p-4">
-          <ErrorBoundary>
+        <main className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-void">
+          <ErrorBoundary key={tab}>
             <TabContent tab={tab} />
           </ErrorBoundary>
         </main>
@@ -47,29 +46,15 @@ function DashboardLayout() {
 }
 
 function TabContent({ tab }: { tab: string }) {
-  const fallback = (
-    <div className="flex items-center justify-center min-h-[200px]">
-      <div className="w-2 h-2 bg-spore rounded-full animate-ping" />
-    </div>
-  )
-
-  const placeholder = (name: string) => (
-    <div className="flex items-center justify-center min-h-[200px] border border-dashed border-white/10 rounded-lg">
-      <span className="text-gray-500 font-mono text-sm capitalize">{name}</span>
-    </div>
-  )
-
   return (
     <div className="max-w-6xl mx-auto w-full">
-      <Suspense fallback={fallback}>
-        {tab === 'overview' && <OverviewTab />}
-        {tab === 'network' && <NetworkTab />}
-        {tab === 'models' && <ModelsTab />}
-        {tab === 'chat' && <ChatTab />}
-        {tab === 'credits' && <CreditsTab />}
-        {tab === 'logs' && <LogsTab />}
-        {tab === 'settings' && <SettingsTab />}
-      </Suspense>
+      {tab === 'overview' && <OverviewTab />}
+      {tab === 'network' && <NetworkTab />}
+      {tab === 'models' && <ModelsTab />}
+      {tab === 'chat' && <ChatTab />}
+      {tab === 'credits' && <CreditsTab />}
+      {tab === 'logs' && <LogsTab />}
+      {tab === 'settings' && <SettingsTab />}
     </div>
   )
 }
