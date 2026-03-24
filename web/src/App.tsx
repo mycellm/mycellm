@@ -1,6 +1,7 @@
 import { useEffect, Component } from 'react'
 import type { ReactNode, ErrorInfo } from 'react'
 import { useAuthStore } from '@/stores/auth'
+import { useNodeStore } from '@/stores/node'
 import { useNodeStatus } from '@/hooks/useNodeStatus'
 import { useCredits } from '@/hooks/useCredits'
 import { useTabRouter } from '@/hooks/useTabRouter'
@@ -47,7 +48,7 @@ function DashboardLayout() {
 
 function TabContent({ tab }: { tab: string }) {
   return (
-    <div className="max-w-6xl mx-auto w-full">
+    <div className="max-w-7xl mx-auto w-full">
       {tab === 'overview' && <OverviewTab />}
       {tab === 'network' && <NetworkTab />}
       {tab === 'models' && <ModelsTab />}
@@ -81,6 +82,14 @@ function CheckingState() {
 
         if (response.ok) {
           const data = await response.json()
+
+          // Save version from health endpoint
+          if (data.version) {
+            useNodeStore.getState().setVersionInfo({
+              current: data.version,
+              update_available: false,
+            })
+          }
 
           // If no auth required, go straight to dashboard
           if (data.auth_required === false) {
