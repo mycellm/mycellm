@@ -86,6 +86,11 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             self._auth_state.pop(ip, None)
             return await call_next(request)
 
+        # Check api_key query param (for EventSource/SSE which can't set headers)
+        if request.query_params.get("api_key") == self.api_key:
+            self._auth_state.pop(ip, None)
+            return await call_next(request)
+
         # Failed auth — increment counter and maybe lock
         state["failures"] = state.get("failures", 0) + 1
         lockout = self._get_lockout(state["failures"])
