@@ -1,15 +1,13 @@
 # Lint and test on push/PR. Fast path: unit, integration, and harness smoke tests.
 # Full multi-node E2E (spawns real `mycellm serve` on localhost) runs after that succeeds.
-name: CI
+name: Lint and Test
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
-
-
 
 jobs:
   lint-and-test:
@@ -17,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12"]
 
     steps:
       - uses: actions/checkout@v4
