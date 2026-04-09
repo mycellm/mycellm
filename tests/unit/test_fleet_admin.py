@@ -1,10 +1,10 @@
 """Tests for node-side fleet command handling."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from dataclasses import dataclass, field
 
-from mycellm.protocol.envelope import MessageEnvelope, MessageType
+from mycellm.protocol.envelope import MessageType
 from mycellm.transport.messages import fleet_command
 
 

@@ -1,6 +1,5 @@
 """Tests for new Phase 3 message types."""
 
-import pytest
 
 from mycellm.transport.messages import (
     signed_credit_receipt,

@@ -7,7 +7,6 @@ Tests:
 4. Credit accounting initializes correctly
 """
 
-import asyncio
 import pytest
 import httpx
 

@@ -1,13 +1,12 @@
 """Tests for peer exchange broadcasting and handling."""
 
-import asyncio
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
-from mycellm.activity import ActivityTracker, EventType
+from mycellm.activity import ActivityTracker
 from mycellm.protocol.capabilities import Capabilities
 from mycellm.router.registry import PeerRegistry, PeerEntry
-from mycellm.transport.connection import PeerConnection, PeerState
+from mycellm.transport.connection import PeerState
 from mycellm.transport.messages import peer_exchange
 
 

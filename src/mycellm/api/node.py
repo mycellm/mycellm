@@ -371,14 +371,17 @@ async def update_model(request: Request):
         return {"error": f"No config for '{model_name}'"}
 
     # Merge overrides — only update fields that were provided
-    if body.get("api_base"): config["api_base"] = body["api_base"]
-    if body.get("api_model"): config["api_model"] = body["api_model"]
+    if body.get("api_base"):
+        config["api_base"] = body["api_base"]
+    if body.get("api_model"):
+        config["api_model"] = body["api_model"]
     if body.get("api_key"):
         new_key = body["api_key"]
         if hasattr(node, "secret_store") and node.secret_store:
             new_key = node.secret_store.resolve(new_key)
         config["api_key"] = new_key
-    if body.get("ctx_len"): config["ctx_len"] = body["ctx_len"]
+    if body.get("ctx_len"):
+        config["ctx_len"] = body["ctx_len"]
 
     # Unload if currently loaded
     if model_name in {m.name for m in node.inference.loaded_models}:
@@ -857,10 +860,8 @@ async def public_stats(request: Request):
 
     # Network info
     network_name = "mycellm"
-    is_public = False
     if hasattr(node, "federation") and node.federation and node.federation.identity:
         network_name = node.federation.identity.network_name
-        is_public = node.federation.identity.public
 
     # Node counts — combine QUIC peers + fleet registry (deduplicated)
     quic_peers = node.registry.connected_peers()
@@ -894,7 +895,7 @@ async def public_stats(request: Request):
     total_tps = node.activity.tps if hasattr(node, "activity") else 0
 
     # Models (no sensitive info) — with tier classification
-    from mycellm.protocol.capabilities import classify_tier, TIER_NAMES
+    from mycellm.protocol.capabilities import classify_tier
     model_names = set()
     models_by_tier: dict[int, list[dict]] = {1: [], 2: [], 3: []}
     seen_models = set()

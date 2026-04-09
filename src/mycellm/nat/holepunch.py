@@ -102,7 +102,6 @@ class HolePuncher:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setblocking(False)
         sock.bind(("0.0.0.0", 0))
-        local_port = sock.getsockname()[1]
 
         result_future: asyncio.Future = loop.create_future()
 

@@ -5,8 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 
-from sqlalchemy import delete, desc, or_, select, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import desc, or_, select
 
 from mycellm.storage.engine import get_session
 from mycellm.storage.models import (

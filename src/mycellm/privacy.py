@@ -57,7 +57,7 @@ _PATTERNS: list[tuple[str, str, str, str]] = [
     ("pii", "Private IP address", r"\b(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}\b", "medium"),
 ]
 
-_COMPILED = [(t, l, re.compile(p, re.IGNORECASE), s) for t, l, p, s in _PATTERNS]
+_COMPILED = [(t, label, re.compile(p, re.IGNORECASE), s) for t, label, p, s in _PATTERNS]
 
 
 _CONTEXT_EXCLUSIONS = ["example", "sample", "placeholder", "dummy", "test", "fake", "demo"]

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 
 from mycellm.protocol.capabilities import ModelCapability
-from mycellm.router.registry import PeerEntry, PeerRegistry
+from mycellm.router.registry import PeerRegistry
 
 logger = logging.getLogger("mycellm.router")
 

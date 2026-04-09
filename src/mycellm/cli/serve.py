@@ -46,7 +46,7 @@ def serve(
             os.nice(nice_val)
         except PermissionError:
             if nice_val < 0:
-                console.print(f"[yellow]Cannot set high priority (needs root). Running at normal.[/yellow]")
+                console.print("[yellow]Cannot set high priority (needs root). Running at normal.[/yellow]")
             else:
                 os.nice(nice_val)  # low priority should always work
 
@@ -134,7 +134,6 @@ def _install_service(host, port, quic_port, dht_port, device, no_dht, priority):
     import platform
     import shutil
     import sys
-    from pathlib import Path
 
     mycellm_bin = shutil.which("mycellm") or sys.executable
 
@@ -213,9 +212,9 @@ def _install_launchd(mycellm_bin, host, port, quic_port, dht_port, device, no_dh
     subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
     result = subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True)
     if result.returncode == 0:
-        console.print(f"[green]Service loaded. mycellm will auto-start and auto-restart.[/green]")
+        console.print("[green]Service loaded. mycellm will auto-start and auto-restart.[/green]")
     else:
-        console.print(f"[yellow]Wrote plist but launchctl load failed. Run manually:[/yellow]")
+        console.print("[yellow]Wrote plist but launchctl load failed. Run manually:[/yellow]")
         console.print(f"  launchctl load {plist_path}")
 
 

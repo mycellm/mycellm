@@ -7,7 +7,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from mycellm.router.registry import PeerEntry, PeerRegistry
+from mycellm.router.registry import PeerRegistry
 from mycellm.transport.connection import PeerState
 
 logger = logging.getLogger("mycellm.router.health")

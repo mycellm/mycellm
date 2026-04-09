@@ -2,7 +2,7 @@
 
 import pytest
 import time
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 from mycellm.protocol.capabilities import classify_tier, ModelCapability
 
@@ -52,7 +52,7 @@ def test_rate_limit_blocks_over_budget():
 
 
 def test_rate_limit_per_minute():
-    from mycellm.api.gateway import _check_rate, _record_usage, _rate_state
+    from mycellm.api.gateway import _check_rate, _rate_state
     _rate_state.clear()
     # Set the minute to current so _check_rate sees the same window
     current_minute = int(time.time() / 60)

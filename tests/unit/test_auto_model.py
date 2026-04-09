@@ -1,7 +1,6 @@
 """Tests for the virtual 'auto' model in the OpenAI-compatible API."""
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 from starlette.testclient import TestClient
 from fastapi import FastAPI
 

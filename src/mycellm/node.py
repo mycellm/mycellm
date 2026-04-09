@@ -13,12 +13,12 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from mycellm.cli.banner import styled_tag
-from mycellm.config import get_settings, MycellmSettings
+from mycellm.config import get_settings
 from mycellm.identity.certs import DeviceCert
 from mycellm.identity.keys import AccountKey, DeviceKey
 from mycellm.identity.peer_id import peer_id_from_public_key
 from mycellm.inference.manager import InferenceManager
-from mycellm.protocol.capabilities import Capabilities, HardwareInfo, ModelCapability
+from mycellm.protocol.capabilities import Capabilities, HardwareInfo
 from mycellm.protocol.envelope import MessageEnvelope, MessageType
 from mycellm.protocol.errors import ErrorCode
 from mycellm.router.registry import PeerRegistry
@@ -26,7 +26,7 @@ from mycellm.router.chain import ChainBuilder
 from mycellm.router.health import HealthChecker
 from mycellm.router.model_resolver import ModelResolver
 from mycellm.transport.tls import generate_self_signed_cert
-from mycellm.transport.auth import build_node_hello, build_hello_ack, verify_hello_message
+from mycellm.transport.auth import build_hello_ack, verify_hello_message
 from mycellm.accounting.reputation import AdmissionResult, ReputationTracker
 from mycellm.accounting.receipts import (
     ReceiptValidator,
@@ -322,8 +322,6 @@ class MycellmNode:
 
     async def _handle_peer_message(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
         """Handle incoming messages from peers."""
-        from mycellm.transport.quic import MycellmQuicProtocol
-        from mycellm.inference.base import InferenceRequest
 
         if msg.type == MessageType.NODE_HELLO:
             try:
@@ -799,7 +797,7 @@ class MycellmNode:
                                              counterparty_id=msg.from_peer,
                                              receipt_signature=sig)
                 else:
-                    logger.warning(f"Credit rate limit reached, skipping self-credit")
+                    logger.warning("Credit rate limit reached, skipping self-credit")
 
                 # Send signed receipt to consumer
                 if sig:
@@ -1408,8 +1406,6 @@ class MycellmNode:
             headers["Authorization"] = f"Bearer {self._settings.api_key}"
 
         sys_info = self.get_system_info()
-        # Public name: peer_id prefix, not hostname (privacy + dedup)
-        public_name = f"node-{self.peer_id[:8]}"
 
         base_payload = {
             "peer_id": self.peer_id,
@@ -1754,7 +1750,6 @@ class MycellmNode:
         if not targets:
             return None
 
-        last_error = None
         for target in targets:
             if target.entry.connection is None:
                 continue
@@ -1770,7 +1765,6 @@ class MycellmNode:
 
                 if resp.type == MessageType.ERROR:
                     target.entry.failure_count += 1
-                    last_error = resp
                     continue
 
                 # Success — reduce failure count
@@ -1788,7 +1782,6 @@ class MycellmNode:
             except Exception as e:
                 target.entry.failure_count += 1
                 logger.debug(f"Peer {target.peer_id[:16]} routing failed: {e}")
-                last_error = e
                 continue
 
         return None

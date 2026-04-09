@@ -5,19 +5,9 @@ import time
 from unittest.mock import MagicMock
 
 from mycellm.metrics import (
-    REGISTRY,
     collect_from_node,
     render_metrics,
     set_node_info,
-    inference_requests_total,
-    inference_tokens_total,
-    credits_earned_total,
-    credits_spent_total,
-    announce_total,
-    models_loaded,
-    peers_connected,
-    fleet_nodes_total,
-    uptime_seconds,
 )
 
 

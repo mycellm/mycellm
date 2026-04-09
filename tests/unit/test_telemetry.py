@@ -4,7 +4,7 @@ import pytest
 import time
 from unittest.mock import MagicMock
 
-from mycellm.activity import ActivityTracker, EventType
+from mycellm.activity import ActivityTracker
 
 
 def _make_node(telemetry=False, public=True):

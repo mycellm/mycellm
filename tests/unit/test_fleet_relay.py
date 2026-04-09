@@ -2,9 +2,9 @@
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from mycellm.protocol.envelope import MessageEnvelope, MessageType
+from mycellm.protocol.envelope import MessageType
 from mycellm.transport.messages import fleet_response
 
 

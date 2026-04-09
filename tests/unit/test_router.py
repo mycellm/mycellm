@@ -1,7 +1,7 @@
 """Tests for peer registry and chain builder."""
 
 from mycellm.protocol.capabilities import Capabilities, ModelCapability, HardwareInfo
-from mycellm.router.registry import PeerRegistry, PeerEntry
+from mycellm.router.registry import PeerRegistry
 from mycellm.router.chain import ChainBuilder
 from mycellm.transport.connection import PeerState
 

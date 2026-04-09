@@ -88,7 +88,7 @@ def _version_callback(value: bool):
     if value:
         from mycellm import __version__
         console.print(f"mycellm {__version__}")
-        console.print(f"Copyright 2026 Michael Gifford-Santos. Apache 2.0 License.")
+        console.print("Copyright 2026 Michael Gifford-Santos. Apache 2.0 License.")
         raise typer.Exit()
 
 

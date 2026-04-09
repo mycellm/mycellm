@@ -7,7 +7,6 @@ import logging
 import time
 from enum import Enum
 
-from mycellm.protocol.capabilities import Capabilities
 from mycellm.protocol.envelope import MessageEnvelope, MessageType
 from mycellm.protocol.node_hello import NodeHello
 from mycellm.transport.connection import PeerConnection, PeerState
@@ -184,7 +183,7 @@ class PeerManager:
     async def _connect_peer(self, peer: ManagedPeer) -> None:
         """Attempt to connect and authenticate with a peer."""
         from mycellm.transport.quic import dial_peer
-        from mycellm.transport.auth import build_node_hello, verify_hello_message
+        from mycellm.transport.auth import build_node_hello
         from mycellm.cli.banner import styled_tag
 
         peer.state = PeerConnectionState.CONNECTING

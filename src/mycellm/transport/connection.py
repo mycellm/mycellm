@@ -128,7 +128,7 @@ class PeerConnection:
         self.last_ping = time.time()
 
         try:
-            resp = await self.request(ping_msg, timeout=10.0)
+            await self.request(ping_msg, timeout=10.0)
             self.last_pong = time.time()
             rtt = self.last_pong - self.last_ping
             self.record_rtt(rtt)

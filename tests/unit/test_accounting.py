@@ -1,8 +1,5 @@
 """Tests for credit accounting."""
 
-import asyncio
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -15,9 +12,9 @@ from mycellm.accounting.pricing import compute_cost, compute_reward
 async def ledger(tmp_path):
     db_path = str(tmp_path / "test.db")
     await init_db(db_path)
-    l = LocalLedger(db_path)
-    await l.ensure_account("peer1", initial_balance=100.0)
-    return l
+    ledger_instance = LocalLedger(db_path)
+    await ledger_instance.ensure_account("peer1", initial_balance=100.0)
+    return ledger_instance
 
 
 async def test_initial_balance(ledger):

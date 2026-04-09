@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from mycellm.protocol.envelope import MessageEnvelope, MessageType

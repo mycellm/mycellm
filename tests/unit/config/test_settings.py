@@ -1,6 +1,5 @@
 """Tests for configuration settings."""
 
-import os
 from pathlib import Path
 
 from mycellm.config.settings import MycellmSettings

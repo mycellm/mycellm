@@ -1,6 +1,5 @@
 """Tests for security defaults and configuration."""
 
-import pytest
 from mycellm.config.settings import MycellmSettings
 
 

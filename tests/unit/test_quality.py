@@ -1,11 +1,9 @@
 """Tests for quality constraints and weighted pricing."""
 
-import pytest
 from mycellm.router.model_resolver import (
-    ModelResolver, QualityConstraints, ResolvedModel,
-    estimate_param_count, derive_tier,
+    ModelResolver, QualityConstraints,
 )
-from mycellm.accounting.pricing import compute_cost, compute_reward, TIER_MULTIPLIERS
+from mycellm.accounting.pricing import compute_cost, compute_reward
 from mycellm.protocol.capabilities import ModelCapability
 from mycellm.router.registry import PeerRegistry
 
