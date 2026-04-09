@@ -4,10 +4,6 @@ import { cn } from '@/lib/utils'
 import { useModels } from '@/hooks/useModels'
 import { EmptyState } from '@/components/common/EmptyState'
 
-const ownerStyles: Record<string, { icon: string; badge: string }> = {
-  local: { icon: 'text-spore', badge: 'bg-spore/10 text-spore' },
-}
-
 function getOwnerStyle(ownedBy: string) {
   if (ownedBy === 'local') {
     return { icon: 'text-spore', badge: 'bg-spore/10 text-spore' }
@@ -23,7 +19,7 @@ function getOwnerStyle(ownedBy: string) {
 
 export function NetworkModels() {
   const { t } = useTranslation('network')
-  const { models, isLoading } = useModels()
+  const { models } = useModels()
 
   return (
     <div className="border border-white/10 bg-surface rounded-xl p-5">

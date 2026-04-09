@@ -11,6 +11,7 @@ import {
   Info,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { logClientError } from '@/lib/logClientError'
 import { api } from '@/api/client'
 import { API } from '@/api/endpoints'
 import { useModels } from '@/hooks/useModels'
@@ -148,7 +149,9 @@ export function VariantTable({ repoId, selectedDevice }: VariantTableProps) {
           [data.download_id!]: data as DownloadStatus,
         }))
       }
-    } catch {}
+    } catch (error) {
+      logClientError('VariantTable: start download', error)
+    }
     setStartingDownloads((prev) => {
       const next = new Set(prev)
       next.delete(file.filename)
@@ -164,7 +167,9 @@ export function VariantTable({ repoId, selectedDevice }: VariantTableProps) {
         if (next[downloadId]) next[downloadId] = { ...next[downloadId], status: 'failed' as const }
         return next
       })
-    } catch {}
+    } catch (error) {
+      logClientError('VariantTable: abort download', error)
+    }
   }
 
   if (!repoFiles) {

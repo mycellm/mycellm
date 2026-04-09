@@ -36,9 +36,6 @@ export function useTheme() {
   const theme = useSettingsStore((s) => s.theme)
   const setThemeStore = useSettingsStore((s) => s.setTheme)
 
-  // Resolve the current theme (system -> actual value)
-  const resolved = resolveTheme(theme)
-
   // Subscribe to system preference changes for real-time updates
   const systemTheme = useSyncExternalStore(
     (callback) => {

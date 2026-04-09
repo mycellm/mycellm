@@ -38,7 +38,6 @@ export function NetworkIdentity() {
 
   const nodeName = status?.node_name || 'mycellm-node'
   const mode = status?.mode || 'standalone'
-  const role = status?.role || mode
   const peerId = status?.peer_id || ''
   const peers = status?.peers || []
   const models = status?.models || []

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, RefreshCw, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { logClientError } from '@/lib/logClientError'
 import { api } from '@/api/client'
 import { API } from '@/api/endpoints'
 import { ResultBanner } from '@/components/common/ResultBanner'
@@ -11,7 +12,7 @@ interface RelayPanelProps {
   selectedDevice: string
 }
 
-export function RelayPanel({ selectedDevice }: RelayPanelProps) {
+export function RelayPanel({ selectedDevice: _selectedDevice }: RelayPanelProps) {
   const { t } = useTranslation('models')
   const [relays, setRelays] = useState<Relay[]>([])
   const [newUrl, setNewUrl] = useState('')
@@ -74,7 +75,9 @@ export function RelayPanel({ selectedDevice }: RelayPanelProps) {
     try {
       await api.post(API.node.relayRemove, { url })
       fetchRelays()
-    } catch {}
+    } catch (error) {
+      logClientError('RelayPanel: remove relay', error)
+    }
   }
 
   const refreshAll = async () => {

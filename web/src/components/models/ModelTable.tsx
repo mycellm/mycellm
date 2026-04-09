@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Pencil, Trash2, Play, Square, RotateCw, X, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { logClientError } from '@/lib/logClientError'
 import { api } from '@/api/client'
 import { API } from '@/api/endpoints'
 import { useModels } from '@/hooks/useModels'
@@ -325,21 +326,27 @@ export function ModelTable({ selectedDevice }: ModelTableProps) {
         ctx_len: m.ctx || 4096,
       })
       refreshAll()
-    } catch {}
+    } catch (error) {
+      logClientError('ModelTable: load model', error)
+    }
   }
 
   const handleUnload = async (name: string) => {
     try {
       await nodePost(API.models.unload, { model: name })
       refreshAll()
-    } catch {}
+    } catch (error) {
+      logClientError('ModelTable: unload model', error)
+    }
   }
 
   const handleReload = async (name: string) => {
     try {
       await nodePost(API.models.reload, { model: name })
       refreshAll()
-    } catch {}
+    } catch (error) {
+      logClientError('ModelTable: reload model', error)
+    }
   }
 
   const handleDelete = async (m: MergedModel) => {
@@ -348,7 +355,9 @@ export function ModelTable({ selectedDevice }: ModelTableProps) {
       try {
         await nodePost(API.models.deleteFile, { filename: m.filename })
         refreshAll()
-      } catch {}
+      } catch (error) {
+        logClientError('ModelTable: delete model file', error)
+      }
     }
   }
 
@@ -357,7 +366,9 @@ export function ModelTable({ selectedDevice }: ModelTableProps) {
     try {
       await nodePost(API.models.removeConfig, { model: name })
       refreshAll()
-    } catch {}
+    } catch (error) {
+      logClientError('ModelTable: remove config', error)
+    }
   }
 
   const handleDismiss = async (name: string) => {
@@ -365,9 +376,15 @@ export function ModelTable({ selectedDevice }: ModelTableProps) {
       // Clear from load-status tracker (handles failed/stuck entries)
       await nodePost(API.models.clearLoadStatus, { model: name })
       // Also try removing saved config if it exists
-      try { await nodePost(API.models.removeConfig, { model: name }) } catch {}
+      try {
+        await nodePost(API.models.removeConfig, { model: name })
+      } catch (error) {
+        logClientError('ModelTable: remove config after clearLoadStatus', error)
+      }
       refreshAll()
-    } catch {}
+    } catch (error) {
+      logClientError('ModelTable: clear load status', error)
+    }
   }
 
   const handleToggleScope = async (m: MergedModel) => {
@@ -375,7 +392,9 @@ export function ModelTable({ selectedDevice }: ModelTableProps) {
     try {
       await nodePost(API.models.scope, { model: m.name, scope: next })
       refreshAll()
-    } catch {}
+    } catch (error) {
+      logClientError('ModelTable: set model scope', error)
+    }
   }
 
   if (allModels.length === 0) {

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Save, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { api } from '@/api/client'
 import { API } from '@/api/endpoints'
 import type { SavedModel } from '@/api/types'

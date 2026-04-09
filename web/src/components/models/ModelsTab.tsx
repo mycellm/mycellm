@@ -7,12 +7,10 @@ import { AddModelPanel } from './AddModelPanel'
 
 export function ModelsTab() {
   const { t } = useTranslation('models')
-  const [selectedDevice, setSelectedDevice] = useState('')  // address or ''
-  const [selectedDeviceName, setSelectedDeviceName] = useState('')
+  const [selectedDevice, setSelectedDevice] = useState('') // address or ''
 
-  const handleDeviceSelect = (addr: string, name?: string) => {
+  const handleDeviceSelect = (addr: string, _name?: string) => {
     setSelectedDevice(addr)
-    setSelectedDeviceName(name || addr || '')
   }
 
   return (

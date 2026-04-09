@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { useFleetStore } from '@/stores/fleet'
 
 export function ManualNodeAdd() {
