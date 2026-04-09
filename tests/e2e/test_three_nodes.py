@@ -72,7 +72,7 @@ async def test_three_nodes_status(three_nodes):
 
 
 async def test_three_nodes_models_endpoint(three_nodes):
-    """Models endpoint returns empty list (no models loaded)."""
+    """Models endpoint lists virtual 'auto' when no GGUF models are loaded."""
     harness = three_nodes
 
     for node in harness.nodes:
@@ -84,7 +84,10 @@ async def test_three_nodes_models_endpoint(three_nodes):
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{harness.nodes[0].api_url}/v1/models")
         assert resp.status_code == 200
-        assert resp.json()["data"] == []
+        data = resp.json()["data"]
+        assert len(data) == 1
+        assert data[0]["id"] == "auto"
+        assert data[0]["owned_by"] == "mycellm"
 
 
 async def test_three_nodes_chat_without_model(three_nodes):
