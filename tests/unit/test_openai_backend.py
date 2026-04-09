@@ -178,6 +178,10 @@ class TestManagerBackendRouting:
         with patch("mycellm.inference.openai_compat.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=mock_resp)
+            # save_model_configs reads client.headers.get synchronously; AsyncMock would
+            # make .get an async mock and leave an un-awaited coroutine warning.
+            mock_client.headers = MagicMock()
+            mock_client.headers.get = MagicMock(return_value="Bearer sk-or-test")
             MockClient.return_value = mock_client
 
             manager = InferenceManager()
