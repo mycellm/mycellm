@@ -86,7 +86,15 @@ class PeerRegistry:
         entries = []
         for pid in peer_ids:
             entry = self._peers.get(pid)
-            if entry and entry.state in (PeerState.ROUTABLE, PeerState.SERVING):
+            # Accept any peer that has completed the NodeHello handshake.
+            # ROUTABLE is the steady-state but a freshly-authenticated peer
+            # is also able to serve — the only state that should disqualify
+            # them is DISCOVERED (no live connection yet).
+            if entry and entry.state in (
+                PeerState.AUTHENTICATED,
+                PeerState.ROUTABLE,
+                PeerState.SERVING,
+            ):
                 entries.append(entry)
         return entries
 

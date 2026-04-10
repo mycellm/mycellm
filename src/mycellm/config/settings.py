@@ -127,8 +127,24 @@ class MycellmSettings(BaseSettings):
     hf_token: str = ""
 
     # Security — optional API key (MYCELLM_API_KEY env var)
-    # When set, all API endpoints (except /health) require Authorization: Bearer <key>
+    # When set, admin/node endpoints require Authorization: Bearer <key>.
+    # When `public` mode is also set, inference endpoints are left unauthenticated
+    # so the node can serve as an open public bootstrap gateway.
     api_key: str = ""
+
+    # Public bootstrap mode (MYCELLM_PUBLIC env var).
+    # When true:
+    #   - /v1/models, /v1/chat/*, /v1/completions, /v1/embeddings and /api/* are
+    #     unauthenticated regardless of api_key (anyone can query the gateway).
+    #   - Admin + /v1/node/* endpoints still require api_key if set.
+    #   - The escalating brute-force lockout is replaced with a lenient per-IP
+    #     sliding window (to prevent self-DoS on a permissive public node).
+    #   - Anonymous inference requests are subject to a per-IP token bucket
+    #     (see `public_anon_rate_per_min`) to keep the node honest but usable.
+    #   - Seeders whose announcements arrive here are auto-approved by the
+    #     existing admin.py public-network logic.
+    public: bool = False
+    public_anon_rate_per_min: int = 30  # anon inference req/min per source IP
 
     # Telemetry — opt-in anonymous usage stats sent to bootstrap node
     # Includes: request/token counts, TPS, model names, uptime, credits earned

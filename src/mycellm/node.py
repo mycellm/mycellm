@@ -338,12 +338,16 @@ class MycellmNode:
                     state=PeerState.AUTHENTICATED,
                 )
                 self._peer_connections[hello.peer_id] = conn
+                # Promote to ROUTABLE *before* registering so the registry
+                # entry copies the right state — peers_for_model() filters
+                # by state and we don't want a window where a freshly-
+                # authenticated peer is invisible to routing.
+                conn.state = PeerState.ROUTABLE
                 self.registry.register(
                     hello.peer_id,
                     connection=conn,
                     capabilities=hello.capabilities,
                 )
-                conn.state = PeerState.ROUTABLE
 
                 # Capture peer's QUIC source address for peer exchange
                 reg_entry = self.registry.get(hello.peer_id)
@@ -1303,6 +1307,10 @@ class MycellmNode:
         self._growth_task = asyncio.create_task(self._growth_snapshot_loop())
         self._growth_snapshots: dict = {}
 
+        # Start registry TTL sweep (every 5 min) — evicts dead seeders
+        # and warns loudly when a public bootstrap has no one online.
+        self._registry_sweep_task = asyncio.create_task(self._registry_ttl_sweep_loop())
+
         # Start peer exchange broadcast (shares connected peer list for P2P discovery)
         self._peer_exchange_task = asyncio.create_task(self._peer_exchange_broadcast_loop())
 
@@ -1369,11 +1377,17 @@ class MycellmNode:
                 }
             any_ok = False
             for host, port in peers:
-                is_lan = host.startswith("10.") or host.startswith("192.168.") or host.startswith("172.") or host.startswith("127.") or host == "localhost"
-                # Only HTTP-announce to LAN bootstraps (fleet management).
-                # Public bootstraps discover peers via QUIC — no fleet registration.
-                if not is_lan:
-                    continue
+                # Announce to every bootstrap — LAN and public.
+                #
+                # Previously this was gated on `is_lan` with the assumption
+                # that public bootstraps would discover peers exclusively via
+                # QUIC NodeHello. In practice home seeders behind symmetric
+                # NAT cannot always rely on QUIC session establishment, and
+                # even when they can, the HTTP announce is still the canonical
+                # way the bootstrap learns which *models* a seeder is serving
+                # (QUIC capabilities exchange is best-effort). Let the
+                # bootstrap decide what to do with the announcement — public
+                # bootstraps auto-approve (see api/admin.py::_is_public_network).
                 payload = {**base_payload}
                 api_port = port if port != 8421 else 8420
                 url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
@@ -1411,6 +1425,65 @@ class MycellmNode:
             except Exception as e:
                 logger.warning(f"{styled_tag('NODE')} Announce loop error: {e}")
                 interval = 30
+
+    async def _registry_ttl_sweep_loop(self) -> None:
+        """Evict node_registry entries that haven't been seen in a long time.
+
+        Public bootstraps accumulate seeders as they come and go. Anything
+        not heard from in over an hour is considered gone — drop it from
+        memory and the database to keep the registry honest. Routing already
+        ignores entries with last_seen > 120s; this just keeps the index
+        from growing forever and surfaces a clean "who's currently online"
+        view in /v1/admin/nodes.
+        """
+        sweep_interval = 300  # every 5 min
+        eviction_age = 3600   # 1 hour
+        while self._running:
+            try:
+                await asyncio.sleep(sweep_interval)
+                now = time.time()
+                stale = [
+                    pid for pid, e in self.node_registry.items()
+                    if now - e.get("last_seen", 0) > eviction_age
+                ]
+                for pid in stale:
+                    self.node_registry.pop(pid, None)
+                    if hasattr(self, "node_registry_repo") and self.node_registry_repo:
+                        try:
+                            await self.node_registry_repo.remove(pid)
+                        except Exception:
+                            pass
+                if stale:
+                    logger.info(
+                        f"{styled_tag('NODE')} Evicted {len(stale)} stale registry entries "
+                        f"(last seen >{eviction_age}s ago)"
+                    )
+
+                # Loud warning if a public bootstrap has zero seeders.
+                # "Seeders" here means: HTTP-announced fleet entries that
+                # are recently alive PLUS live QUIC peer connections (the
+                # latter is the dominant path now that home seeders rely
+                # on outbound QUIC).
+                if self._settings.public:
+                    online = sum(
+                        1 for e in self.node_registry.values()
+                        if now - e.get("last_seen", 0) < 120
+                        and e.get("status") == "approved"
+                    )
+                    quic_seeders = sum(
+                        1 for p in self.registry.connected_peers()
+                        if p.capabilities.role == "seeder"
+                    )
+                    if (online + quic_seeders) == 0 and len(self.inference.loaded_models) == 0:
+                        logger.warning(
+                            f"{styled_tag('NODE')} Public bootstrap has 0 online seeders "
+                            f"and 0 local models — gateway is empty. Check seeder QUIC "
+                            f"sessions and recent /v1/admin/nodes/announce traffic."
+                        )
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.debug(f"Registry TTL sweep error: {e}")
 
     async def _growth_snapshot_loop(self) -> None:
         """Record network growth snapshots every hour."""

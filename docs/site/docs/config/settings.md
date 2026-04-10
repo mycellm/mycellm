@@ -11,7 +11,9 @@ All settings are configured via environment variables prefixed with `MYCELLM_`. 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MYCELLM_API_KEY` | *(none)* | API key for dashboard/API authentication |
-| `MYCELLM_BOOTSTRAP_PEERS` | *(none)* | Bootstrap node addresses (`host:port`, comma-separated) |
+| `MYCELLM_PUBLIC` | `false` | Run as a public bootstrap gateway. Inference endpoints (`/v1/models`, `/v1/chat/*`, `/v1/completions`, `/v1/embeddings`, `/api/*`) are unauthenticated; admin/node endpoints still require `MYCELLM_API_KEY`. See [Public Bootstrap](../architecture/public-bootstrap.md). |
+| `MYCELLM_PUBLIC_ANON_RATE_PER_MIN` | `30` | Per-IP token bucket for anonymous inference requests when `MYCELLM_PUBLIC=true`. Authenticated callers (Bearer the API key) bypass. |
+| `MYCELLM_BOOTSTRAP_PEERS` | *(none)* | Bootstrap node addresses (`host:port`, comma-separated). Seeders auto-connect via QUIC and announce capabilities through the NodeHello handshake. |
 | `MYCELLM_HF_TOKEN` | *(none)* | HuggingFace token for gated models + higher rate limits |
 | `MYCELLM_DB_URL` | SQLite | Database URL (`postgresql+asyncpg://user:pass@host/db`) |
 | `MYCELLM_TELEMETRY` | `false` | Opt-in anonymous usage stats |

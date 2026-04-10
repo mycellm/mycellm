@@ -16,6 +16,8 @@
         <link rel="prev" href="../../cli/chat/">
       
       
+        <link rel="next" href="../public-bootstrap/">
+      
       
         
       
@@ -1366,10 +1368,49 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#roadmap-beyond-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Roadmap: Beyond Inference
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../public-bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1524,6 +1565,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#roadmap-beyond-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Roadmap: Beyond Inference
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1605,6 +1657,22 @@
 <li><strong>Telemetry</strong>: Opt-in anonymous counters to bootstrap</li>
 <li><strong>Logs</strong>: SSE stream at <code>/v1/node/logs/stream</code></li>
 </ul>
+<h2 id="roadmap-beyond-inference">Roadmap: Beyond Inference<a class="headerlink" href="#roadmap-beyond-inference" title="Permanent link">&para;</a></h2>
+<p>mycellm is a protocol layer — like BitTorrent for LLM compute. The
+transport, identity, routing, and accounting primitives are workload-agnostic.
+Future workloads that compose with the existing protocol:</p>
+<ul>
+<li><strong>Federated LoRA fine-tuning</strong>: Nodes train adapters locally, share only
+  small weight deltas. Coordinator aggregates rounds. No raw data leaves nodes.</li>
+<li><strong>P2P model distribution</strong>: BitTorrent-style chunked GGUF transfer over
+  QUIC, with integrity verification.</li>
+<li><strong>Distributed eval swarms</strong>: Fan-out benchmark tasks as inference requests,
+  aggregate scores.</li>
+<li><strong>Mixture-of-Experts routing</strong>: Content-aware dispatch to specialized
+  adapters across the network.</li>
+</ul>
+<p>See <a href="../../../spec-evolution.md#phase-7-protocol-composable-workloads-roadmap">Spec Evolution — Phase 7</a>
+for detailed design notes and protocol mapping.</p>
 
 
 

@@ -147,6 +147,26 @@ http_requests_total = Counter(
     registry=REGISTRY,
 )
 
+# --- Public bootstrap routing ---
+bootstrap_routed_total = Counter(
+    "mycellm_bootstrap_routed_total",
+    "Inference requests routed to a downstream seeder by a public bootstrap",
+    ["transport", "outcome"],  # transport: quic|http_fleet  outcome: success|fail
+    registry=REGISTRY,
+)
+
+bootstrap_seeders_online = Gauge(
+    "mycellm_bootstrap_seeders_online",
+    "Seeders currently visible (announced within last 120s)",
+    registry=REGISTRY,
+)
+
+bootstrap_anon_rate_limited_total = Counter(
+    "mycellm_bootstrap_anon_rate_limited_total",
+    "Anonymous inference requests rejected by per-IP rate limit",
+    registry=REGISTRY,
+)
+
 
 def set_node_info(peer_id: str, node_name: str, version: str) -> None:
     """Set static node info labels."""
@@ -177,6 +197,20 @@ def collect_from_node(node) -> None:
     pending = sum(1 for n in node.node_registry.values() if n.get("status") == "pending")
     fleet_nodes_total.labels(status="approved").set(approved)
     fleet_nodes_total.labels(status="pending").set(pending)
+
+    # Public bootstrap: seeders online — sum of HTTP-announced fleet
+    # entries seen in the last 120s plus live QUIC peers in seeder role.
+    import time as _time
+    _now = _time.time()
+    http_online = sum(
+        1 for e in node.node_registry.values()
+        if _now - e.get("last_seen", 0) < 120 and e.get("status") == "approved"
+    )
+    quic_online = sum(
+        1 for p in node.registry.connected_peers()
+        if p.capabilities.role == "seeder"
+    ) if hasattr(node, "registry") else 0
+    bootstrap_seeders_online.set(http_online + quic_online)
 
     # Hardware
     hardware_vram_gb.set(node.capabilities.hardware.vram_gb)

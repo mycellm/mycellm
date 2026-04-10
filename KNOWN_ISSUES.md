@@ -1,6 +1,39 @@
 # mycellm — Known Issues
 
-*Last updated: April 8, 2026 (v0.2.4)*
+*Last updated: April 9, 2026 (v0.2.5)*
+
+## Fixed in 0.2.5
+
+### ~~Public bootstrap nodes locked out their own users~~
+When a node was set as a public network bootstrap (`MYCELLM_PUBLIC=true`),
+`/v1/models` and `/v1/chat/*` were still gated behind `MYCELLM_API_KEY`, and
+the escalating brute-force lockout would 429 anyone who had previously sent
+a request without a key. The "public" gateway was effectively closed.
+**Fixed**: in public mode, inference paths are unauthenticated (admin
+endpoints still require the key) and the lockout is replaced with a lenient
+sliding window. A per-IP token bucket
+(`MYCELLM_PUBLIC_ANON_RATE_PER_MIN`, default 30/min) protects against abuse.
+
+### ~~Freshly-handshaked peers were invisible to routing~~
+`PeerRegistry.peers_for_model()` filtered to `ROUTABLE`/`SERVING` only, but
+new peers were registered while still in `AUTHENTICATED` and only later
+promoted to `ROUTABLE` — leaving a window where they couldn't be routed
+to. On a public bootstrap recovering from restart this manifested as
+"3 peers connected, 0 models served". **Fixed**: connection state is
+promoted before registration, and `peers_for_model()` accepts
+`AUTHENTICATED` too.
+
+### ~~Streaming path skipped P2P routing~~
+`/v1/chat/completions` with `stream:true` only tried the HTTP fleet
+fallback when no local model was available, never the QUIC chain.
+**Fixed**: `_stream_response` now calls `route_inference_stream()` before
+the fleet HTTP fallback, mirroring the non-streaming path.
+
+### ~~Seeders couldn't announce to non-LAN bootstraps~~
+`_announce_to_bootstrap()` had a hard `if not is_lan: continue` filter so
+seeders never registered with public bootstraps over HTTP. **Fixed**: the
+filter is removed; capabilities are still primarily exchanged via QUIC
+NodeHello (which already worked).
 
 ## Fixed in 0.2.4
 

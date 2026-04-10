@@ -429,17 +429,119 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             })
         else:
-            # Try fleet streaming
-            import httpx
+            # No local model — try streaming via direct QUIC peers first
+            # (this is the canonical P2P path: chain_builder picks the best
+            # peer that advertises the requested model in its capabilities).
             fleet_handled = False
+            try:
+                quic_chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+                role_sent = False
+                any_quic_chunk = False
+                async for piece in node.route_inference_stream(
+                    body.model, messages,
+                    temperature=body.temperature,
+                    max_tokens=body.max_tokens or 2048,
+                ):
+                    if not role_sent:
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                        })
+                        role_sent = True
+                    text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
+                    finish = piece.get("finish_reason") if isinstance(piece, dict) else None
+                    if text:
+                        any_quic_chunk = True
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": finish}],
+                        })
+                if any_quic_chunk:
+                    yield json.dumps({
+                        "id": quic_chunk_id, "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": body.model or "auto",
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    })
+                    yield "[DONE]"
+                    return
+            except Exception as e:
+                logging.getLogger("mycellm.router").debug(f"QUIC stream routing failed: {e}")
+
+            # Then check fleet/announced seeders (HTTP path or QUIC fallback).
+            now = time.time()
+            matching_entries = []
             for entry in node.node_registry.values():
-                if entry.get("status") != "approved" or not entry.get("api_addr"):
+                if entry.get("status") != "approved":
+                    continue
+                if now - entry.get("last_seen", 0) > 120:
                     continue
                 caps = entry.get("capabilities", {})
                 fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
                 if body.model and body.model not in fleet_models:
                     continue
+                matching_entries.append(entry)
 
+            # QUIC-first ordering
+            def _sk(e):
+                pid = e.get("peer_id", "")
+                return (0 if (pid and pid in getattr(node, "_peer_connections", {})) else 1,
+                        e.get("failure_count", 0))
+            matching_entries.sort(key=_sk)
+
+            for entry in matching_entries:
+                pid = entry.get("peer_id", "")
+                if not pid or pid not in getattr(node, "_peer_connections", {}):
+                    continue
+                try:
+                    chunk_id_q = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+                    yield json.dumps({
+                        "id": chunk_id_q, "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": body.model or "auto",
+                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                    })
+                    any_chunk = False
+                    async for piece in node.route_inference_stream(
+                        body.model, messages,
+                        temperature=body.temperature,
+                        max_tokens=body.max_tokens or 2048,
+                    ):
+                        any_chunk = True
+                        text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
+                        finish = piece.get("finish_reason") if isinstance(piece, dict) else None
+                        if text:
+                            yield json.dumps({
+                                "id": chunk_id_q, "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": body.model or "auto",
+                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": finish}],
+                            })
+                    if any_chunk:
+                        yield json.dumps({
+                            "id": chunk_id_q, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        })
+                        fleet_handled = True
+                        yield "[DONE]"
+                        return
+                except Exception as e:
+                    logging.getLogger("mycellm.router").debug(
+                        f"QUIC stream to {pid[:16]} failed: {e}")
+                    entry["failure_count"] = entry.get("failure_count", 0) + 1
+                    continue
+
+            # Fallback: try fleet HTTP streaming against api_addr.
+            import httpx
+            for entry in matching_entries:
+                if not entry.get("api_addr"):
+                    continue
                 addr = entry["api_addr"]
                 base = f"http://{addr}" if not addr.startswith("http") else addr
                 url = f"{base}/v1/chat/completions"
@@ -499,10 +601,14 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
 async def _route_via_fleet(
     node, body: ChatCompletionRequest, messages: list[dict], target_model: str = ""
 ):
-    """Route inference to a fleet node via HTTP (registry-based).
+    """Route inference to a fleet node.
 
-    Collects ALL matching nodes, sorts by health, tries in order (failover).
+    Prefers an already-open QUIC session (works for NAT'd home seeders) and
+    falls back to HTTP POST against the seeder's self-reported api_addr
+    (works for seeders with a public endpoint). Failover across all matching
+    nodes, sorted by health.
     """
+    import time
     import httpx
     import logging
     from fastapi.responses import JSONResponse
@@ -511,10 +617,15 @@ async def _route_via_fleet(
 
     model_to_route = target_model or body.model
 
-    # Collect and sort matching fleet nodes by health (failure_count ascending)
+    # Collect and sort matching fleet nodes: freshness first, then health.
+    # Skip entries whose last_seen is too stale — a seeder that hasn't
+    # checked in for >2min is treated as gone.
+    now = time.time()
     matching_entries = []
     for entry in node.node_registry.values():
-        if entry.get("status") != "approved" or not entry.get("api_addr"):
+        if entry.get("status") != "approved":
+            continue
+        if now - entry.get("last_seen", 0) > 120:
             continue
         caps = entry.get("capabilities", {})
         fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
@@ -522,11 +633,83 @@ async def _route_via_fleet(
             continue
         matching_entries.append(entry)
 
-    # Sort by failure count (lower is better), then by node name for stability
-    matching_entries.sort(key=lambda e: (e.get("failure_count", 0), e.get("node_name", "")))
+    # Sort: live QUIC session first, then failure count, then name
+    def _sort_key(e):
+        peer_id = e.get("peer_id", "")
+        has_quic = 0 if (peer_id and peer_id in getattr(node, "_peer_connections", {})) else 1
+        return (has_quic, e.get("failure_count", 0), e.get("node_name", ""))
+    matching_entries.sort(key=_sort_key)
+
+    # Try QUIC routing first for any entry that has a live peer connection.
+    # This is the critical path for home seeders behind NAT: they hold an
+    # outbound QUIC session open, and the bootstrap pushes inference down it.
+    for entry in matching_entries:
+        peer_id = entry.get("peer_id", "")
+        if not peer_id or peer_id not in getattr(node, "_peer_connections", {}):
+            continue
+        try:
+            result = await node.route_inference(
+                model_to_route or body.model, messages,
+                temperature=body.temperature,
+                max_tokens=body.max_tokens or 2048,
+            )
+        except Exception as e:
+            logger.debug(f"QUIC route to {peer_id[:16]} failed: {e}")
+            entry["failure_count"] = entry.get("failure_count", 0) + 1
+            try:
+                from mycellm.metrics import bootstrap_routed_total
+                bootstrap_routed_total.labels(transport="quic", outcome="fail").inc()
+            except Exception:
+                pass
+            continue
+        if not result:
+            try:
+                from mycellm.metrics import bootstrap_routed_total
+                bootstrap_routed_total.labels(transport="quic", outcome="fail").inc()
+            except Exception:
+                pass
+            continue
+        text = result.get("text", "") if isinstance(result, dict) else result.text
+        prompt_tokens = result.get("prompt_tokens", 0) if isinstance(result, dict) else 0
+        completion_tokens = result.get("completion_tokens", 0) if isinstance(result, dict) else 0
+        total_tokens = prompt_tokens + completion_tokens
+        entry["failure_count"] = 0
+        node_name = entry.get("node_name", peer_id[:8])
+        routed_to = f"quic:{node_name}"
+        from mycellm.activity import EventType as _ET
+        node.activity.record(
+            _ET.INFERENCE_COMPLETE,
+            model=model_to_route or body.model,
+            source="quic",
+            routed_to=routed_to,
+            tokens=total_tokens,
+        )
+        resp_data = ChatCompletionResponse(
+            model=model_to_route or body.model,
+            choices=[
+                ChatCompletionChoice(
+                    message=ChatMessage(role="assistant", content=text),
+                )
+            ],
+            usage=Usage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            ),
+        )
+        try:
+            from mycellm.metrics import bootstrap_routed_total
+            bootstrap_routed_total.labels(transport="quic", outcome="success").inc()
+        except Exception:
+            pass
+        response = JSONResponse(content=resp_data.model_dump())
+        response.headers["X-Mycellm-Routed-To"] = routed_to
+        return response
 
     for entry in matching_entries:
-        addr = entry["api_addr"]
+        addr = entry.get("api_addr", "")
+        if not addr:
+            continue
         base = f"http://{addr}" if not addr.startswith("http") else addr
         url = f"{base}/v1/chat/completions"
 

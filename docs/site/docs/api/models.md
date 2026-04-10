@@ -56,4 +56,4 @@ Models are classified by parameter count:
 | Tier 2 | up to 70B | Mistral Small 24B, Llama 70B |
 | Tier 3 | 70B+ | Qwen 72B, Llama 405B |
 
-The public gateway restricts anonymous users to the best available model. Contributors and power seeders get access to higher tiers.
+A public bootstrap exposes every model online across the network through `/v1/models`. Anonymous callers can request any of them; the [per-IP rate limit](../architecture/public-bootstrap.md) protects against abuse.

@@ -790,10 +790,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#base-url" class="md-nav__link">
+  <a href="#base-urls" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Base URL
+        Base URLs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-auto-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The auto Model
       
     </span>
   </a>
@@ -835,10 +846,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#public-no-auth" class="md-nav__link">
+  <a href="#public-stats-always-no-auth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Public (no auth)
+        Public stats (always no auth)
       
     </span>
   </a>
@@ -872,6 +883,17 @@
     <span class="md-ellipsis">
       
         Admin (Bootstrap nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ollama-compatible" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ollama-Compatible
       
     </span>
   </a>
@@ -1366,6 +1388,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/public-bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1400,10 +1450,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#base-url" class="md-nav__link">
+  <a href="#base-urls" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Base URL
+        Base URLs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-auto-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The auto Model
       
     </span>
   </a>
@@ -1445,10 +1506,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#public-no-auth" class="md-nav__link">
+  <a href="#public-stats-always-no-auth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Public (no auth)
+        Public stats (always no auth)
       
     </span>
   </a>
@@ -1482,6 +1543,17 @@
     <span class="md-ellipsis">
       
         Admin (Bootstrap nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ollama-compatible" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ollama-Compatible
       
     </span>
   </a>
@@ -1522,15 +1594,28 @@
 
 
 <h1 id="api-overview">API Overview<a class="headerlink" href="#api-overview" title="Permanent link">&para;</a></h1>
-<p>mycellm exposes an <strong>OpenAI-compatible REST API</strong> on port 8420. Any tool that works with the OpenAI API works with mycellm.</p>
-<h2 id="base-url">Base URL<a class="headerlink" href="#base-url" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>http://localhost:8420/v1
+<p>mycellm exposes an <strong>OpenAI-compatible REST API</strong> on port 8420. Any tool that works with the OpenAI API works with mycellm. An <strong>Ollama-compatible API</strong> is also available for tools that use the Ollama SDK.</p>
+<h2 id="base-urls">Base URLs<a class="headerlink" href="#base-urls" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>http://localhost:8420/v1    # OpenAI-compatible
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>http://localhost:8420/api   # Ollama-compatible
 </code></pre></div>
+<h2 id="the-auto-model">The <code>auto</code> Model<a class="headerlink" href="#the-auto-model" title="Permanent link">&para;</a></h2>
+<p>Use <code>model: "auto"</code> to let mycellm route to the best available model
+across all local, peer, and fleet nodes. This works in both the OpenAI
+and Ollama APIs.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
-<p>When <code>MYCELLM_API_KEY</code> is set, all <code>/v1/*</code> endpoints require authentication:</p>
+<p>mycellm has two auth modes, controlled by <code>MYCELLM_PUBLIC</code>:</p>
+<p><strong>Private mode (default).</strong> When <code>MYCELLM_API_KEY</code> is set, all <code>/v1/*</code> and
+<code>/api/*</code> endpoints require authentication:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Authorization: Bearer &lt;your-api-key&gt;
 </code></pre></div>
-<p>Public endpoints (<code>/health</code>, <code>/metrics</code>, <code>/v1/public/*</code>) never require auth.</p>
+<p><code>/health</code>, <code>/metrics</code>, <code>/v1/public/*</code>, and <code>/v1/admin/nodes/announce</code> are
+always public.</p>
+<p><strong>Public bootstrap mode (<code>MYCELLM_PUBLIC=true</code>).</strong> Inference endpoints
+(<code>/v1/models</code>, <code>/v1/chat/*</code>, <code>/v1/completions</code>, <code>/v1/embeddings</code>, <code>/api/*</code>)
+are unauthenticated regardless of <code>MYCELLM_API_KEY</code>. Admin and node
+management endpoints still require the key. Anonymous inference is rate
+limited per source IP — see <a href="../../architecture/public-bootstrap/">Public Bootstrap</a>.</p>
 <h2 id="endpoints">Endpoints<a class="headerlink" href="#endpoints" title="Permanent link">&para;</a></h2>
 <h3 id="inference">Inference<a class="headerlink" href="#inference" title="Permanent link">&para;</a></h3>
 <table>
@@ -1538,7 +1623,8 @@
 <tr>
 <th>Method</th>
 <th>Path</th>
-<th>Auth</th>
+<th>Private auth</th>
+<th>Public-mode auth</th>
 <th>Description</th>
 </tr>
 </thead>
@@ -1547,23 +1633,40 @@
 <td>POST</td>
 <td><code>/v1/chat/completions</code></td>
 <td>Yes</td>
+<td><strong>No</strong></td>
 <td>Chat completions (streaming supported)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/completions</code></td>
+<td>Yes</td>
+<td><strong>No</strong></td>
+<td>Legacy completions</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/models</code></td>
 <td>Yes</td>
+<td><strong>No</strong></td>
 <td>List available models</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/models/{id}</code></td>
+<td>Yes</td>
+<td><strong>No</strong></td>
+<td>Retrieve a single model</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/v1/embeddings</code></td>
 <td>Yes</td>
+<td><strong>No</strong></td>
 <td>Text embeddings</td>
 </tr>
 </tbody>
 </table>
-<h3 id="public-no-auth">Public (no auth)<a class="headerlink" href="#public-no-auth" title="Permanent link">&para;</a></h3>
+<h3 id="public-stats-always-no-auth">Public stats (always no auth)<a class="headerlink" href="#public-stats-always-no-auth" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -1573,11 +1676,6 @@
 </tr>
 </thead>
 <tbody>
-<tr>
-<td>POST</td>
-<td><code>/v1/public/chat/completions</code></td>
-<td>Rate-limited public chat (5K tokens/day)</td>
-</tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/node/public/stats</code></td>
@@ -1685,6 +1783,35 @@
 </tr>
 </tbody>
 </table>
+<h3 id="ollama-compatible">Ollama-Compatible<a class="headerlink" href="#ollama-compatible" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/tags</code></td>
+<td>List models (Ollama format)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/show</code></td>
+<td>Model info (Ollama format)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/chat</code></td>
+<td>Chat completion (Ollama format)</td>
+</tr>
+</tbody>
+</table>
+<p>These endpoints allow Ollama SDK clients (OpenClaw, etc.) to use mycellm
+as a drop-in Ollama replacement without configuration changes.</p>
 <h2 id="interactive-docs">Interactive docs<a class="headerlink" href="#interactive-docs" title="Permanent link">&para;</a></h2>
 <p>Every running node serves OpenAPI docs at:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>http://localhost:8420/docs
