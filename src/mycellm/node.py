@@ -338,12 +338,16 @@ class MycellmNode:
                     state=PeerState.AUTHENTICATED,
                 )
                 self._peer_connections[hello.peer_id] = conn
+                # Promote to ROUTABLE *before* registering so the registry
+                # entry copies the right state — peers_for_model() filters
+                # by state and we don't want a window where a freshly-
+                # authenticated peer is invisible to routing.
+                conn.state = PeerState.ROUTABLE
                 self.registry.register(
                     hello.peer_id,
                     connection=conn,
                     capabilities=hello.capabilities,
                 )
-                conn.state = PeerState.ROUTABLE
 
                 # Capture peer's QUIC source address for peer exchange
                 reg_entry = self.registry.get(hello.peer_id)
@@ -1455,14 +1459,22 @@ class MycellmNode:
                         f"(last seen >{eviction_age}s ago)"
                     )
 
-                # Loud warning if a public bootstrap has zero online seeders
+                # Loud warning if a public bootstrap has zero seeders.
+                # "Seeders" here means: HTTP-announced fleet entries that
+                # are recently alive PLUS live QUIC peer connections (the
+                # latter is the dominant path now that home seeders rely
+                # on outbound QUIC).
                 if self._settings.public:
                     online = sum(
                         1 for e in self.node_registry.values()
                         if now - e.get("last_seen", 0) < 120
                         and e.get("status") == "approved"
                     )
-                    if online == 0 and len(self.inference.loaded_models) == 0:
+                    quic_seeders = sum(
+                        1 for p in self.registry.connected_peers()
+                        if p.capabilities.role == "seeder"
+                    )
+                    if (online + quic_seeders) == 0 and len(self.inference.loaded_models) == 0:
                         logger.warning(
                             f"{styled_tag('NODE')} Public bootstrap has 0 online seeders "
                             f"and 0 local models — gateway is empty. Check seeder QUIC "

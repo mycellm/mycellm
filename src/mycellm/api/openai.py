@@ -429,8 +429,50 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             })
         else:
-            # First, try streaming via a live QUIC peer (NAT'd home seeder path).
+            # No local model — try streaming via direct QUIC peers first
+            # (this is the canonical P2P path: chain_builder picks the best
+            # peer that advertises the requested model in its capabilities).
             fleet_handled = False
+            try:
+                quic_chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+                role_sent = False
+                any_quic_chunk = False
+                async for piece in node.route_inference_stream(
+                    body.model, messages,
+                    temperature=body.temperature,
+                    max_tokens=body.max_tokens or 2048,
+                ):
+                    if not role_sent:
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                        })
+                        role_sent = True
+                    text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
+                    finish = piece.get("finish_reason") if isinstance(piece, dict) else None
+                    if text:
+                        any_quic_chunk = True
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": finish}],
+                        })
+                if any_quic_chunk:
+                    yield json.dumps({
+                        "id": quic_chunk_id, "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": body.model or "auto",
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    })
+                    yield "[DONE]"
+                    return
+            except Exception as e:
+                logging.getLogger("mycellm.router").debug(f"QUIC stream routing failed: {e}")
+
+            # Then check fleet/announced seeders (HTTP path or QUIC fallback).
             now = time.time()
             matching_entries = []
             for entry in node.node_registry.values():

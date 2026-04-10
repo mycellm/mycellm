@@ -198,14 +198,19 @@ def collect_from_node(node) -> None:
     fleet_nodes_total.labels(status="approved").set(approved)
     fleet_nodes_total.labels(status="pending").set(pending)
 
-    # Public bootstrap: seeders online (last 120s)
+    # Public bootstrap: seeders online — sum of HTTP-announced fleet
+    # entries seen in the last 120s plus live QUIC peers in seeder role.
     import time as _time
     _now = _time.time()
-    online = sum(
+    http_online = sum(
         1 for e in node.node_registry.values()
         if _now - e.get("last_seen", 0) < 120 and e.get("status") == "approved"
     )
-    bootstrap_seeders_online.set(online)
+    quic_online = sum(
+        1 for p in node.registry.connected_peers()
+        if p.capabilities.role == "seeder"
+    ) if hasattr(node, "registry") else 0
+    bootstrap_seeders_online.set(http_online + quic_online)
 
     # Hardware
     hardware_vram_gb.set(node.capabilities.hardware.vram_gb)

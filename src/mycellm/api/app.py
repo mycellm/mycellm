@@ -351,11 +351,18 @@ def create_app(node: MycellmNode) -> FastAPI:
                 "protected": protected,
                 "public": public_paths,
             },
-            "seeders_online": sum(
-                1 for e in node.node_registry.values()
-                if (__import__("time").time() - e.get("last_seen", 0)) < 120
-                and e.get("status") == "approved"
-            ) if hasattr(node, "node_registry") else 0,
+            "seeders_online": (
+                sum(
+                    1 for e in node.node_registry.values()
+                    if (__import__("time").time() - e.get("last_seen", 0)) < 120
+                    and e.get("status") == "approved"
+                )
+                if hasattr(node, "node_registry") else 0
+            ) + (
+                sum(1 for p in node.registry.connected_peers()
+                    if p.capabilities.role == "seeder")
+                if hasattr(node, "registry") else 0
+            ),
         }
 
     # Prometheus metrics endpoint (always public)
