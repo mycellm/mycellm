@@ -1305,6 +1305,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/public-bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1422,9 +1450,19 @@
 <td>API key for dashboard/API authentication</td>
 </tr>
 <tr>
+<td><code>MYCELLM_PUBLIC</code></td>
+<td><code>false</code></td>
+<td>Run as a public bootstrap gateway. Inference endpoints (<code>/v1/models</code>, <code>/v1/chat/*</code>, <code>/v1/completions</code>, <code>/v1/embeddings</code>, <code>/api/*</code>) are unauthenticated; admin/node endpoints still require <code>MYCELLM_API_KEY</code>. See <a href="../../architecture/public-bootstrap/">Public Bootstrap</a>.</td>
+</tr>
+<tr>
+<td><code>MYCELLM_PUBLIC_ANON_RATE_PER_MIN</code></td>
+<td><code>30</code></td>
+<td>Per-IP token bucket for anonymous inference requests when <code>MYCELLM_PUBLIC=true</code>. Authenticated callers (Bearer the API key) bypass.</td>
+</tr>
+<tr>
 <td><code>MYCELLM_BOOTSTRAP_PEERS</code></td>
 <td><em>(none)</em></td>
-<td>Bootstrap node addresses (<code>host:port</code>, comma-separated)</td>
+<td>Bootstrap node addresses (<code>host:port</code>, comma-separated). Seeders auto-connect via QUIC and announce capabilities through the NodeHello handshake.</td>
 </tr>
 <tr>
 <td><code>MYCELLM_HF_TOKEN</code></td>

@@ -17,30 +17,40 @@ and Ollama APIs.
 
 ## Authentication
 
-When `MYCELLM_API_KEY` is set, all `/v1/*` endpoints require authentication:
+mycellm has two auth modes, controlled by `MYCELLM_PUBLIC`:
+
+**Private mode (default).** When `MYCELLM_API_KEY` is set, all `/v1/*` and
+`/api/*` endpoints require authentication:
 
 ```
 Authorization: Bearer <your-api-key>
 ```
 
-Public endpoints (`/health`, `/metrics`, `/v1/public/*`) never require auth.
+`/health`, `/metrics`, `/v1/public/*`, and `/v1/admin/nodes/announce` are
+always public.
+
+**Public bootstrap mode (`MYCELLM_PUBLIC=true`).** Inference endpoints
+(`/v1/models`, `/v1/chat/*`, `/v1/completions`, `/v1/embeddings`, `/api/*`)
+are unauthenticated regardless of `MYCELLM_API_KEY`. Admin and node
+management endpoints still require the key. Anonymous inference is rate
+limited per source IP — see [Public Bootstrap](../architecture/public-bootstrap.md).
 
 ## Endpoints
 
 ### Inference
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/v1/chat/completions` | Yes | Chat completions (streaming supported) |
-| GET | `/v1/models` | Yes | List available models |
-| GET | `/v1/models/{id}` | Yes | Retrieve a single model |
-| POST | `/v1/embeddings` | Yes | Text embeddings |
+| Method | Path | Private auth | Public-mode auth | Description |
+|--------|------|------|------|-------------|
+| POST | `/v1/chat/completions` | Yes | **No** | Chat completions (streaming supported) |
+| POST | `/v1/completions` | Yes | **No** | Legacy completions |
+| GET | `/v1/models` | Yes | **No** | List available models |
+| GET | `/v1/models/{id}` | Yes | **No** | Retrieve a single model |
+| POST | `/v1/embeddings` | Yes | **No** | Text embeddings |
 
-### Public (no auth)
+### Public stats (always no auth)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/v1/public/chat/completions` | Rate-limited public chat (5K tokens/day) |
 | GET | `/v1/node/public/stats` | Network stats |
 
 ### Node Management

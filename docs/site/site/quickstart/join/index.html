@@ -595,6 +595,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#multi-network-federation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-network federation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#private-network" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1316,6 +1327,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/public-bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1354,6 +1393,17 @@
     <span class="md-ellipsis">
       
         Public network
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multi-network-federation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-network federation
       
     </span>
   </a>
@@ -1427,44 +1477,59 @@
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mycellm<span class="w"> </span>serve
 </code></pre></div>
 <p>Your node auto-announces to the bootstrap, gets auto-approved (public network), and appears on the <a href="https://stats.mycellm.dev">stats page</a> within 60 seconds.</p>
+<p>When connecting to a bootstrap peer, your node automatically joins any
+networks the bootstrap belongs to. This means a fresh <code>mycellm init</code> +
+<code>mycellm serve</code> with the default bootstrap will join the public network
+without any manual federation steps.</p>
+<h2 id="multi-network-federation">Multi-network federation<a class="headerlink" href="#multi-network-federation" title="Permanent link">&para;</a></h2>
+<p>A node can belong to multiple networks simultaneously — for example, a
+trusted private homelab network <em>and</em> the public network:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Already running on the public network. Join a private homelab too:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8420/v1/node/federation/join<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;network_id&quot;: &quot;&lt;homelab-network-id&gt;&quot;, &quot;network_name&quot;: &quot;homelab&quot;, &quot;role&quot;: &quot;seeder&quot;}&#39;</span>
+</code></pre></div>
+<p>Nodes advertise all their network IDs during QUIC handshake. Trust is
+resolved per-peer based on shared network memberships — homelab peers
+get <code>full</code> trust, public peers get <code>untrusted</code>.</p>
 <h2 id="private-network">Private network<a class="headerlink" href="#private-network" title="Permanent link">&para;</a></h2>
 <p>Create your own network:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mycellm<span class="w"> </span>init<span class="w"> </span>--create-network<span class="w"> </span><span class="s2">&quot;My Org&quot;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>mycellm<span class="w"> </span>serve
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mycellm<span class="w"> </span>init<span class="w"> </span>--create-network<span class="w"> </span><span class="s2">&quot;My Org&quot;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>mycellm<span class="w"> </span>serve
 </code></pre></div>
 <p>Then invite others:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># On the network creator&#39;s node, create an invite via the dashboard</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># or API, then share the token:</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>mycellm<span class="w"> </span>init<span class="w"> </span>--invite<span class="w"> </span>&lt;token&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># On the network creator&#39;s node, create an invite via the dashboard</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># or API, then share the token:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>mycellm<span class="w"> </span>init<span class="w"> </span>--invite<span class="w"> </span>&lt;token&gt;
 </code></pre></div>
 <h2 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>mycellm<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8420</span>:8420<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8421</span>:8421/udp<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>-v<span class="w"> </span>mycellm-data:/data/mycellm<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">MYCELLM_BOOTSTRAP_PEERS</span><span class="o">=</span>bootstrap.mycellm.dev:8421<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>ghcr.io/mycellm/mycellm
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--name<span class="w"> </span>mycellm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8420</span>:8420<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8421</span>:8421/udp<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>-v<span class="w"> </span>mycellm-data:/data/mycellm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">MYCELLM_BOOTSTRAP_PEERS</span><span class="o">=</span>bootstrap.mycellm.dev:8421<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span>ghcr.io/mycellm/mycellm
 </code></pre></div>
 <p>The Docker image auto-initializes on first run.</p>
 <h2 id="load-a-model">Load a model<a class="headerlink" href="#load-a-model" title="Permanent link">&para;</a></h2>
 <p>Open the dashboard at <code>http://localhost:8420</code> → <strong>Models</strong> tab → <strong>Browse HuggingFace</strong> to search and download GGUF models.</p>
 <p>Or via API:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Connect a remote API model (OpenRouter, Ollama, etc.)</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8420/v1/node/models/load<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s1">    &quot;name&quot;: &quot;claude-sonnet&quot;,</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="s1">    &quot;backend&quot;: &quot;openai&quot;,</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="s1">    &quot;api_base&quot;: &quot;https://openrouter.ai/api/v1&quot;,</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="s1">    &quot;api_key&quot;: &quot;secret:openrouter&quot;,</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="s1">    &quot;api_model&quot;: &quot;anthropic/claude-sonnet-4&quot;</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="s1">  }&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Connect a remote API model (OpenRouter, Ollama, etc.)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8420/v1/node/models/load<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="s1">    &quot;name&quot;: &quot;claude-sonnet&quot;,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="s1">    &quot;backend&quot;: &quot;openai&quot;,</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="s1">    &quot;api_base&quot;: &quot;https://openrouter.ai/api/v1&quot;,</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="s1">    &quot;api_key&quot;: &quot;secret:openrouter&quot;,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="s1">    &quot;api_model&quot;: &quot;anthropic/claude-sonnet-4&quot;</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="s1">  }&#39;</span>
 </code></pre></div>
 <h2 id="earning-credits">Earning credits<a class="headerlink" href="#earning-credits" title="Permanent link">&para;</a></h2>
 <p>Your node earns credits whenever it serves inference to the network. Credits are used to consume inference from other nodes. The system is zero-sum — serving earns what consuming costs.</p>
 <p>Check your balance:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>mycellm<span class="w"> </span>chat
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>/credits
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>mycellm<span class="w"> </span>chat
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>/credits
 </code></pre></div>
 
 

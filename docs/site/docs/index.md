@@ -65,7 +65,7 @@ export OPENAI_API_KEY=your-key  # optional
 ├─────────────────────────────────────────────────┤
 │  API Layer (:8420)                              │
 │  /v1/chat/completions  (OpenAI-compatible)      │
-│  /v1/public/chat/completions  (rate-limited)    │
+│  /v1/models, /api/* (Ollama-compatible)         │
 │  /metrics  (Prometheus)                         │
 ├─────────────────────────────────────────────────┤
 │  Router (model resolver, quality constraints)   │

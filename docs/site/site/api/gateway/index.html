@@ -874,40 +874,61 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#post-v1publicchatcompletions" class="md-nav__link">
+  <a href="#anonymous-endpoints" class="md-nav__link">
     <span class="md-ellipsis">
       
-        POST /v1/public/chat/completions
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="POST /v1/public/chat/completions">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#request" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Request
+        Anonymous endpoints
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#streaming-metadata" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Streaming metadata
+        Quick start
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
+      
+        <li class="md-nav__item">
+  <a href="#rate-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routing-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing details
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-stats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public stats
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#error-responses" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -917,17 +938,12 @@
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
-  
-</li>
       
         <li class="md-nav__item">
-  <a href="#get-v1nodepublicstats" class="md-nav__link">
+  <a href="#streaming-notes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GET /v1/node/public/stats
+        Streaming notes
       
     </span>
   </a>
@@ -1322,6 +1338,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/public-bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1356,40 +1400,61 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#post-v1publicchatcompletions" class="md-nav__link">
+  <a href="#anonymous-endpoints" class="md-nav__link">
     <span class="md-ellipsis">
       
-        POST /v1/public/chat/completions
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="POST /v1/public/chat/completions">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#request" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Request
+        Anonymous endpoints
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#streaming-metadata" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Streaming metadata
+        Quick start
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
+      
+        <li class="md-nav__item">
+  <a href="#rate-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routing-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing details
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-stats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public stats
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#error-responses" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1399,17 +1464,12 @@
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
-  
-</li>
       
         <li class="md-nav__item">
-  <a href="#get-v1nodepublicstats" class="md-nav__link">
+  <a href="#streaming-notes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GET /v1/node/public/stats
+        Streaming notes
       
     </span>
   </a>
@@ -1434,31 +1494,130 @@
 
 
 <h1 id="public-gateway">Public Gateway<a class="headerlink" href="#public-gateway" title="Permanent link">&para;</a></h1>
-<p>The public gateway provides rate-limited, anonymous access to the mycellm network. No API key required.</p>
-<h2 id="post-v1publicchatcompletions"><code>POST /v1/public/chat/completions</code><a class="headerlink" href="#post-v1publicchatcompletions" title="Permanent link">&para;</a></h2>
-<p>Same request format as <code>/v1/chat/completions</code> with restrictions:</p>
-<ul>
-<li><strong>Rate limit</strong>: 5,000 tokens/day per IP, 10 requests/minute</li>
-<li><strong>Max tokens</strong>: 1,024 per response</li>
-<li><strong>Max message length</strong>: 2,000 characters</li>
-<li><strong>Model</strong>: auto-selected (best available), user cannot choose</li>
-<li><strong>Metadata</strong>: stripped — no peer IDs, routing details, or credit info</li>
-</ul>
-<h3 id="request">Request<a class="headerlink" href="#request" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">&quot;messages&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;user&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Hello&quot;</span><span class="p">}],</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">&quot;stream&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">}</span>
+<p>When a node runs with <code>MYCELLM_PUBLIC=true</code> it becomes a <strong>public bootstrap
+gateway</strong> — anonymous callers can use the standard OpenAI-compatible
+endpoints with no API key required. The canonical instance is
+<a href="https://api.mycellm.dev"><code>api.mycellm.dev</code></a>, but the same image with
+<code>MYCELLM_PUBLIC=true</code> produces a fully-equivalent alternative gateway.
+See <a href="../../architecture/public-bootstrap/">Public Bootstrap</a> for the full
+architecture.</p>
+<h2 id="anonymous-endpoints">Anonymous endpoints<a class="headerlink" href="#anonymous-endpoints" title="Permanent link">&para;</a></h2>
+<p>When <code>MYCELLM_PUBLIC=true</code>, these are open to the public:</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Method</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/v1/models</code></td>
+<td>GET</td>
+<td>Union of local + QUIC peer + fleet models</td>
+</tr>
+<tr>
+<td><code>/v1/models/{id}</code></td>
+<td>GET</td>
+<td>Per-model details</td>
+</tr>
+<tr>
+<td><code>/v1/chat/completions</code></td>
+<td>POST</td>
+<td>Streaming and non-streaming</td>
+</tr>
+<tr>
+<td><code>/v1/completions</code></td>
+<td>POST</td>
+<td>Legacy OpenAI completions</td>
+</tr>
+<tr>
+<td><code>/v1/embeddings</code></td>
+<td>POST</td>
+<td>If a backing model supports embeddings</td>
+</tr>
+<tr>
+<td><code>/api/tags</code> <code>/api/show</code> <code>/api/chat</code></td>
+<td>GET/POST</td>
+<td>Ollama-compatible routes</td>
+</tr>
+<tr>
+<td><code>/health</code> <code>/metrics</code></td>
+<td>GET</td>
+<td>Always public</td>
+</tr>
+</tbody>
+</table>
+<p>Admin and node-management endpoints (<code>/v1/node/*</code>, <code>/v1/admin/*</code>) <strong>still
+require</strong> the bootstrap's <code>MYCELLM_API_KEY</code>.</p>
+<h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># List models on api.mycellm.dev</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>https://api.mycellm.dev/v1/models
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Chat</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>curl<span class="w"> </span>https://api.mycellm.dev/v1/chat/completions<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="s1">    &quot;model&quot;: &quot;auto&quot;,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="s1">    &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Hello&quot;}]</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="s1">  }&#39;</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Streaming</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>curl<span class="w"> </span>-N<span class="w"> </span>https://api.mycellm.dev/v1/chat/completions<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="s1">    &quot;model&quot;: &quot;auto&quot;,</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="s1">    &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Tell me a haiku&quot;}],</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="s1">    &quot;stream&quot;: true</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="s1">  }&#39;</span>
 </code></pre></div>
-<h3 id="streaming-metadata">Streaming metadata<a class="headerlink" href="#streaming-metadata" title="Permanent link">&para;</a></h3>
-<p>The gateway includes <code>mycellm</code> metadata in streaming chunks:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">// First chunk — node attribution</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="p">{</span><span class="nt">&quot;mycellm&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;node&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;99e58f4c&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;served_by&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mycellm-public&quot;</span><span class="p">}}</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1">// Final chunk — latency</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">{</span><span class="nt">&quot;mycellm&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;node&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;99e58f4c&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;latency_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">485</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;served_by&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mycellm-public&quot;</span><span class="p">}}</span>
+<p>The <code>auto</code> model lets the gateway pick the best available — typically the
+highest-tier model with the lowest queue depth across all online seeders.</p>
+<h2 id="rate-limits">Rate limits<a class="headerlink" href="#rate-limits" title="Permanent link">&para;</a></h2>
+<p>Anonymous callers are subject to a per-IP token bucket. The default is
+<strong>30 requests per minute</strong> per source IP, configurable via
+<code>MYCELLM_PUBLIC_ANON_RATE_PER_MIN</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kr">HTTP</span><span class="o">/</span><span class="m">1.1</span> <span class="m">429</span> <span class="ne">Too Many Requests</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="na">Retry-After</span><span class="o">:</span> <span class="l">42</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="na">Content-Type</span><span class="o">:</span> <span class="l">application/json</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">{</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;rate_limited&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Anonymous inference limit (30/min) reached. Retry in 42s, or send an api_key for higher limits.&quot;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
 </code></pre></div>
-<h3 id="error-responses">Error responses<a class="headerlink" href="#error-responses" title="Permanent link">&para;</a></h3>
+<p>Authenticated callers (clients that send <code>Authorization: Bearer &lt;api_key&gt;</code>
+matching the bootstrap's key) <strong>bypass</strong> the anon rate limit entirely.</p>
+<h2 id="routing-details">Routing details<a class="headerlink" href="#routing-details" title="Permanent link">&para;</a></h2>
+<p>A request to a public bootstrap is routed in priority order:</p>
+<ol>
+<li><strong>Local model</strong> on the bootstrap, if loaded (×1.5 score)</li>
+<li><strong>Direct QUIC peer</strong> that advertises the requested model (×1.2 score)</li>
+<li><strong>HTTP fleet route</strong> to a seeder's <code>api_addr</code> (×1.0 score)</li>
+</ol>
+<p>The bootstrap reports the chosen path back in a header:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>X-Mycellm-Routed-To: quic:hokulea
+</code></pre></div>
+<p>If a peer fails mid-request the failure is recorded against that peer's
+score and the next best candidate is tried. P2P is always preferred —
+running a public bootstrap adds reach, not centralisation.</p>
+<h2 id="public-stats">Public stats<a class="headerlink" href="#public-stats" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>GET /v1/public/stats
+</code></pre></div>
+<p>Network stats — no auth required, no rate limit.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">&quot;network_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mycellm-public&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">&quot;nodes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;seeding&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">},</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">&quot;compute&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;total_tps&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">12.5</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total_vram_gb&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">80.0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total_ram_gb&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">87.6</span><span class="p">},</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">&quot;models&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="nt">&quot;unique&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">&quot;names&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;Qwen2.5-32B-Instruct-Q4_K_M&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;Qwen2.5-7B-Instruct-Q4_K_M&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">]</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="nt">&quot;activity&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;total_requests&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1542</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">89420</span><span class="p">}</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="p">}</span>
+</code></pre></div>
+<h2 id="error-responses">Error responses<a class="headerlink" href="#error-responses" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -1468,34 +1627,31 @@
 </thead>
 <tbody>
 <tr>
-<td>429</td>
-<td>Rate limit exceeded</td>
-</tr>
-<tr>
-<td>503</td>
-<td>No models available</td>
+<td>200</td>
+<td>OK</td>
 </tr>
 <tr>
 <td>400</td>
-<td>Invalid request</td>
+<td>Invalid request body</td>
+</tr>
+<tr>
+<td>429</td>
+<td>Per-IP anon rate limit reached</td>
+</tr>
+<tr>
+<td>503</td>
+<td>No models available across the network</td>
 </tr>
 </tbody>
 </table>
-<h2 id="get-v1nodepublicstats"><code>GET /v1/node/public/stats</code><a class="headerlink" href="#get-v1nodepublicstats" title="Permanent link">&para;</a></h2>
-<p>Network stats — no auth required.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;network_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mycellm-public&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;nodes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;seeding&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">},</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">&quot;compute&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;total_tps&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">12.5</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total_vram_gb&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">80.0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total_ram_gb&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">87.6</span><span class="p">},</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">&quot;models&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">&quot;unique&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">&quot;names&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;Qwen2.5-3B-Instruct-Q8_0&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;Mistral-Small-24B&quot;</span><span class="p">],</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">&quot;by_tier&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;tier1&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;tier2&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;tier3&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[]}</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">&quot;activity&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;total_requests&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1542</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">89420</span><span class="p">},</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">&quot;top_contributors&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;aurora&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;tps&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">12.3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;models&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">}]</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="p">}</span>
-</code></pre></div>
+<h2 id="streaming-notes">Streaming notes<a class="headerlink" href="#streaming-notes" title="Permanent link">&para;</a></h2>
+<p>The gateway returns standard OpenAI SSE chunks. If you put your own reverse
+proxy in front of a public bootstrap, two things matter:</p>
+<ul>
+<li>Disable response buffering on the proxy. With Caddy: <code>flush_interval -1</code>.</li>
+<li>Use HTTP/1.1 to the upstream — HTTP/2 to a uvicorn upstream produces
+  intermittent 502s.</li>
+</ul>
 
 
 

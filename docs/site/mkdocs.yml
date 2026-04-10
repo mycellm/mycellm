@@ -71,6 +71,7 @@ nav:
     - Chat REPL: cli/chat.md
   - Architecture:
     - Overview: architecture/overview.md
+    - Public Bootstrap: architecture/public-bootstrap.md
 
 extra:
   social:
