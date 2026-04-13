@@ -365,14 +365,14 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
 
     async def generate():
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-        _requested = body.model if body.model != "auto" else ""
-        model_name = node.inference.resolve_model_name(_requested)
+        _requested = body.model if body.model not in ("auto", "") else ""
 
-        # For auto routing (no specific model), use ModelResolver for quality-based
-        # selection instead of falling back to whatever was loaded first.
-        if not model_name and node.model_resolver:
+        # For auto routing, use ModelResolver for quality-based selection
+        # rather than first-loaded model (which could be a tiny model).
+        model_name = ""
+        if not _requested and node.model_resolver:
             resolved = node.model_resolver.resolve(
-                _requested,
+                "",
                 node.inference.loaded_models,
                 fleet_registry=node.node_registry,
             )
@@ -380,9 +380,9 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 best = resolved[0]
                 if best.source in ("local", "fleet"):
                     model_name = best.model_name
-                elif best.source == "quic":
-                    # For QUIC-only models, fall through to the no-local-model path
-                    model_name = ""
+                # quic-only: fall through to the no-local-model path below
+        if not model_name:
+            model_name = node.inference.resolve_model_name(_requested)
 
         if model_name:
             from mycellm.inference.base import InferenceRequest
@@ -411,7 +411,12 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
             # When tools are requested, streaming tool_call deltas are unreliable
             # (llama-cpp-python and many backends don't emit them).  Fall back to
             # a single non-streaming generate() call and emit the result as SSE.
+            # Also upgrade tool_choice "auto" → "required": the "auto" path causes
+            # some backends to return tool calls as <tool_call> text instead of
+            # proper JSON tool_calls format, while "required" forces native format.
             if req.tools:
+                if req.tool_choice in (None, "auto"):
+                    req.tool_choice = "required"
                 result = await node.inference.generate(req)
                 yield json.dumps({
                     "id": chunk_id,
