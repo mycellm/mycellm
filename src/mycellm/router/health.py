@@ -22,6 +22,7 @@ class PeerHealthMetrics:
     _max_success_samples: int = 20
     last_check: float = 0.0
     estimated_queue_depth: int = 0
+    consecutive_failures: int = 0
 
     @property
     def avg_rtt(self) -> float:
@@ -102,8 +103,17 @@ class HealthChecker:
             await asyncio.sleep(self._interval)
             await self._check_all()
 
+    _FAILURE_THRESHOLD = 3  # consecutive ping failures before marking DISCONNECTED
+
     async def _check_all(self) -> None:
-        peers = self._registry.connected_peers()
+        # Check connected peers AND disconnected ones (recovery path).
+        connected = self._registry.connected_peers()
+        disconnected = [
+            p for p in self._registry.all_peers()
+            if p.state == PeerState.DISCONNECTED and p.connection is not None
+        ]
+        peers = connected + disconnected
+
         for entry in peers:
             if entry.connection is None:
                 continue
@@ -112,22 +122,42 @@ class HealthChecker:
                 rtt = await entry.connection.ping()
                 if rtt < 0:
                     metrics.record_failure()
-                    entry.state = PeerState.DISCONNECTED
+                    metrics.consecutive_failures += 1
                     entry.failure_count += 1
-                    logger.warning(f"Peer {entry.peer_id[:8]} ping timeout (health={metrics.health_score:.2f})")
-                    if self._activity:
-                        from mycellm.activity import EventType
-                        self._activity.record(EventType.CONNECTION_HEALTH, peer_id=entry.peer_id[:16], status="timeout", health=round(metrics.health_score, 2))
+                    if metrics.consecutive_failures >= self._FAILURE_THRESHOLD:
+                        entry.state = PeerState.DISCONNECTED
+                        logger.warning(
+                            f"Peer {entry.peer_id[:8]} marked DISCONNECTED after "
+                            f"{metrics.consecutive_failures} consecutive ping timeouts "
+                            f"(health={metrics.health_score:.2f})"
+                        )
+                        if self._activity:
+                            from mycellm.activity import EventType
+                            self._activity.record(EventType.CONNECTION_HEALTH, peer_id=entry.peer_id[:16], status="timeout", health=round(metrics.health_score, 2))
+                    else:
+                        logger.debug(
+                            f"Peer {entry.peer_id[:8]} ping miss "
+                            f"{metrics.consecutive_failures}/{self._FAILURE_THRESHOLD} "
+                            f"(health={metrics.health_score:.2f})"
+                        )
                 else:
                     metrics.record_success(rtt)
+                    metrics.consecutive_failures = 0
                     entry.state = PeerState.ROUTABLE
                     entry.failure_count = 0
                     logger.debug(f"Peer {entry.peer_id[:8]} RTT={rtt*1000:.0f}ms health={metrics.health_score:.2f}")
             except Exception as e:
                 metrics.record_failure()
-                entry.state = PeerState.DISCONNECTED
+                metrics.consecutive_failures += 1
                 entry.failure_count += 1
-                logger.warning(f"Peer {entry.peer_id[:8]} health check failed: {e}")
-                if self._activity:
-                    from mycellm.activity import EventType
-                    self._activity.record(EventType.CONNECTION_HEALTH, peer_id=entry.peer_id[:16], status="failed", health=round(metrics.health_score, 2))
+                if metrics.consecutive_failures >= self._FAILURE_THRESHOLD:
+                    entry.state = PeerState.DISCONNECTED
+                    logger.warning(f"Peer {entry.peer_id[:8]} health check failed: {e}")
+                    if self._activity:
+                        from mycellm.activity import EventType
+                        self._activity.record(EventType.CONNECTION_HEALTH, peer_id=entry.peer_id[:16], status="failed", health=round(metrics.health_score, 2))
+                else:
+                    logger.debug(
+                        f"Peer {entry.peer_id[:8]} ping error "
+                        f"{metrics.consecutive_failures}/{self._FAILURE_THRESHOLD}: {e}"
+                    )
