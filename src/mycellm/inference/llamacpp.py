@@ -257,6 +257,10 @@ class LlamaCppBackend(InferenceBackend):
                 extra_kwargs["grammar"] = LlamaGrammar.from_string(request.grammar)
             except (ImportError, Exception) as e:
                 logger.warning(f"Grammar constraint ignored: {e}")
+        if request.tools:
+            extra_kwargs["tools"] = request.tools
+        if request.tool_choice is not None:
+            extra_kwargs["tool_choice"] = request.tool_choice
         response = await asyncio.to_thread(
             llm.create_chat_completion,
             messages=request.messages,
@@ -268,9 +272,11 @@ class LlamaCppBackend(InferenceBackend):
 
         choice = response["choices"][0]
         usage = response.get("usage", {})
+        msg = choice["message"]
 
         return InferenceResult(
-            text=choice["message"]["content"],
+            text=msg.get("content") or "",
+            tool_calls=msg.get("tool_calls"),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             finish_reason=choice.get("finish_reason", "stop"),
@@ -307,6 +313,10 @@ class LlamaCppBackend(InferenceBackend):
                 extra_kwargs["grammar"] = LlamaGrammar.from_string(request.grammar)
             except (ImportError, Exception) as e:
                 logger.warning(f"Grammar constraint ignored: {e}")
+        if request.tools:
+            extra_kwargs["tools"] = request.tools
+        if request.tool_choice is not None:
+            extra_kwargs["tool_choice"] = request.tool_choice
 
         def _run_stream():
             try:
@@ -328,17 +338,48 @@ class LlamaCppBackend(InferenceBackend):
         thread = threading.Thread(target=_run_stream, daemon=True)
         thread.start()
 
+        # Accumulate tool_call deltas across streaming chunks.
+        # llama-cpp-python emits one delta per tool_call argument token;
+        # we collect them and emit a single InferenceChunk with the full
+        # tool_calls list at finish_reason=="tool_calls".
+        accumulated_tool_calls: dict[int, dict] = {}
+
         while True:
             item = await chunk_queue.get()
             if item is _SENTINEL:
                 break
             if isinstance(item, Exception):
                 raise item
-            delta = item["choices"][0].get("delta", {})
+            choice = item["choices"][0]
+            delta = choice.get("delta", {})
             content = delta.get("content", "")
-            finish = item["choices"][0].get("finish_reason")
-            if content or finish:
+            finish = choice.get("finish_reason")
+
+            # Accumulate tool_call deltas
+            for tc_delta in delta.get("tool_calls") or []:
+                idx = tc_delta.get("index", 0)
+                if idx not in accumulated_tool_calls:
+                    accumulated_tool_calls[idx] = {
+                        "id": tc_delta.get("id", ""),
+                        "type": tc_delta.get("type", "function"),
+                        "function": {"name": "", "arguments": ""},
+                    }
+                tc = accumulated_tool_calls[idx]
+                fn = tc_delta.get("function", {})
+                if fn.get("name"):
+                    tc["function"]["name"] += fn["name"]
+                if fn.get("arguments"):
+                    tc["function"]["arguments"] += fn["arguments"]
+                if tc_delta.get("id"):
+                    tc["id"] = tc_delta["id"]
+
+            if content or (finish and finish != "tool_calls"):
                 yield InferenceChunk(text=content, finish_reason=finish)
+
+        # If we accumulated tool_calls, emit them as a final chunk
+        if accumulated_tool_calls:
+            tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls)]
+            yield InferenceChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls_list)
 
     async def embed(self, request):
         from mycellm.inference.base import EmbeddingResult

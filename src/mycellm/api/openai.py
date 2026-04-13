@@ -30,7 +30,10 @@ router = APIRouter()
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Optional[str] = None
+    tool_calls: Optional[list] = None      # assistant → tool invocations
+    tool_call_id: Optional[str] = None     # tool → result for this call_id
+    name: Optional[str] = None             # tool → function name
 
 
 class MycellmRouting(BaseModel):
@@ -57,6 +60,8 @@ class ChatCompletionRequest(BaseModel):
     seed: int | None = None
     response_format: dict | None = None  # {"type": "json_object"}
     grammar: str | None = None  # GBNF grammar for constrained output (llama.cpp)
+    tools: list | None = None              # OpenAI tool definitions
+    tool_choice: str | dict | None = None  # "auto", "none", "required", or specific tool
     mycellm: MycellmRouting | None = None
 
 
@@ -89,7 +94,18 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     from mycellm.activity import EventType
 
     node = request.app.state.node
-    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    messages = []
+    for m in body.messages:
+        msg: dict = {"role": m.role}
+        if m.content is not None:
+            msg["content"] = m.content
+        if m.tool_calls is not None:
+            msg["tool_calls"] = m.tool_calls
+        if m.tool_call_id is not None:
+            msg["tool_call_id"] = m.tool_call_id
+        if m.name is not None:
+            msg["name"] = m.name
+        messages.append(msg)
     start_time = time.time()
     node.activity.record(EventType.INFERENCE_START, model=body.model, source="api")
 
@@ -222,6 +238,8 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             seed=body.seed,
             response_format=body.response_format,
             grammar=body.grammar,
+            tools=body.tools,
+            tool_choice=body.tool_choice,
         )
         try:
             result = await node.inference.generate(req)
@@ -270,7 +288,11 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             model=model_name,
             choices=[
                 ChatCompletionChoice(
-                    message=ChatMessage(role="assistant", content=result.text),
+                    message=ChatMessage(
+                        role="assistant",
+                        content=result.text or None,
+                        tool_calls=result.tool_calls,
+                    ),
                     finish_reason=result.finish_reason,
                 )
             ],
@@ -280,7 +302,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 total_tokens=result.prompt_tokens + result.completion_tokens,
             ),
         )
-        response = JSONResponse(content=resp_data.model_dump())
+        response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
         response.headers["X-Mycellm-Routed-To"] = "local"
         return response
 
@@ -366,6 +388,8 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 seed=body.seed,
                 response_format=body.response_format,
                 grammar=body.grammar,
+                tools=body.tools,
+                tool_choice=body.tool_choice,
             )
 
             # Send role delta first
@@ -407,7 +431,20 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     raise
 
             async for chunk in stream_iter:
-                if chunk.text:
+                if chunk.tool_calls:
+                    # Tool-call chunk: emit full tool_calls array in delta
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"tool_calls": chunk.tool_calls},
+                            "finish_reason": "tool_calls",
+                        }],
+                    })
+                elif chunk.text:
                     yield json.dumps({
                         "id": chunk_id,
                         "object": "chat.completion.chunk",
@@ -560,6 +597,10 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                         "max_tokens": body.max_tokens or 2048,
                         "stream": True,
                     }
+                    if body.tools:
+                        payload["tools"] = body.tools
+                    if body.tool_choice is not None:
+                        payload["tool_choice"] = body.tool_choice
 
                     async with httpx.AsyncClient(timeout=120) as client:
                         async with client.stream("POST", url, json=payload, headers=headers) as resp:
@@ -727,6 +768,10 @@ async def _route_via_fleet(
                 "max_tokens": body.max_tokens or 2048,
                 "top_p": body.top_p,
             }
+            if body.tools:
+                payload["tools"] = body.tools
+            if body.tool_choice is not None:
+                payload["tool_choice"] = body.tool_choice
 
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(url, json=payload, headers=headers)
