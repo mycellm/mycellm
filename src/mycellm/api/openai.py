@@ -392,6 +392,47 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 tool_choice=body.tool_choice,
             )
 
+            # When tools are requested, streaming tool_call deltas are unreliable
+            # (llama-cpp-python and many backends don't emit them).  Fall back to
+            # a single non-streaming generate() call and emit the result as SSE.
+            if req.tools:
+                result = await node.inference.generate(req)
+                yield json.dumps({
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                })
+                if result.tool_calls:
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"tool_calls": result.tool_calls},
+                            "finish_reason": "tool_calls",
+                        }],
+                    })
+                elif result.text:
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": result.text}, "finish_reason": None}],
+                    })
+                yield json.dumps({
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": result.finish_reason}],
+                })
+                return
+
             # Send role delta first
             yield json.dumps({
                 "id": chunk_id,
