@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Optional
@@ -12,6 +13,31 @@ logger = logging.getLogger("mycellm.api")
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+
+
+def _parse_tool_call_xml(text: str) -> list | None:
+    """Convert Qwen-style <tool_call>...</tool_call> text to OpenAI tool_calls format.
+
+    Some backends (llama-cpp-python with Qwen models) emit tool calls as XML
+    text instead of proper tool_calls JSON when tool_choice is "auto" or unset.
+    This parses that format back into the standard OpenAI structure.
+    """
+    tool_calls = []
+    for match in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL):
+        try:
+            data = json.loads(match.group(1))
+            name = data.get("name", "")
+            arguments = data.get("arguments", {})
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments)
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:16]}",
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            })
+        except (json.JSONDecodeError, AttributeError, KeyError):
+            pass
+    return tool_calls if tool_calls else None
 
 
 def _find_alternative_model(node, busy_model: str) -> str | None:
@@ -277,6 +303,16 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                     finish_reason="error",
                 )],
             )
+        # Some backends emit tool calls as <tool_call> XML text (e.g. Qwen via
+        # llama-cpp-python with tool_choice "auto" or unset).  Parse and normalize
+        # to standard tool_calls JSON so callers always see a consistent format.
+        if req.tools and not result.tool_calls and result.text and "<tool_call>" in result.text:
+            parsed = _parse_tool_call_xml(result.text)
+            if parsed:
+                result.tool_calls = parsed
+                result.text = ""
+                result.finish_reason = "tool_calls"
+
         node.activity.record(
             EventType.INFERENCE_COMPLETE,
             model=model_name,
@@ -424,6 +460,15 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     except (KeyError, TypeError, IndexError):
                         pass
                 result = await node.inference.generate(req)
+
+                # Normalize <tool_call> XML text → tool_calls JSON (Qwen multi-tool case)
+                if not result.tool_calls and result.text and "<tool_call>" in result.text:
+                    parsed = _parse_tool_call_xml(result.text)
+                    if parsed:
+                        result.tool_calls = parsed
+                        result.text = ""
+                        result.finish_reason = "tool_calls"
+
                 yield json.dumps({
                     "id": chunk_id,
                     "object": "chat.completion.chunk",
