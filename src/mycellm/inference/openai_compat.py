@@ -119,6 +119,10 @@ class OpenAICompatibleBackend(InferenceBackend):
             body["seed"] = request.seed
         if request.response_format:
             body["response_format"] = request.response_format
+        if request.tools:
+            body["tools"] = request.tools
+        if request.tool_choice is not None:
+            body["tool_choice"] = request.tool_choice
 
         resp = await remote.client.post("/chat/completions", json=body)
         resp.raise_for_status()
@@ -126,9 +130,11 @@ class OpenAICompatibleBackend(InferenceBackend):
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
+        msg = choice["message"]
 
         return InferenceResult(
-            text=choice["message"]["content"],
+            text=msg.get("content") or "",
+            tool_calls=msg.get("tool_calls"),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             finish_reason=choice.get("finish_reason", "stop"),
@@ -160,6 +166,12 @@ class OpenAICompatibleBackend(InferenceBackend):
             body["seed"] = request.seed
         if request.response_format:
             body["response_format"] = request.response_format
+        if request.tools:
+            body["tools"] = request.tools
+        if request.tool_choice is not None:
+            body["tool_choice"] = request.tool_choice
+
+        accumulated_tool_calls: dict[int, dict] = {}
 
         async with remote.client.stream("POST", "/chat/completions", json=body) as resp:
             resp.raise_for_status()
@@ -172,11 +184,34 @@ class OpenAICompatibleBackend(InferenceBackend):
 
                 import json
                 chunk = json.loads(payload)
-                delta = chunk["choices"][0].get("delta", {})
+                choice = chunk["choices"][0]
+                delta = choice.get("delta", {})
                 content = delta.get("content", "")
-                finish = chunk["choices"][0].get("finish_reason")
-                if content or finish:
+                finish = choice.get("finish_reason")
+
+                for tc_delta in delta.get("tool_calls") or []:
+                    idx = tc_delta.get("index", 0)
+                    if idx not in accumulated_tool_calls:
+                        accumulated_tool_calls[idx] = {
+                            "id": tc_delta.get("id", ""),
+                            "type": tc_delta.get("type", "function"),
+                            "function": {"name": "", "arguments": ""},
+                        }
+                    tc = accumulated_tool_calls[idx]
+                    fn = tc_delta.get("function", {})
+                    if fn.get("name"):
+                        tc["function"]["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        tc["function"]["arguments"] += fn["arguments"]
+                    if tc_delta.get("id"):
+                        tc["id"] = tc_delta["id"]
+
+                if content or (finish and finish != "tool_calls"):
                     yield InferenceChunk(text=content, finish_reason=finish)
+
+        if accumulated_tool_calls:
+            tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls)]
+            yield InferenceChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls_list)
 
     def get_loaded_models(self) -> list[str]:
         return list(self._models.keys())
