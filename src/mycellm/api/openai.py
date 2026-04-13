@@ -368,6 +368,22 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
         _requested = body.model if body.model != "auto" else ""
         model_name = node.inference.resolve_model_name(_requested)
 
+        # For auto routing (no specific model), use ModelResolver for quality-based
+        # selection instead of falling back to whatever was loaded first.
+        if not model_name and node.model_resolver:
+            resolved = node.model_resolver.resolve(
+                _requested,
+                node.inference.loaded_models,
+                fleet_registry=node.node_registry,
+            )
+            if resolved:
+                best = resolved[0]
+                if best.source in ("local", "fleet"):
+                    model_name = best.model_name
+                elif best.source == "quic":
+                    # For QUIC-only models, fall through to the no-local-model path
+                    model_name = ""
+
         if model_name:
             from mycellm.inference.base import InferenceRequest
 
