@@ -401,17 +401,39 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             })
 
+            got_tool_calls = False
+
+            def _emit_chunk(chunk_val):
+                nonlocal got_tool_calls
+                if chunk_val.tool_calls:
+                    got_tool_calls = True
+                    return json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"tool_calls": chunk_val.tool_calls},
+                            "finish_reason": "tool_calls",
+                        }],
+                    })
+                elif chunk_val.text:
+                    return json.dumps({
+                        "id": chunk_id, "object": "chat.completion.chunk",
+                        "created": int(time.time()), "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": chunk_val.text}, "finish_reason": None}],
+                    })
+                return None
+
             try:
                 stream_iter = node.inference.generate_stream(req)
                 # Acquire the lock by getting the first iteration
                 first_chunk_val = await stream_iter.__anext__()
                 # Got the lock — yield first chunk and continue
-                if first_chunk_val.text:
-                    yield json.dumps({
-                        "id": chunk_id, "object": "chat.completion.chunk",
-                        "created": int(time.time()), "model": model_name,
-                        "choices": [{"index": 0, "delta": {"content": first_chunk_val.text}, "finish_reason": None}],
-                    })
+                first_out = _emit_chunk(first_chunk_val)
+                if first_out:
+                    yield first_out
             except RuntimeError as busy_err:
                 if "busy" in str(busy_err).lower() or "timed out" in str(busy_err).lower():
                     alt = _find_alternative_model(node, model_name)
@@ -431,39 +453,17 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     raise
 
             async for chunk in stream_iter:
-                if chunk.tool_calls:
-                    # Tool-call chunk: emit full tool_calls array in delta
-                    yield json.dumps({
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"tool_calls": chunk.tool_calls},
-                            "finish_reason": "tool_calls",
-                        }],
-                    })
-                elif chunk.text:
-                    yield json.dumps({
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"content": chunk.text},
-                            "finish_reason": chunk.finish_reason,
-                        }],
-                    })
+                out = _emit_chunk(chunk)
+                if out:
+                    yield out
 
-            # Final chunk
+            # Final chunk — use "tool_calls" finish_reason if model called a tool
             yield json.dumps({
                 "id": chunk_id,
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
                 "model": model_name,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if got_tool_calls else "stop"}],
             })
         else:
             # No local model — try streaming via direct QUIC peers first
@@ -777,7 +777,9 @@ async def _route_via_fleet(
                 resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
-                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    resp_msg = data.get("choices", [{}])[0].get("message", {})
+                    text = resp_msg.get("content") or ""
+                    resp_tool_calls = resp_msg.get("tool_calls")
                     usage = data.get("usage", {})
                     node_name = entry.get("node_name", addr)
                     logger.info(f"Routed '{model_to_route or body.model}' to fleet node {node_name}")
@@ -824,7 +826,11 @@ async def _route_via_fleet(
                         model=data.get("model", model_to_route or body.model),
                         choices=[
                             ChatCompletionChoice(
-                                message=ChatMessage(role="assistant", content=text),
+                                message=ChatMessage(
+                                    role="assistant",
+                                    content=text or None,
+                                    tool_calls=resp_tool_calls,
+                                ),
                                 finish_reason=data.get("choices", [{}])[0].get("finish_reason", "stop"),
                             )
                         ],
@@ -834,7 +840,7 @@ async def _route_via_fleet(
                             total_tokens=usage.get("total_tokens", 0),
                         ),
                     )
-                    response = JSONResponse(content=resp_data.model_dump())
+                    response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
                     response.headers["X-Mycellm-Routed-To"] = routed_to
                     return response
                 else:
