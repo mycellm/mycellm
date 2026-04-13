@@ -374,6 +374,22 @@ class MycellmNode:
         elif msg.type == MessageType.PING:
             reply = pong_message(self.peer_id, msg.id)
             await protocol.reply_on_stream(stream_id, reply)
+            # Liveness signal: if a DISCONNECTED peer is still sending PINGs,
+            # the QUIC session is alive — restore it to ROUTABLE immediately
+            # rather than waiting for the next HealthChecker cycle.
+            _ping_peer_id = msg.from_peer
+            if _ping_peer_id and _ping_peer_id in self._peer_connections:
+                _conn = self._peer_connections[_ping_peer_id]
+                if not getattr(getattr(_conn, 'protocol', None), '_is_closed', True):
+                    _entry = self.registry.get(_ping_peer_id)
+                    if _entry and _entry.state == PeerState.DISCONNECTED:
+                        _entry.state = PeerState.ROUTABLE
+                        _conn.state = PeerState.ROUTABLE
+                        _entry.last_seen = time.time()
+                        logger.debug(
+                            f"{styled_tag('P2P')} Peer {_ping_peer_id[:8]} restored "
+                            f"ROUTABLE via incoming PING"
+                        )
 
         elif msg.type == MessageType.INFERENCE_REQ:
             await self._handle_inference_request(protocol, msg, stream_id)
@@ -391,8 +407,15 @@ class MycellmNode:
             caps = msg.payload.get("capabilities", {})
             addrs = msg.payload.get("addresses", [])
             from mycellm.protocol.capabilities import Capabilities
+            _ann_conn = self._peer_connections.get(msg.from_peer)
+            # If the QUIC session for this peer is alive, ensure its state is
+            # restored to ROUTABLE before registering — otherwise the
+            # connection= parameter has no effect on a DISCONNECTED entry.
+            if _ann_conn and not getattr(getattr(_ann_conn, 'protocol', None), '_is_closed', True):
+                _ann_conn.state = PeerState.ROUTABLE
             self.registry.register(
                 msg.from_peer,
+                connection=_ann_conn,
                 capabilities=Capabilities.from_dict(caps),
                 addresses=addrs,
             )
@@ -1408,6 +1431,13 @@ class MycellmNode:
                 except Exception as e:
                     logger.warning(f"{styled_tag('NODE')} Announce to {url} failed: {e}")
                     self.activity.record(EventType.ANNOUNCE_FAILED, bootstrap=url, reason=str(e))
+            # Also send capabilities via QUIC to any live managed bootstrap connections.
+            # This ensures the bootstrap's PeerRegistry stays current even when the
+            # HTTP endpoint is unreachable (e.g. port bound to 127.0.0.1 inside Docker).
+            try:
+                await self.announce_capabilities()
+            except Exception as e:
+                logger.debug(f"{styled_tag('NODE')} QUIC capability announce failed: {e}")
             return any_ok
 
         # Initial announce
