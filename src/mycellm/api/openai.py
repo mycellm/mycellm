@@ -411,12 +411,18 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
             # When tools are requested, streaming tool_call deltas are unreliable
             # (llama-cpp-python and many backends don't emit them).  Fall back to
             # a single non-streaming generate() call and emit the result as SSE.
-            # Also upgrade tool_choice "auto" → "required": the "auto" path causes
-            # some backends to return tool calls as <tool_call> text instead of
-            # proper JSON tool_calls format, while "required" forces native format.
+            # Also: "auto" tool_choice causes some backends to return tool calls
+            # as <tool_call> XML text instead of proper JSON tool_calls.  When
+            # exactly one tool is defined and choice is "auto"/"none"/unset, force
+            # it to {"type":"function","function":{"name":<tool>}} which reliably
+            # produces the standard tool_calls response format.
             if req.tools:
-                if req.tool_choice in (None, "auto"):
-                    req.tool_choice = "required"
+                if req.tool_choice in (None, "auto", "none") and len(req.tools) == 1:
+                    try:
+                        fn_name = req.tools[0]["function"]["name"]
+                        req.tool_choice = {"type": "function", "function": {"name": fn_name}}
+                    except (KeyError, TypeError, IndexError):
+                        pass
                 result = await node.inference.generate(req)
                 yield json.dumps({
                     "id": chunk_id,
