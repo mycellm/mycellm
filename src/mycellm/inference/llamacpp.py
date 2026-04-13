@@ -135,7 +135,7 @@ class LlamaCppBackend(InferenceBackend):
         import inspect
 
         model_name = kwargs.get("name", model_path.split("/")[-1])
-        n_ctx = kwargs.get("n_ctx", 4096)
+        n_ctx = kwargs.get("ctx_len", kwargs.get("n_ctx", 4096))
         n_gpu_layers = kwargs.get("n_gpu_layers", -1)  # -1 = auto
         progress_callback = kwargs.get("progress_callback")
 
