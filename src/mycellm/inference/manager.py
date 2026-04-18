@@ -17,6 +17,31 @@ from mycellm.protocol.capabilities import ModelCapability
 
 logger = logging.getLogger("mycellm.inference")
 
+# Backends that load model bytes into local memory (need RAM check, file-based
+# progress tracking, single-threaded Lock). Remote backends (openai-compat)
+# stream over HTTP and don't need any of that.
+LOCAL_BACKENDS = ("llama.cpp", "mlx")
+
+
+def _model_size_on_disk(model_path: str) -> int:
+    """Return total bytes of a model on disk.
+
+    For llama.cpp: a single .gguf file.
+    For MLX: a directory containing config.json + one or more .safetensors shards.
+    """
+    p = Path(model_path)
+    if p.is_file():
+        try:
+            return p.stat().st_size
+        except OSError:
+            return 0
+    if p.is_dir():
+        try:
+            return sum(f.stat().st_size for f in p.glob("*.safetensors"))
+        except OSError:
+            return 0
+    return 0
+
 
 def _get_rss_bytes() -> int:
     """Get current process RSS in bytes. Cross-platform."""
@@ -118,9 +143,9 @@ class InferenceManager:
             self._load_status[model_name]["phase"] = "creating backend"
             backend = self._create_backend(backend_type)
 
-            # Memory check for llama.cpp models
-            if backend_type == "llama.cpp" and model_path:
-                file_size = Path(model_path).stat().st_size if Path(model_path).exists() else 0
+            # Memory check for any local backend (llama.cpp or mlx)
+            if backend_type in LOCAL_BACKENDS and model_path:
+                file_size = _model_size_on_disk(model_path)
                 if file_size > 0:
                     est_ram_needed = file_size * 1.2  # model + KV cache overhead
                     try:
@@ -150,18 +175,18 @@ class InferenceManager:
                     except Exception:
                         pass
 
-            if backend_type == "llama.cpp":
+            if backend_type in LOCAL_BACKENDS:
                 self._load_status[model_name]["phase"] = "loading model into memory"
                 if model_path:
-                    size_gb = Path(model_path).stat().st_size / (1024**3) if Path(model_path).exists() else 0
+                    size_gb = _model_size_on_disk(model_path) / (1024**3)
                     if size_gb > 0:
                         self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
                         self._load_status[model_name]["size_gb"] = round(size_gb, 2)
 
                 # Progress tracking — uses llama.cpp callback if available,
-                # falls back to RSS-based estimation for older versions
+                # falls back to RSS-based estimation for older versions / MLX
                 load_start = _time.time()
-                file_bytes = Path(model_path).stat().st_size if Path(model_path).exists() else 0
+                file_bytes = _model_size_on_disk(model_path) if model_path else 0
                 _has_native_progress = False
 
                 def _progress_cb(progress: float):
@@ -223,7 +248,7 @@ class InferenceManager:
             await backend.load_model(model_path, name=model_name, **kwargs)
 
             # Stop RSS monitor if it was running
-            if backend_type == "llama.cpp":
+            if backend_type in LOCAL_BACKENDS:
                 self._load_status[model_name]["_monitor"] = False
                 rss_task.cancel()
 
@@ -237,7 +262,9 @@ class InferenceManager:
             # - llama.cpp: Lock (1 concurrent) — C context is NOT thread-safe
             # - Remote/relay: configurable via max_concurrent kwarg, default 32
             #   The remote server handles its own backpressure via HTTP 429/503
-            if backend_type == "llama.cpp":
+            if backend_type in LOCAL_BACKENDS:
+                # Local model objects (llama.cpp Llama / MLX model+tokenizer)
+                # are not safe for parallel forward passes — serialize.
                 self._model_locks[model_name] = asyncio.Lock()
             else:
                 max_c = kwargs.get("max_concurrent", 32)
@@ -329,7 +356,7 @@ class InferenceManager:
         self._queue_depth[model_name] = self._queue_depth.get(model_name, 0) + 1
         try:
             if isinstance(lock, asyncio.Lock):
-                # llama.cpp: serialize. If locked, we're queued.
+                # Local backend (llama.cpp / mlx): serialize. If locked, we're queued.
                 if lock.locked():
                     logger.info(f"Model {model_name} busy — request queued (depth={self._queue_depth[model_name]})")
                 await asyncio.wait_for(lock.acquire(), timeout=self._queue_timeout)
@@ -604,6 +631,9 @@ class InferenceManager:
         if backend_type == "llama.cpp":
             from mycellm.inference.llamacpp import LlamaCppBackend
             return LlamaCppBackend()
+        if backend_type == "mlx":
+            from mycellm.inference.mlx import MLXBackend
+            return MLXBackend()
         if backend_type in ("openai", "openai-compatible"):
             from mycellm.inference.openai_compat import OpenAICompatibleBackend
             return OpenAICompatibleBackend()

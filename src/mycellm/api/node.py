@@ -201,6 +201,9 @@ async def load_model(request: Request):
     For local GGUF models (backend=llama.cpp, default):
         {"model_path": "/path/to/model.gguf", "name": "my-model"}
 
+    For local MLX models (Apple Silicon only, backend=mlx):
+        {"model_path": "/path/to/mlx-dir-or-hf-repo-id", "name": "my-model", "backend": "mlx"}
+
     For remote OpenAI-compatible APIs (backend=openai):
         {"name": "claude-sonnet", "backend": "openai",
          "api_base": "https://openrouter.ai/api/v1",
@@ -218,13 +221,20 @@ async def load_model(request: Request):
         api_key = node.secret_store.resolve(api_key)
 
     # Local backends require model_path; remote backends don't
-    if backend_type == "llama.cpp" and not model_path:
-        return {"error": "model_path required for llama.cpp backend"}
+    LOCAL_BACKENDS = ("llama.cpp", "mlx")
+    if backend_type in LOCAL_BACKENDS and not model_path:
+        return {"error": f"model_path required for {backend_type} backend"}
 
-    model_name = name or (model_path.split("/")[-1].replace(".gguf", "") if model_path else "remote-model")
+    if name:
+        model_name = name
+    elif model_path:
+        leaf = model_path.rstrip("/").split("/")[-1]
+        model_name = leaf.replace(".gguf", "")
+    else:
+        model_name = "remote-model"
 
-    # For llama.cpp, load async (can take minutes for large models)
-    if backend_type == "llama.cpp":
+    # For local backends, load async (can take minutes for large models)
+    if backend_type in LOCAL_BACKENDS:
         import asyncio
 
         async def _bg_load():

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mycellm"
-version = "0.2.5"
+version = "0.3.0.dev0"
 description = "Distributed LLM inference across heterogeneous hardware"
 readme = "README.md"
 license = "Apache-2.0"
@@ -44,6 +44,11 @@ dependencies = [
 [project.optional-dependencies]
 inference = [
     "llama-cpp-python>=0.3.19",
+    # MLX backend (Apple Silicon only — install no-ops on Linux/Intel)
+    "mlx-lm>=0.31.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+mlx = [
+    "mlx-lm>=0.31.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 postgres = [
     "asyncpg>=0.29",
