@@ -151,17 +151,21 @@ async def search_models(request: Request, q: str = "", limit: int = 20):
 
 @router.get("/search/{repo_id:path}/files")
 async def list_repo_files(repo_id: str, request: Request):
-    """List GGUF files in a HuggingFace repo with sizes and metadata."""
+    """List installable variants in a HuggingFace repo.
+
+    Two layouts are recognised:
+      - GGUF: one or more `.gguf` files at the repo root (llama.cpp backend)
+      - MLX:  a directory of `.safetensors` shards + `config.json`
+              (mlx-community/* convention). The whole repo is one variant.
+    """
     import re
 
     try:
         async with httpx.AsyncClient(timeout=15, headers=_hf_headers()) as client:
-            # Use tree API for file sizes
             tree_resp = await client.get(f"https://huggingface.co/api/models/{repo_id}/tree/main")
             tree_resp.raise_for_status()
             tree = tree_resp.json()
 
-            # Get model metadata for param count / context
             meta_resp = await client.get(f"https://huggingface.co/api/models/{repo_id}")
             meta_resp.raise_for_status()
             meta = meta_resp.json()
@@ -176,30 +180,46 @@ async def list_repo_files(repo_id: str, request: Request):
         ram_gb = resources["ram_gb"]
 
         files = []
+        safetensors_files: list[dict] = []
+        has_config = False
+
         for f in tree:
             fname = f.get("path", "")
-            if not fname.endswith(".gguf"):
-                continue
             size = f.get("size", 0) or f.get("lfs", {}).get("size", 0)
 
-            # Parse quantization from filename
+            if fname == "config.json":
+                has_config = True
+                continue
+
+            if fname.endswith(".safetensors"):
+                safetensors_files.append({"filename": fname, "size": size})
+                continue
+
+            if not fname.endswith(".gguf"):
+                continue
+
             quant = ""
             quant_match = re.search(r'[._-](Q\d[_A-Z0-9]*|[Ff]16|[Ff]32|IQ\d[_A-Z0-9]*)', fname)
             if quant_match:
                 quant = quant_match.group(1)
 
-            # Estimate RAM needed (~1.2x file size for inference)
             est_ram_gb = round(size / (1024**3) * 1.2, 1) if size else 0
 
-            # Warnings
             warnings = []
             if size and disk_free and size > disk_free:
-                warnings.append(f"Insufficient disk space ({disk_free / (1024**3):.1f}GB free, need {size / (1024**3):.1f}GB)")
+                warnings.append(
+                    f"Insufficient disk space ({disk_free / (1024**3):.1f}GB free, "
+                    f"need {size / (1024**3):.1f}GB)"
+                )
             if est_ram_gb and ram_gb and est_ram_gb > ram_gb * 0.8:
-                warnings.append(f"May need more RAM ({est_ram_gb:.1f}GB needed, {ram_gb:.1f}GB available)")
+                warnings.append(
+                    f"May need more RAM ({est_ram_gb:.1f}GB needed, {ram_gb:.1f}GB available)"
+                )
 
             files.append({
                 "filename": fname,
+                "format": "gguf",
+                "backend": "llama.cpp",
                 "size_bytes": size,
                 "size_gb": round(size / (1024**3), 2) if size else 0,
                 "quant": quant,
@@ -207,10 +227,43 @@ async def list_repo_files(repo_id: str, request: Request):
                 "warnings": warnings,
             })
 
-        # Sort: by quantization quality (Q4_K_M is popular default)
+        # MLX repo detection: directory of safetensors + config.json with no .gguf
+        if has_config and safetensors_files and not files:
+            total_size = sum(s["size"] for s in safetensors_files if s["size"])
+            est_ram_gb = round(total_size / (1024**3) * 1.2, 1) if total_size else 0
+            warnings = []
+            if total_size and disk_free and total_size > disk_free:
+                warnings.append(
+                    f"Insufficient disk space ({disk_free / (1024**3):.1f}GB free, "
+                    f"need {total_size / (1024**3):.1f}GB)"
+                )
+            if est_ram_gb and ram_gb and est_ram_gb > ram_gb * 0.8:
+                warnings.append(
+                    f"May need more RAM ({est_ram_gb:.1f}GB needed, {ram_gb:.1f}GB available)"
+                )
+            quant = ""
+            for tag in ("mxfp4", "mxfp8", "nvfp4", "4bit", "8bit", "bf16", "DWQ"):
+                if tag.lower() in repo_id.lower():
+                    quant = tag
+                    break
+            files.append({
+                "filename": "",
+                "format": "mlx",
+                "backend": "mlx",
+                "repo_id": repo_id,
+                "size_bytes": total_size,
+                "size_gb": round(total_size / (1024**3), 2) if total_size else 0,
+                "quant": quant,
+                "est_ram_gb": est_ram_gb,
+                "shards": len(safetensors_files),
+                "warnings": warnings,
+            })
+
+        # Quant ranking (GGUF) — keep MLX entries at top by inserting sort key
         quant_order = {"Q4_K_M": 0, "Q4_K_S": 1, "Q5_K_M": 2, "Q5_K_S": 3, "Q3_K_M": 4,
                        "Q6_K": 5, "Q8_0": 6, "Q2_K": 7, "F16": 8, "F32": 9}
-        files.sort(key=lambda f: quant_order.get(f["quant"], 50))
+        files.sort(key=lambda f: (0 if f.get("format") == "mlx" else 1,
+                                  quant_order.get(f.get("quant", ""), 50)))
 
         return {
             "repo_id": repo_id,
@@ -480,30 +533,45 @@ async def delete_model_file(request: Request):
 
 
 @router.get("/suggested")
-async def suggested_models(request: Request):
-    """Suggest models that will run well on this node."""
+async def suggested_models(request: Request, role: str = "", limit: int = 10):
+    """Suggest models that will run well on this node.
+
+    Uses the live mycellm catalog (fetched from mycellm.dev with bundled
+    fallback) and the host's platform/RAM/disk to rank variants. On Apple
+    Silicon prefers MLX; on Linux/Windows prefers GGUF.
+    """
+    from mycellm.inference.model_catalog import get_catalog
+    from mycellm.inference.recommender import recommend, detect_platform
+
+    node = request.app.state.node
     resources = _get_node_resources()
     ram = resources["ram_gb"]
     disk = resources["disk_free_gb"]
 
-    suggestions = []
-    for min_ram, repo_id, desc, param_b in _SUGGESTED_MODELS:
-        est_size_gb = round(param_b * 0.5, 1)  # Q4 estimate
-        fits_ram = ram >= min_ram if ram else True
-        fits_disk = disk >= est_size_gb if disk else True
-        compatible = fits_ram and fits_disk
+    # Account for currently-loaded models when computing free RAM.
+    loaded_bytes = 0
+    try:
+        for cap in node.inference.loaded_models:
+            loaded_bytes += int(getattr(cap, "loaded_bytes", 0) or 0)
+    except Exception:
+        pass
+    free_ram = max(0.0, ram - loaded_bytes / (1024**3))
 
-        suggestions.append({
-            "repo_id": repo_id,
-            "description": desc,
-            "param_b": param_b,
-            "min_ram_gb": min_ram,
-            "est_size_gb": est_size_gb,
-            "compatible": compatible,
-        })
+    catalog = await get_catalog()
+    recs = recommend(
+        catalog,
+        free_ram_gb=free_ram,
+        free_disk_gb=disk,
+        role_filter=role or None,
+        limit=limit,
+    )
 
     return {
-        "suggestions": suggestions,
+        "suggestions": [r.to_dict() for r in recs],
+        "platform": detect_platform(),
         "node_ram_gb": ram,
+        "node_free_ram_gb": round(free_ram, 1),
         "node_disk_free_gb": disk,
+        "loaded_bytes": loaded_bytes,
+        "catalog_version": catalog.get("catalog_version", ""),
     }

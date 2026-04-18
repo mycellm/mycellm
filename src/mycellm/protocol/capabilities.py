@@ -43,6 +43,7 @@ class ModelCapability:
     visible_networks: list[str] = field(default_factory=list)  # network_ids when scope="networks"
     features: list[str] = field(default_factory=list)  # "streaming", "function_calling", "vision", "json_mode"
     throughput_tok_s: float = 0.0  # measured tokens/sec
+    loaded_bytes: int = 0  # approximate model footprint (file size on disk; 0 for remote)
 
     def to_dict(self) -> dict:
         d = {
@@ -65,6 +66,8 @@ class ModelCapability:
             d["features"] = self.features
         if self.throughput_tok_s > 0:
             d["throughput_tok_s"] = self.throughput_tok_s
+        if self.loaded_bytes > 0:
+            d["loaded_bytes"] = self.loaded_bytes
         return d
 
     @classmethod
@@ -81,6 +84,7 @@ class ModelCapability:
             visible_networks=d.get("visible_networks", []),
             features=d.get("features", []),
             throughput_tok_s=d.get("throughput_tok_s", 0.0),
+            loaded_bytes=d.get("loaded_bytes", 0),
         )
 
 

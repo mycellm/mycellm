@@ -275,6 +275,7 @@ class InferenceManager:
                 quant=kwargs.get("quant", ""),
                 ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", 4096)),
                 backend=backend_type,
+                loaded_bytes=_model_size_on_disk(model_path) if model_path else 0,
             )
 
             elapsed = _time.time() - self._load_status[model_name]["started_at"]
