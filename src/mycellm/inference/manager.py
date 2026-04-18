@@ -528,7 +528,10 @@ class InferenceManager:
                     )
                 elif config.get("model_path"):
                     model_path = config["model_path"]
-                    if Path(model_path).exists():
+                    # MLX accepts an HF repo id (e.g. "mlx-community/foo")
+                    # which won't exist as a local path — let the backend
+                    # resolve it. llama.cpp models must be a real local file.
+                    if backend_type == "mlx" or Path(model_path).exists():
                         await self.load_model(
                             model_path,
                             name=name,
