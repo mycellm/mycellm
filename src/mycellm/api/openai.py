@@ -936,7 +936,14 @@ async def retrieve_model(request: Request, model_id: str):
 
 @router.get("/models")
 async def list_models(request: Request):
-    """List available models (local + remote via QUIC + fleet via registry)."""
+    """List available models (local + remote via QUIC + fleet via registry).
+
+    Model names are normalized — transport-internal prefixes like `relay:`
+    are stripped so the public model list matches what consumers can
+    actually request.
+    """
+    from mycellm.protocol.capabilities import normalize_model_name
+
     node = request.app.state.node
     models = []
 
@@ -951,25 +958,26 @@ async def list_models(request: Request):
     # Local models
     for m in node.inference.loaded_models:
         models.append({
-            "id": m.name,
+            "id": normalize_model_name(m.name),
             "object": "model",
             "created": int(time.time()),
             "owned_by": "local",
         })
 
-    seen = {m.name for m in node.inference.loaded_models}
+    seen = {normalize_model_name(m.name) for m in node.inference.loaded_models}
 
     # Remote models from QUIC-connected peers
     for entry in node.registry.connected_peers():
         for m in entry.capabilities.models:
-            if m.name not in seen:
+            display = normalize_model_name(m.name)
+            if display not in seen:
                 models.append({
-                    "id": m.name,
+                    "id": display,
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": f"peer:{entry.peer_id[:8]}",
                 })
-                seen.add(m.name)
+                seen.add(display)
 
     # Fleet models from registry (HTTP-routable)
     for entry in node.node_registry.values():
@@ -977,15 +985,16 @@ async def list_models(request: Request):
             continue
         caps = entry.get("capabilities", {})
         for m in caps.get("models", []):
-            name = m.get("name", m) if isinstance(m, dict) else m
-            if name not in seen:
+            raw = m.get("name", m) if isinstance(m, dict) else m
+            display = normalize_model_name(raw)
+            if display not in seen:
                 models.append({
-                    "id": name,
+                    "id": display,
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": f"fleet:{entry.get('node_name', entry.get('peer_id', '')[:8])}",
                 })
-                seen.add(name)
+                seen.add(display)
 
     return {"object": "list", "data": models}
 

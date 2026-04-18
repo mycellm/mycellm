@@ -14,6 +14,21 @@ TIER_THRESHOLDS = [
     (float("inf"), 3),  # >70B = Tier 3
 ]
 
+
+def normalize_model_name(name: str) -> str:
+    """Strip transport-internal prefixes from a model name for display.
+
+    The HTTP-relay backend prefixes models with `relay:` for routing
+    disambiguation. Users shouldn't see that — model lists, stats,
+    activity logs, and federation advertisements should all show the
+    canonical model name.
+    """
+    if not name:
+        return name
+    if name.startswith("relay:"):
+        return name[6:]
+    return name
+
 TIER_LABELS = {1: "tier1", 2: "tier2", 3: "tier3"}
 TIER_NAMES = {1: "Standard (≤8B)", 2: "Large (≤70B)", 3: "Frontier (>70B)"}
 

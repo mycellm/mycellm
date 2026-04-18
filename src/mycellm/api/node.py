@@ -327,16 +327,29 @@ async def clear_load_status(request: Request):
 
 @router.get("/models/saved")
 async def list_saved_configs(request: Request):
-    """List all saved model configs (loaded + unloaded API models)."""
+    """List all saved model configs (loaded + unloaded API models).
+
+    Names are normalized — `relay:` prefixes from old HTTP-relay configs
+    are stripped from the displayed name. The original is kept in
+    `internal_name` for the unload/remove endpoints that need an exact match.
+    """
+    from mycellm.protocol.capabilities import normalize_model_name
+
     node = request.app.state.node
     loaded_names = {m.name for m in node.inference.loaded_models}
     configs = []
     for c in node.inference.get_saved_configs():
-        configs.append({
+        raw = c.get("name", "")
+        display = normalize_model_name(raw)
+        entry = {
             **c,
-            "loaded": c.get("name", "") in loaded_names,
-            "api_key": "***" if c.get("api_key") else "",  # mask key
-        })
+            "name": display,
+            "loaded": raw in loaded_names,
+            "api_key": "***" if c.get("api_key") else "",
+        }
+        if raw != display:
+            entry["internal_name"] = raw
+        configs.append(entry)
     return {"configs": configs}
 
 
