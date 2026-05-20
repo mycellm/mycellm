@@ -26,6 +26,10 @@ class InferenceRequest:
     tool_choice: str | dict | None = None  # "auto", "none", "required", or specific tool
     priority: str = "normal"  # "normal", "high", "speculative"
     request_group: str = ""  # for batch cancellation
+    # Reasoning ("thinking") control. When True the backend should suppress
+    # reasoning where possible (template flag for Qwen3-family, otherwise the
+    # API layer strips <think>...</think> from the output side).
+    reasoning_exclude: bool = False
 
 
 @dataclass
@@ -35,6 +39,10 @@ class InferenceChunk:
     text: str
     finish_reason: str | None = None
     tool_calls: list[dict] | None = None  # accumulated tool_calls when finish_reason=="tool_calls"
+    # When set, this chunk is reasoning text rather than final answer content.
+    # API layer (or callers) route it into the streaming `delta.reasoning_content`
+    # field so clients can render it in an ephemeral "thinking" panel.
+    reasoning_content: str | None = None
 
 
 @dataclass
@@ -46,6 +54,9 @@ class InferenceResult:
     completion_tokens: int = 0
     finish_reason: str = "stop"
     tool_calls: list[dict] | None = None  # populated when model called a tool
+    # Aggregated reasoning emitted by the model, with surrounding <think>
+    # tags removed. Empty string when the model didn't think.
+    reasoning_content: str = ""
 
 
 @dataclass

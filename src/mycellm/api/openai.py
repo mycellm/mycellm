@@ -60,6 +60,37 @@ def _parse_tool_call_xml(text: str) -> list | None:
     return tool_calls if tool_calls else None
 
 
+def _resolve_reasoning_exclude(body_reasoning: dict | None) -> bool:
+    """Decide whether to suppress reasoning for this request.
+
+    Explicit body.reasoning.exclude wins. Otherwise fall back to the
+    MYCELLM_HIDE_REASONING_BY_DEFAULT setting (public bootstraps default
+    to true; self-hosted nodes default to false).
+    """
+    if body_reasoning is not None and "exclude" in body_reasoning:
+        return bool(body_reasoning["exclude"])
+    try:
+        from mycellm.config import get_settings
+        return bool(get_settings().hide_reasoning_by_default)
+    except Exception:
+        return False
+
+
+def _split_text_for_message(text: str, model_name: str, reasoning_exclude: bool) -> tuple[str, str | None]:
+    """Split raw model output into (content, reasoning_content_or_None).
+
+    When reasoning_exclude is True we still split (so <think> blocks don't leak
+    into content) but we drop the reasoning side (returns None for it). When
+    False we surface reasoning_content as a separate field so the client can
+    render it in a collapsible panel.
+    """
+    from mycellm.inference.reasoning_dialects import split_reasoning
+    content, reasoning = split_reasoning(text or "", model_name)
+    if reasoning_exclude:
+        return content, None
+    return content, (reasoning or None)
+
+
 def _find_alternative_model(node, busy_model: str) -> str | None:
     """Find another loaded model to use when the requested one is busy."""
     for m in node.inference.loaded_models:
@@ -80,6 +111,7 @@ class ChatMessage(BaseModel):
     tool_calls: Optional[list] = None      # assistant → tool invocations
     tool_call_id: Optional[str] = None     # tool → result for this call_id
     name: Optional[str] = None             # tool → function name
+    reasoning_content: Optional[str] = None  # extracted <think>...</think>, OpenAI-o1 style
 
 
 class MycellmRouting(BaseModel):
@@ -108,6 +140,12 @@ class ChatCompletionRequest(BaseModel):
     grammar: str | None = None  # GBNF grammar for constrained output (llama.cpp)
     tools: list | None = None              # OpenAI tool definitions
     tool_choice: str | dict | None = None  # "auto", "none", "required", or specific tool
+    # OpenAI-o-series style reasoning control. Recognised shapes:
+    #   {"exclude": true}   strip thinking from output (and ask backend to suppress)
+    #   {"exclude": false}  include thinking
+    #   {"effort": "low"|"medium"|"high"}  passed through for reasoning-API backends
+    # Omitted → server default (MYCELLM_HIDE_REASONING_BY_DEFAULT decides).
+    reasoning: dict | None = None
     mycellm: MycellmRouting | None = None
 
 
@@ -151,6 +189,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         if m.name is not None:
             msg["name"] = m.name
         messages.append(msg)
+    reasoning_exclude = _resolve_reasoning_exclude(body.reasoning)
     start_time = time.time()
     node.activity.record(EventType.INFERENCE_START, model=body.model, source="api")
 
@@ -285,6 +324,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             grammar=body.grammar,
             tools=body.tools,
             tool_choice=body.tool_choice,
+            reasoning_exclude=reasoning_exclude,
         )
         try:
             result = await node.inference.generate(req)
@@ -339,14 +379,18 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             tokens=result.prompt_tokens + result.completion_tokens,
             latency_ms=round((time.time() - start_time) * 1000),
         )
+        content_text, reasoning_text = _split_text_for_message(
+            result.text or "", model_name, reasoning_exclude,
+        )
         resp_data = ChatCompletionResponse(
             model=model_name,
             choices=[
                 ChatCompletionChoice(
                     message=ChatMessage(
                         role="assistant",
-                        content=result.text or None,
+                        content=content_text or None,
                         tool_calls=result.tool_calls,
+                        reasoning_content=reasoning_text,
                     ),
                     finish_reason=result.finish_reason,
                 )
@@ -417,6 +461,9 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
 async def _stream_response(node, body: ChatCompletionRequest, messages: list[dict]):
     """Stream response via SSE."""
     from sse_starlette.sse import EventSourceResponse
+    from mycellm.inference.reasoning_dialects import make_splitter
+
+    reasoning_exclude = _resolve_reasoning_exclude(body.reasoning)
 
     async def generate():
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -461,7 +508,13 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 grammar=body.grammar,
                 tools=body.tools,
                 tool_choice=body.tool_choice,
+                reasoning_exclude=reasoning_exclude,
             )
+
+            # Per-stream splitter routes <think>-block tokens to
+            # delta.reasoning_content and post-think tokens to delta.content.
+            # No-op (passthrough as content) for models without an output_tag_pair.
+            splitter = make_splitter(model_name)
 
             # When tools are requested, streaming tool_call deltas are unreliable
             # (llama-cpp-python and many backends don't emit them).  Fall back to
@@ -535,37 +588,39 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
 
             got_tool_calls = False
 
+            def _envelope(delta: dict, finish: str | None = None) -> str:
+                return json.dumps({
+                    "id": chunk_id, "object": "chat.completion.chunk",
+                    "created": int(time.time()), "model": model_name,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                })
+
             def _emit_chunk(chunk_val):
+                """Feed a streaming InferenceChunk through the think-splitter and
+                yield SSE envelopes. May produce 0, 1, or multiple envelopes per
+                input chunk (one input token can straddle a <think> boundary)."""
                 nonlocal got_tool_calls
                 if chunk_val.tool_calls:
                     got_tool_calls = True
-                    return json.dumps({
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"tool_calls": chunk_val.tool_calls},
-                            "finish_reason": "tool_calls",
-                        }],
-                    })
-                elif chunk_val.text:
-                    return json.dumps({
-                        "id": chunk_id, "object": "chat.completion.chunk",
-                        "created": int(time.time()), "model": model_name,
-                        "choices": [{"index": 0, "delta": {"content": chunk_val.text}, "finish_reason": None}],
-                    })
-                return None
+                    yield _envelope({"tool_calls": chunk_val.tool_calls}, finish="tool_calls")
+                    return
+                if not chunk_val.text:
+                    return
+                for kind, piece in splitter.feed(chunk_val.text):
+                    if kind == "content":
+                        yield _envelope({"content": piece})
+                    elif kind == "reasoning" and not reasoning_exclude:
+                        # OpenAI o-series convention: delta.reasoning_content
+                        yield _envelope({"reasoning_content": piece})
+                    # else: kind=="reasoning" and excluded → silently drop
 
             try:
                 stream_iter = node.inference.generate_stream(req)
                 # Acquire the lock by getting the first iteration
                 first_chunk_val = await stream_iter.__anext__()
-                # Got the lock — yield first chunk and continue
-                first_out = _emit_chunk(first_chunk_val)
-                if first_out:
-                    yield first_out
+                # Got the lock — yield first chunk(s) and continue
+                for out in _emit_chunk(first_chunk_val):
+                    yield out
             except RuntimeError as busy_err:
                 if "busy" in str(busy_err).lower() or "timed out" in str(busy_err).lower():
                     alt = _find_alternative_model(node, model_name)
@@ -585,18 +640,18 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     raise
 
             async for chunk in stream_iter:
-                out = _emit_chunk(chunk)
-                if out:
+                for out in _emit_chunk(chunk):
                     yield out
 
+            # Drain the splitter — handles unclosed <think> at end of stream.
+            for kind, piece in splitter.flush():
+                if kind == "content":
+                    yield _envelope({"content": piece})
+                elif kind == "reasoning" and not reasoning_exclude:
+                    yield _envelope({"reasoning_content": piece})
+
             # Final chunk — use "tool_calls" finish_reason if model called a tool
-            yield json.dumps({
-                "id": chunk_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": model_name,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if got_tool_calls else "stop"}],
-            })
+            yield _envelope({}, finish=("tool_calls" if got_tool_calls else "stop"))
         else:
             # No local model — try streaming via direct QUIC peers first
             # (this is the canonical P2P path: chain_builder picks the best
@@ -1010,6 +1065,7 @@ async def model_capabilities(request: Request):
     Returns model metadata (params, quantization, context length, features,
     throughput, queue depth, source) for intelligent routing decisions.
     """
+    from mycellm.inference.reasoning_dialects import supports_thinking
     node = request.app.state.node
     models = []
 
@@ -1031,6 +1087,7 @@ async def model_capabilities(request: Request):
             "queue_depth": queue,
             "max_concurrent": node.inference._max_concurrent,
             "supports_grammar": m.backend == "llama.cpp",
+            "supports_thinking": supports_thinking(m.name),
         })
 
     # QUIC peers
@@ -1050,6 +1107,7 @@ async def model_capabilities(request: Request):
                 "tier": m.tier or "",
                 "tags": m.tags,
                 "supports_grammar": m.backend == "llama.cpp",
+                "supports_thinking": supports_thinking(m.name),
             })
 
     # Fleet nodes
@@ -1059,8 +1117,9 @@ async def model_capabilities(request: Request):
         caps = entry.get("capabilities", {})
         for m_data in caps.get("models", []):
             m = m_data if isinstance(m_data, dict) else {"name": m_data}
+            name = m.get("name", "")
             models.append({
-                "id": m.get("name", ""),
+                "id": name,
                 "source": "fleet",
                 "peer_id": entry.get("peer_id", ""),
                 "node_name": entry.get("node_name", ""),
@@ -1074,6 +1133,7 @@ async def model_capabilities(request: Request):
                 "tier": m.get("tier", ""),
                 "tags": m.get("tags", []),
                 "supports_grammar": m.get("backend", "") == "llama.cpp",
+                "supports_thinking": supports_thinking(name),
             })
 
     return {"models": models}

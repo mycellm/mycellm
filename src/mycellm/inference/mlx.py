@@ -138,19 +138,24 @@ class MLXBackend(InferenceBackend):
             }
             if request.tools:
                 template_kwargs["tools"] = request.tools
+            if request.reasoning_exclude:
+                from mycellm.inference.reasoning_dialects import chat_template_suppress_kwargs
+                template_kwargs.update(chat_template_suppress_kwargs(request.model))
             try:
                 return tokenizer.apply_chat_template(request.messages, **template_kwargs)
             except Exception as e:
-                # Retry without tools — some chat templates raise on unknown kwargs
-                if "tools" in template_kwargs:
-                    logger.warning(f"apply_chat_template with tools failed ({e}), retrying without")
-                    template_kwargs.pop("tools", None)
-                    try:
-                        return tokenizer.apply_chat_template(request.messages, **template_kwargs)
-                    except Exception as e2:
-                        logger.warning(f"apply_chat_template failed, falling back to concat: {e2}")
-                else:
-                    logger.warning(f"apply_chat_template failed, falling back to concat: {e}")
+                # Retry shedding optional kwargs one at a time — some chat
+                # templates raise on unknown kwargs.
+                for shed_key in ("enable_thinking", "tools"):
+                    if shed_key in template_kwargs:
+                        logger.warning(f"apply_chat_template with {shed_key} failed ({e}), retrying without")
+                        template_kwargs.pop(shed_key, None)
+                        try:
+                            return tokenizer.apply_chat_template(request.messages, **template_kwargs)
+                        except Exception as e_retry:
+                            e = e_retry
+                            continue
+                logger.warning(f"apply_chat_template failed, falling back to concat: {e}")
         return "\n".join(
             f"{m.get('role','user')}: {m.get('content','')}" for m in request.messages
         )
