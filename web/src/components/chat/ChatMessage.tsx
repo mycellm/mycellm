@@ -1,4 +1,5 @@
-import { RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, ChevronRight, RefreshCw, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MarkdownRenderer } from '@/components/common/MarkdownRenderer'
 import type { ChatMessage as ChatMessageType } from '@/api/types'
@@ -8,13 +9,39 @@ interface ChatMessageProps {
   onRetry?: (content: string) => void
 }
 
+function ReasoningPanel({ reasoning }: { reasoning: string }) {
+  const [open, setOpen] = useState(false)
+  const lineCount = reasoning.split('\n').length
+  return (
+    <div className="mb-2 rounded-lg border border-poison/20 bg-poison/5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs text-poison hover:bg-poison/10"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <Sparkles size={11} />
+        <span className="font-medium">Reasoning</span>
+        <span className="text-poison/60">({lineCount} lines)</span>
+      </button>
+      {open && (
+        <div className="border-t border-poison/15 px-3 py-2">
+          <MarkdownRenderer
+            content={reasoning}
+            className="text-xs text-gray-400 whitespace-pre-wrap"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function formatTime(ts: number): string {
   const d = new Date(ts)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 export function ChatMessage({ message, onRetry }: ChatMessageProps) {
-  const { role, content, model, routed_to, tokens, timestamp } = message
+  const { role, content, model, routed_to, tokens, timestamp, reasoning_content } = message
 
   // System messages
   if (role === 'system') {
@@ -96,6 +123,7 @@ export function ChatMessage({ message, onRetry }: ChatMessageProps) {
           'md:max-w-[70%]'
         )}
       >
+        {reasoning_content && <ReasoningPanel reasoning={reasoning_content} />}
         <MarkdownRenderer content={content} className="text-sm text-gray-200" />
 
         {(model || tokens) && (

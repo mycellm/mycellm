@@ -2,14 +2,12 @@
 
 import asyncio
 
-import pytest
 
 from mycellm.identity.certs import create_device_cert
 from mycellm.identity.keys import generate_account_key, generate_device_key
 from mycellm.identity.peer_id import peer_id_from_public_key
 from mycellm.protocol.capabilities import Capabilities, ModelCapability
 from mycellm.protocol.envelope import MessageEnvelope, MessageType
-from mycellm.protocol.node_hello import NodeHello
 from mycellm.transport.auth import build_node_hello, verify_hello_message
 from mycellm.transport.messages import ping_message, pong_message
 from mycellm.transport.tls import generate_self_signed_cert

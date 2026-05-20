@@ -379,7 +379,7 @@ def create_app(node: MycellmNode) -> FastAPI:
     # Serve web dashboard with SPA fallback
     try:
         from importlib.resources import files
-        from fastapi.responses import FileResponse, HTMLResponse
+        from fastapi.responses import FileResponse
         import os
 
         web_dir = files("mycellm.web")
@@ -399,7 +399,6 @@ def create_app(node: MycellmNode) -> FastAPI:
             # SPA fallback: serve index.html for non-API GET requests
             # Uses exception handler instead of catch-all route to avoid
             # 405 conflicts with API POST/DELETE endpoints
-            from starlette.exceptions import HTTPException as StarletteHTTPException
 
             @app.exception_handler(404)
             async def spa_fallback(request, exc):

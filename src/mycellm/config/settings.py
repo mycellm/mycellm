@@ -97,6 +97,13 @@ class MycellmSettings(BaseSettings):
     # Inference
     model_dir: Optional[Path] = None
     max_concurrent_inferences: int = 2
+    default_ctx_len: int = 32768  # Default context window for loaded models (MYCELLM_DEFAULT_CTX_LEN)
+    # When true, /v1/chat/completions requests with no explicit `reasoning` block
+    # default to {"exclude": true} — strip <think>...</think> from responses and
+    # ask the chat template to suppress thinking on Qwen3-family models. The
+    # public bootstrap demo sets this so visitors see clean answers; self-hosted
+    # nodes default to false so devs see the full model output.
+    hide_reasoning_by_default: bool = False  # MYCELLM_HIDE_REASONING_BY_DEFAULT
     flash_attn: bool = True  # Metal/CUDA optimized attention kernel
     kv_cache_quant: str = "q8_0"  # KV cache quantization: "none", "q8_0", "q4_0" (legacy, use k/v below)
     kv_cache_quant_k: str = ""  # Key cache quantization (default: use kv_cache_quant)

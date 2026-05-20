@@ -1,7 +1,5 @@
 """Unit tests for ActivityTracker."""
 
-import time
-import pytest
 
 from mycellm.activity import ActivityTracker, EventType, ActivityEvent
 

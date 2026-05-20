@@ -66,6 +66,7 @@ app = typer.Typer(
       MYCELLM_MODEL_DIR       Model download directory
       MYCELLM_DATA_DIR        Data directory (~/.local/share/mycellm)
       MYCELLM_CONFIG_DIR      Config directory (~/.config/mycellm)
+      MYCELLM_DEFAULT_CTX_LEN Default context window for loaded models (32768)
 
     [bold]As an LLM backend (OpenAI-compatible):[/bold]
       OPENAI_BASE_URL=http://localhost:8420/v1
@@ -88,7 +89,7 @@ def _version_callback(value: bool):
     if value:
         from mycellm import __version__
         console.print(f"mycellm {__version__}")
-        console.print(f"Copyright 2026 Michael Gifford-Santos. Apache 2.0 License.")
+        console.print("Copyright 2026 Michael Gifford-Santos. Apache 2.0 License.")
         raise typer.Exit()
 
 

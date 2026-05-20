@@ -108,12 +108,16 @@ async def test_chat_completions_no_model(app):
         assert "No model" in data["choices"][0]["message"]["content"]
 
 
-async def test_list_models_empty(app):
+async def test_list_models_only_auto_virtual(app):
+    """With no loaded models, /v1/models still exposes the virtual 'auto' model."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/v1/models")
         assert resp.status_code == 200
-        assert resp.json()["data"] == []
+        data = resp.json()["data"]
+        assert len(data) == 1
+        assert data[0]["id"] == "auto"
+        assert data[0]["owned_by"] == "mycellm"
 
 
 async def test_credits(app):

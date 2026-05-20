@@ -14,6 +14,21 @@ TIER_THRESHOLDS = [
     (float("inf"), 3),  # >70B = Tier 3
 ]
 
+
+def normalize_model_name(name: str) -> str:
+    """Strip transport-internal prefixes from a model name for display.
+
+    The HTTP-relay backend prefixes models with `relay:` for routing
+    disambiguation. Users shouldn't see that — model lists, stats,
+    activity logs, and federation advertisements should all show the
+    canonical model name.
+    """
+    if not name:
+        return name
+    if name.startswith("relay:"):
+        return name[6:]
+    return name
+
 TIER_LABELS = {1: "tier1", 2: "tier2", 3: "tier3"}
 TIER_NAMES = {1: "Standard (≤8B)", 2: "Large (≤70B)", 3: "Frontier (>70B)"}
 
@@ -43,6 +58,7 @@ class ModelCapability:
     visible_networks: list[str] = field(default_factory=list)  # network_ids when scope="networks"
     features: list[str] = field(default_factory=list)  # "streaming", "function_calling", "vision", "json_mode"
     throughput_tok_s: float = 0.0  # measured tokens/sec
+    loaded_bytes: int = 0  # approximate model footprint (file size on disk; 0 for remote)
 
     def to_dict(self) -> dict:
         d = {
@@ -65,6 +81,8 @@ class ModelCapability:
             d["features"] = self.features
         if self.throughput_tok_s > 0:
             d["throughput_tok_s"] = self.throughput_tok_s
+        if self.loaded_bytes > 0:
+            d["loaded_bytes"] = self.loaded_bytes
         return d
 
     @classmethod
@@ -81,6 +99,7 @@ class ModelCapability:
             visible_networks=d.get("visible_networks", []),
             features=d.get("features", []),
             throughput_tok_s=d.get("throughput_tok_s", 0.0),
+            loaded_bytes=d.get("loaded_bytes", 0),
         )
 
 

@@ -1,6 +1,5 @@
 """Tests for streaming inference types and parameters."""
 
-import pytest
 from mycellm.inference.base import InferenceRequest
 
 

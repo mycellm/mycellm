@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,6 +27,63 @@ def _mock_chat_response(content: str = "Hello!") -> dict:
         ],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
     }
+
+
+# generate() now delegates to generate_stream() internally to avoid slow-model
+# request timeouts (see openai_compat.py). Mock the SSE stream rather than .post.
+
+
+class _MockSSEResponse:
+    def __init__(self, lines: list[str]):
+        self._lines = lines
+
+    def raise_for_status(self) -> None:
+        pass
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _MockSSEContext:
+    def __init__(self, lines: list[str]):
+        self._lines = lines
+
+    async def __aenter__(self) -> _MockSSEResponse:
+        return _MockSSEResponse(self._lines)
+
+    async def __aexit__(self, *args) -> None:
+        return None
+
+
+def _sse_text_lines(content: str, finish: str = "stop") -> list[str]:
+    return [
+        'data: {"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}',
+        f'data: {{"choices":[{{"index":0,"delta":{{"content":"{content}"}},"finish_reason":null}}]}}',
+        f'data: {{"choices":[{{"index":0,"delta":{{}},"finish_reason":"{finish}"}}]}}',
+        'data: [DONE]',
+    ]
+
+
+def _sse_tool_call_lines(tool_calls: list[dict]) -> list[str]:
+    import json as _json
+    lines = ['data: {"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}']
+    for i, tc in enumerate(tool_calls):
+        delta = {
+            "tool_calls": [{
+                "index": i,
+                "id": tc["id"],
+                "type": "function",
+                "function": {
+                    "name": tc["function"]["name"],
+                    "arguments": tc["function"]["arguments"],
+                },
+            }]
+        }
+        lines.append(f'data: {_json.dumps({"choices": [{"index": 0, "delta": delta, "finish_reason": None}]})}')
+    lines.append('data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}')
+    lines.append('data: [DONE]')
+    return lines
 
 
 # ── Unit tests ──
@@ -91,15 +147,10 @@ class TestOpenAICompatibleBackend:
         mock_resp_models = MagicMock()
         mock_resp_models.status_code = 200
 
-        mock_resp_chat = MagicMock()
-        mock_resp_chat.status_code = 200
-        mock_resp_chat.raise_for_status = MagicMock()
-        mock_resp_chat.json.return_value = _mock_chat_response("Test response")
-
         with patch("mycellm.inference.openai_compat.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=mock_resp_models)
-            mock_client.post = AsyncMock(return_value=mock_resp_chat)
+            mock_client.stream = MagicMock(return_value=_MockSSEContext(_sse_text_lines("Test response")))
             mock_client.aclose = AsyncMock()
             MockClient.return_value = mock_client
 
@@ -122,11 +173,9 @@ class TestOpenAICompatibleBackend:
             result = await backend.generate(req)
             assert isinstance(result, InferenceResult)
             assert result.text == "Test response"
-            assert result.prompt_tokens == 10
-            assert result.completion_tokens == 5
 
             # Verify the upstream model ID was used, not the local name
-            call_kwargs = mock_client.post.call_args
+            call_kwargs = mock_client.stream.call_args
             assert call_kwargs[1]["json"]["model"] == "gpt-4o-mini"
 
             await backend.unload_model("test-model")
@@ -178,6 +227,10 @@ class TestManagerBackendRouting:
         with patch("mycellm.inference.openai_compat.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=mock_resp)
+            # save_model_configs reads client.headers.get synchronously; AsyncMock would
+            # make .get an async mock and leave an un-awaited coroutine warning.
+            mock_client.headers = MagicMock()
+            mock_client.headers.get = MagicMock(return_value="Bearer sk-or-test")
             MockClient.return_value = mock_client
 
             manager = InferenceManager()

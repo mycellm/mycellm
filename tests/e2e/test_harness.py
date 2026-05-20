@@ -1,6 +1,5 @@
 """Test the E2E harness itself — spawn, check, kill."""
 
-import pytest
 
 from tests.e2e.harness import E2EHarness
 

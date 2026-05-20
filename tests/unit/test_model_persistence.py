@@ -2,9 +2,7 @@
 
 import json
 import pytest
-import asyncio
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from mycellm.inference.manager import InferenceManager
 

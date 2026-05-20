@@ -13,12 +13,12 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from mycellm.cli.banner import styled_tag
-from mycellm.config import get_settings, MycellmSettings
+from mycellm.config import get_settings
 from mycellm.identity.certs import DeviceCert
 from mycellm.identity.keys import AccountKey, DeviceKey
 from mycellm.identity.peer_id import peer_id_from_public_key
 from mycellm.inference.manager import InferenceManager
-from mycellm.protocol.capabilities import Capabilities, HardwareInfo, ModelCapability
+from mycellm.protocol.capabilities import Capabilities, HardwareInfo
 from mycellm.protocol.envelope import MessageEnvelope, MessageType
 from mycellm.protocol.errors import ErrorCode
 from mycellm.router.registry import PeerRegistry
@@ -26,7 +26,7 @@ from mycellm.router.chain import ChainBuilder
 from mycellm.router.health import HealthChecker
 from mycellm.router.model_resolver import ModelResolver
 from mycellm.transport.tls import generate_self_signed_cert
-from mycellm.transport.auth import build_node_hello, build_hello_ack, verify_hello_message
+from mycellm.transport.auth import build_hello_ack, verify_hello_message
 from mycellm.accounting.reputation import AdmissionResult, ReputationTracker
 from mycellm.accounting.receipts import (
     ReceiptValidator,
@@ -322,8 +322,6 @@ class MycellmNode:
 
     async def _handle_peer_message(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
         """Handle incoming messages from peers."""
-        from mycellm.transport.quic import MycellmQuicProtocol
-        from mycellm.inference.base import InferenceRequest
 
         if msg.type == MessageType.NODE_HELLO:
             try:
@@ -374,6 +372,22 @@ class MycellmNode:
         elif msg.type == MessageType.PING:
             reply = pong_message(self.peer_id, msg.id)
             await protocol.reply_on_stream(stream_id, reply)
+            # Liveness signal: if a DISCONNECTED peer is still sending PINGs,
+            # the QUIC session is alive — restore it to ROUTABLE immediately
+            # rather than waiting for the next HealthChecker cycle.
+            _ping_peer_id = msg.from_peer
+            if _ping_peer_id and _ping_peer_id in self._peer_connections:
+                _conn = self._peer_connections[_ping_peer_id]
+                if not getattr(getattr(_conn, 'protocol', None), '_is_closed', True):
+                    _entry = self.registry.get(_ping_peer_id)
+                    if _entry and _entry.state == PeerState.DISCONNECTED:
+                        _entry.state = PeerState.ROUTABLE
+                        _conn.state = PeerState.ROUTABLE
+                        _entry.last_seen = time.time()
+                        logger.debug(
+                            f"{styled_tag('P2P')} Peer {_ping_peer_id[:8]} restored "
+                            f"ROUTABLE via incoming PING"
+                        )
 
         elif msg.type == MessageType.INFERENCE_REQ:
             await self._handle_inference_request(protocol, msg, stream_id)
@@ -391,8 +405,15 @@ class MycellmNode:
             caps = msg.payload.get("capabilities", {})
             addrs = msg.payload.get("addresses", [])
             from mycellm.protocol.capabilities import Capabilities
+            _ann_conn = self._peer_connections.get(msg.from_peer)
+            # If the QUIC session for this peer is alive, ensure its state is
+            # restored to ROUTABLE before registering — otherwise the
+            # connection= parameter has no effect on a DISCONNECTED entry.
+            if _ann_conn and not getattr(getattr(_ann_conn, 'protocol', None), '_is_closed', True):
+                _ann_conn.state = PeerState.ROUTABLE
             self.registry.register(
                 msg.from_peer,
+                connection=_ann_conn,
                 capabilities=Capabilities.from_dict(caps),
                 addresses=addrs,
             )
@@ -597,6 +618,8 @@ class MycellmNode:
         model = payload.get("model", "")
         messages = payload.get("messages", [])
         stream = payload.get("stream", False)
+        tools = payload.get("tools") or None
+        tool_choice = payload.get("tool_choice")
 
         # Determine trust level based on shared network memberships
         peer_trust = self._resolve_peer_trust(msg.from_peer)
@@ -655,10 +678,12 @@ class MycellmNode:
                     async for chunk in self.route_inference_stream(model, messages, **{
                         "temperature": payload.get("temperature", 0.7),
                         "max_tokens": payload.get("max_tokens", 2048),
+                        "tools": tools,
                     }):
                         text = chunk.get("text", "")
-                        if text:
-                            chunk_msg = inference_stream_chunk(self.peer_id, msg.id, text, chunk.get("finish_reason"))
+                        tc = chunk.get("tool_calls")
+                        if text or tc:
+                            chunk_msg = inference_stream_chunk(self.peer_id, msg.id, text or "", chunk.get("finish_reason"), tool_calls=tc)
                             await protocol.send_message(chunk_msg)
                             relayed = True
                     if relayed:
@@ -691,20 +716,51 @@ class MycellmNode:
             await protocol.reply_on_stream(stream_id, err)
             return
 
+        # Apply Qwen single-tool workaround: force tool_choice when exactly one
+        # tool is defined and no choice is set, to reliably get JSON tool_calls.
+        effective_tool_choice = tool_choice
+        if tools and effective_tool_choice in (None, "auto", "none") and len(tools) == 1:
+            try:
+                fn_name = tools[0]["function"]["name"]
+                effective_tool_choice = {"type": "function", "function": {"name": fn_name}}
+            except (KeyError, TypeError, IndexError):
+                pass
+
         req = InferenceRequest(
             messages=messages,
             model=model_name,
             temperature=payload.get("temperature", 0.7),
             max_tokens=payload.get("max_tokens", 2048),
+            tools=tools,
+            tool_choice=effective_tool_choice,
         )
 
         try:
-            if stream:
+            if stream and not tools:
                 async for chunk in self.inference.generate_stream(req):
                     chunk_msg = inference_stream_chunk(
-                        self.peer_id, msg.id, chunk.text, chunk.finish_reason
+                        self.peer_id, msg.id, chunk.text, chunk.finish_reason,
+                        tool_calls=chunk.tool_calls,
                     )
                     await protocol.send_message(chunk_msg)
+                done_msg = inference_done(self.peer_id, msg.id)
+                await protocol.send_message(done_msg)
+            elif stream and tools:
+                # Use non-streaming generate() for tool requests — streaming tool_call
+                # deltas are unreliable; emit the full result as a single stream chunk.
+                result = await self.inference.generate(req)
+                if not result.tool_calls and result.text and "<tool_call>" in result.text:
+                    from mycellm.api.openai import _parse_tool_call_xml
+                    parsed = _parse_tool_call_xml(result.text)
+                    if parsed:
+                        result.tool_calls = parsed
+                        result.text = ""
+                        result.finish_reason = "tool_calls"
+                chunk_msg = inference_stream_chunk(
+                    self.peer_id, msg.id, result.text, result.finish_reason,
+                    tool_calls=result.tool_calls,
+                )
+                await protocol.send_message(chunk_msg)
                 done_msg = inference_done(self.peer_id, msg.id)
                 await protocol.send_message(done_msg)
             else:
@@ -741,7 +797,7 @@ class MycellmNode:
                                              counterparty_id=msg.from_peer,
                                              receipt_signature=sig)
                 else:
-                    logger.warning(f"Credit rate limit reached, skipping self-credit")
+                    logger.warning("Credit rate limit reached, skipping self-credit")
 
                 # Send signed receipt to consumer
                 if sig:
@@ -1350,8 +1406,6 @@ class MycellmNode:
             headers["Authorization"] = f"Bearer {self._settings.api_key}"
 
         sys_info = self.get_system_info()
-        # Public name: peer_id prefix, not hostname (privacy + dedup)
-        public_name = f"node-{self.peer_id[:8]}"
 
         base_payload = {
             "peer_id": self.peer_id,
@@ -1408,6 +1462,13 @@ class MycellmNode:
                 except Exception as e:
                     logger.warning(f"{styled_tag('NODE')} Announce to {url} failed: {e}")
                     self.activity.record(EventType.ANNOUNCE_FAILED, bootstrap=url, reason=str(e))
+            # Also send capabilities via QUIC to any live managed bootstrap connections.
+            # This ensures the bootstrap's PeerRegistry stays current even when the
+            # HTTP endpoint is unreachable (e.g. port bound to 127.0.0.1 inside Docker).
+            try:
+                await self.announce_capabilities()
+            except Exception as e:
+                logger.debug(f"{styled_tag('NODE')} QUIC capability announce failed: {e}")
             return any_ok
 
         # Initial announce
@@ -1689,7 +1750,6 @@ class MycellmNode:
         if not targets:
             return None
 
-        last_error = None
         for target in targets:
             if target.entry.connection is None:
                 continue
@@ -1705,7 +1765,6 @@ class MycellmNode:
 
                 if resp.type == MessageType.ERROR:
                     target.entry.failure_count += 1
-                    last_error = resp
                     continue
 
                 # Success — reduce failure count
@@ -1723,7 +1782,6 @@ class MycellmNode:
             except Exception as e:
                 target.entry.failure_count += 1
                 logger.debug(f"Peer {target.peer_id[:16]} routing failed: {e}")
-                last_error = e
                 continue
 
         return None
@@ -1753,14 +1811,17 @@ class MycellmNode:
                 temperature=kwargs.get("temperature", 0.7),
                 max_tokens=kwargs.get("max_tokens", 2048),
                 stream=True,
+                tools=kwargs.get("tools"),
+                tool_choice=kwargs.get("tool_choice"),
             )
 
             try:
                 async for resp in target.entry.connection.request_stream(req_msg):
                     text = resp.payload.get("text", "")
                     finish_reason = resp.payload.get("finish_reason")
-                    if text:
-                        yield {"text": text, "finish_reason": finish_reason, "peer_id": target.peer_id}
+                    tool_calls = resp.payload.get("tool_calls")
+                    if text or tool_calls:
+                        yield {"text": text, "finish_reason": finish_reason, "tool_calls": tool_calls, "peer_id": target.peer_id}
                 target.entry.failure_count = max(0, target.entry.failure_count - 1)
                 return
             except Exception as e:

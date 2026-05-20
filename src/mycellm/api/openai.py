@@ -4,14 +4,91 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Optional
 
-logger = logging.getLogger("mycellm.api")
-
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("mycellm.api")
+
+
+_TOOLCALL_PATTERNS = (
+    # Qwen2.5-Instruct style: <tool_call>{"name":..., "arguments":...}</tool_call>
+    re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL),
+    # Qwen-Coder MLX style: ```json\n{"name":..., "arguments":...}\n```
+    re.compile(r"```(?:json|tool_call)?\s*\n?\s*(\{[^`]*?\"name\"[^`]*?\"arguments\"[^`]*?\})\s*\n?\s*```", re.DOTALL),
+)
+
+
+def _parse_tool_call_xml(text: str) -> list | None:
+    """Convert free-text tool calls into OpenAI tool_calls format.
+
+    Models that don't reliably emit native function_calling JSON often produce
+    tool calls in surrounding markup. We recognise:
+      - Qwen-Instruct: <tool_call>{...}</tool_call>
+      - Qwen-Coder MLX: ```json\\n{...}\\n```  (bare JSON inside a code fence)
+
+    Returned dicts follow OpenAI spec — function.arguments is a JSON string.
+    """
+    tool_calls: list[dict] = []
+    seen_payloads: set[str] = set()
+    for pattern in _TOOLCALL_PATTERNS:
+        for match in pattern.finditer(text):
+            payload = match.group(1)
+            if payload in seen_payloads:
+                continue
+            try:
+                data = json.loads(payload)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if not isinstance(data, dict) or "name" not in data:
+                continue
+            seen_payloads.add(payload)
+            arguments = data.get("arguments", {})
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments)
+            elif not isinstance(arguments, str):
+                arguments = json.dumps(arguments)
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:16]}",
+                "type": "function",
+                "function": {"name": data["name"], "arguments": arguments},
+            })
+    return tool_calls if tool_calls else None
+
+
+def _resolve_reasoning_exclude(body_reasoning: dict | None) -> bool:
+    """Decide whether to suppress reasoning for this request.
+
+    Explicit body.reasoning.exclude wins. Otherwise fall back to the
+    MYCELLM_HIDE_REASONING_BY_DEFAULT setting (public bootstraps default
+    to true; self-hosted nodes default to false).
+    """
+    if body_reasoning is not None and "exclude" in body_reasoning:
+        return bool(body_reasoning["exclude"])
+    try:
+        from mycellm.config import get_settings
+        return bool(get_settings().hide_reasoning_by_default)
+    except Exception:
+        return False
+
+
+def _split_text_for_message(text: str, model_name: str, reasoning_exclude: bool) -> tuple[str, str | None]:
+    """Split raw model output into (content, reasoning_content_or_None).
+
+    When reasoning_exclude is True we still split (so <think> blocks don't leak
+    into content) but we drop the reasoning side (returns None for it). When
+    False we surface reasoning_content as a separate field so the client can
+    render it in a collapsible panel.
+    """
+    from mycellm.inference.reasoning_dialects import split_reasoning
+    content, reasoning = split_reasoning(text or "", model_name)
+    if reasoning_exclude:
+        return content, None
+    return content, (reasoning or None)
 
 
 def _find_alternative_model(node, busy_model: str) -> str | None:
@@ -30,7 +107,11 @@ router = APIRouter()
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Optional[str] = None
+    tool_calls: Optional[list] = None      # assistant → tool invocations
+    tool_call_id: Optional[str] = None     # tool → result for this call_id
+    name: Optional[str] = None             # tool → function name
+    reasoning_content: Optional[str] = None  # extracted <think>...</think>, OpenAI-o1 style
 
 
 class MycellmRouting(BaseModel):
@@ -57,6 +138,14 @@ class ChatCompletionRequest(BaseModel):
     seed: int | None = None
     response_format: dict | None = None  # {"type": "json_object"}
     grammar: str | None = None  # GBNF grammar for constrained output (llama.cpp)
+    tools: list | None = None              # OpenAI tool definitions
+    tool_choice: str | dict | None = None  # "auto", "none", "required", or specific tool
+    # OpenAI-o-series style reasoning control. Recognised shapes:
+    #   {"exclude": true}   strip thinking from output (and ask backend to suppress)
+    #   {"exclude": false}  include thinking
+    #   {"effort": "low"|"medium"|"high"}  passed through for reasoning-API backends
+    # Omitted → server default (MYCELLM_HIDE_REASONING_BY_DEFAULT decides).
+    reasoning: dict | None = None
     mycellm: MycellmRouting | None = None
 
 
@@ -85,11 +174,22 @@ class ChatCompletionResponse(BaseModel):
 async def chat_completions(request: Request, body: ChatCompletionRequest):
     """OpenAI-compatible chat completions endpoint."""
     from fastapi.responses import JSONResponse
-    from mycellm.router.model_resolver import ModelResolver
     from mycellm.activity import EventType
 
     node = request.app.state.node
-    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    messages = []
+    for m in body.messages:
+        msg: dict = {"role": m.role}
+        if m.content is not None:
+            msg["content"] = m.content
+        if m.tool_calls is not None:
+            msg["tool_calls"] = m.tool_calls
+        if m.tool_call_id is not None:
+            msg["tool_call_id"] = m.tool_call_id
+        if m.name is not None:
+            msg["name"] = m.name
+        messages.append(msg)
+    reasoning_exclude = _resolve_reasoning_exclude(body.reasoning)
     start_time = time.time()
     node.activity.record(EventType.INFERENCE_START, model=body.model, source="api")
 
@@ -174,11 +274,22 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                         completion_tokens=completion_tokens,
                         latency_ms=round((time.time() - start_time) * 1000),
                     )
+                    # Apply reasoning split locally: peers may not have suppressed
+                    # thinking (older nodes, or didn't get the reasoning param via
+                    # the QUIC envelope). Split <think>...</think> at the bootstrap
+                    # so clients always see a clean answer / side-channel split.
+                    content_text, reasoning_text = _split_text_for_message(
+                        text, best.model_name, reasoning_exclude,
+                    )
                     resp_data = ChatCompletionResponse(
                         model=best.model_name,
                         choices=[
                             ChatCompletionChoice(
-                                message=ChatMessage(role="assistant", content=text),
+                                message=ChatMessage(
+                                    role="assistant",
+                                    content=content_text or None,
+                                    reasoning_content=reasoning_text,
+                                ),
                             )
                         ],
                         usage=Usage(
@@ -187,7 +298,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                             total_tokens=total_tokens,
                         ),
                     )
-                    response = JSONResponse(content=resp_data.model_dump())
+                    response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
                     response.headers["X-Mycellm-Routed-To"] = routed_to
                     return response
             elif best.source == "fleet":
@@ -222,6 +333,9 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             seed=body.seed,
             response_format=body.response_format,
             grammar=body.grammar,
+            tools=body.tools,
+            tool_choice=body.tool_choice,
+            reasoning_exclude=reasoning_exclude,
         )
         try:
             result = await node.inference.generate(req)
@@ -259,6 +373,16 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                     finish_reason="error",
                 )],
             )
+        # Some backends emit tool calls as <tool_call> XML text (e.g. Qwen via
+        # llama-cpp-python with tool_choice "auto" or unset).  Parse and normalize
+        # to standard tool_calls JSON so callers always see a consistent format.
+        if req.tools and not result.tool_calls and result.text and ("<tool_call>" in result.text or '"name"' in result.text):
+            parsed = _parse_tool_call_xml(result.text)
+            if parsed:
+                result.tool_calls = parsed
+                result.text = ""
+                result.finish_reason = "tool_calls"
+
         node.activity.record(
             EventType.INFERENCE_COMPLETE,
             model=model_name,
@@ -266,11 +390,19 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             tokens=result.prompt_tokens + result.completion_tokens,
             latency_ms=round((time.time() - start_time) * 1000),
         )
+        content_text, reasoning_text = _split_text_for_message(
+            result.text or "", model_name, reasoning_exclude,
+        )
         resp_data = ChatCompletionResponse(
             model=model_name,
             choices=[
                 ChatCompletionChoice(
-                    message=ChatMessage(role="assistant", content=result.text),
+                    message=ChatMessage(
+                        role="assistant",
+                        content=content_text or None,
+                        tool_calls=result.tool_calls,
+                        reasoning_content=reasoning_text,
+                    ),
                     finish_reason=result.finish_reason,
                 )
             ],
@@ -280,7 +412,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 total_tokens=result.prompt_tokens + result.completion_tokens,
             ),
         )
-        response = JSONResponse(content=resp_data.model_dump())
+        response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
         response.headers["X-Mycellm-Routed-To"] = "local"
         return response
 
@@ -299,15 +431,22 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             routed_to="quic:peer",
             latency_ms=round((time.time() - start_time) * 1000),
         )
+        content_text, reasoning_text = _split_text_for_message(
+            text, body.model or "", reasoning_exclude,
+        )
         resp_data = ChatCompletionResponse(
             model=body.model or "remote",
             choices=[
                 ChatCompletionChoice(
-                    message=ChatMessage(role="assistant", content=text),
+                    message=ChatMessage(
+                        role="assistant",
+                        content=content_text or None,
+                        reasoning_content=reasoning_text,
+                    ),
                 )
             ],
         )
-        response = JSONResponse(content=resp_data.model_dump())
+        response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
         response.headers["X-Mycellm-Routed-To"] = "quic:peer"
         return response
 
@@ -340,11 +479,30 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
 async def _stream_response(node, body: ChatCompletionRequest, messages: list[dict]):
     """Stream response via SSE."""
     from sse_starlette.sse import EventSourceResponse
+    from mycellm.inference.reasoning_dialects import make_splitter
+
+    reasoning_exclude = _resolve_reasoning_exclude(body.reasoning)
 
     async def generate():
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-        _requested = body.model if body.model != "auto" else ""
-        model_name = node.inference.resolve_model_name(_requested)
+        _requested = body.model if body.model not in ("auto", "") else ""
+
+        # For auto routing, use ModelResolver for quality-based selection
+        # rather than first-loaded model (which could be a tiny model).
+        model_name = ""
+        if not _requested and node.model_resolver:
+            resolved = node.model_resolver.resolve(
+                "",
+                node.inference.loaded_models,
+                fleet_registry=node.node_registry,
+            )
+            if resolved:
+                best = resolved[0]
+                if best.source in ("local", "fleet"):
+                    model_name = best.model_name
+                # quic-only: fall through to the no-local-model path below
+        if not model_name:
+            model_name = node.inference.resolve_model_name(_requested)
 
         if model_name:
             from mycellm.inference.base import InferenceRequest
@@ -366,7 +524,76 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 seed=body.seed,
                 response_format=body.response_format,
                 grammar=body.grammar,
+                tools=body.tools,
+                tool_choice=body.tool_choice,
+                reasoning_exclude=reasoning_exclude,
             )
+
+            # Per-stream splitter routes <think>-block tokens to
+            # delta.reasoning_content and post-think tokens to delta.content.
+            # No-op (passthrough as content) for models without an output_tag_pair.
+            splitter = make_splitter(model_name)
+
+            # When tools are requested, streaming tool_call deltas are unreliable
+            # (llama-cpp-python and many backends don't emit them).  Fall back to
+            # a single non-streaming generate() call and emit the result as SSE.
+            # Also: "auto" tool_choice causes some backends to return tool calls
+            # as <tool_call> XML text instead of proper JSON tool_calls.  When
+            # exactly one tool is defined and choice is "auto"/"none"/unset, force
+            # it to {"type":"function","function":{"name":<tool>}} which reliably
+            # produces the standard tool_calls response format.
+            if req.tools:
+                if req.tool_choice in (None, "auto", "none") and len(req.tools) == 1:
+                    try:
+                        fn_name = req.tools[0]["function"]["name"]
+                        req.tool_choice = {"type": "function", "function": {"name": fn_name}}
+                    except (KeyError, TypeError, IndexError):
+                        pass
+                result = await node.inference.generate(req)
+
+                # Normalize <tool_call> XML text → tool_calls JSON (Qwen multi-tool case)
+                if not result.tool_calls and result.text and ("<tool_call>" in result.text or '"name"' in result.text):
+                    parsed = _parse_tool_call_xml(result.text)
+                    if parsed:
+                        result.tool_calls = parsed
+                        result.text = ""
+                        result.finish_reason = "tool_calls"
+
+                yield json.dumps({
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                })
+                if result.tool_calls:
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"tool_calls": result.tool_calls},
+                            "finish_reason": "tool_calls",
+                        }],
+                    })
+                elif result.text:
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": result.text}, "finish_reason": None}],
+                    })
+                yield json.dumps({
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": result.finish_reason}],
+                })
+                return
 
             # Send role delta first
             yield json.dumps({
@@ -377,17 +604,41 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             })
 
+            got_tool_calls = False
+
+            def _envelope(delta: dict, finish: str | None = None) -> str:
+                return json.dumps({
+                    "id": chunk_id, "object": "chat.completion.chunk",
+                    "created": int(time.time()), "model": model_name,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                })
+
+            def _emit_chunk(chunk_val):
+                """Feed a streaming InferenceChunk through the think-splitter and
+                yield SSE envelopes. May produce 0, 1, or multiple envelopes per
+                input chunk (one input token can straddle a <think> boundary)."""
+                nonlocal got_tool_calls
+                if chunk_val.tool_calls:
+                    got_tool_calls = True
+                    yield _envelope({"tool_calls": chunk_val.tool_calls}, finish="tool_calls")
+                    return
+                if not chunk_val.text:
+                    return
+                for kind, piece in splitter.feed(chunk_val.text):
+                    if kind == "content":
+                        yield _envelope({"content": piece})
+                    elif kind == "reasoning" and not reasoning_exclude:
+                        # OpenAI o-series convention: delta.reasoning_content
+                        yield _envelope({"reasoning_content": piece})
+                    # else: kind=="reasoning" and excluded → silently drop
+
             try:
                 stream_iter = node.inference.generate_stream(req)
                 # Acquire the lock by getting the first iteration
                 first_chunk_val = await stream_iter.__anext__()
-                # Got the lock — yield first chunk and continue
-                if first_chunk_val.text:
-                    yield json.dumps({
-                        "id": chunk_id, "object": "chat.completion.chunk",
-                        "created": int(time.time()), "model": model_name,
-                        "choices": [{"index": 0, "delta": {"content": first_chunk_val.text}, "finish_reason": None}],
-                    })
+                # Got the lock — yield first chunk(s) and continue
+                for out in _emit_chunk(first_chunk_val):
+                    yield out
             except RuntimeError as busy_err:
                 if "busy" in str(busy_err).lower() or "timed out" in str(busy_err).lower():
                     alt = _find_alternative_model(node, model_name)
@@ -407,27 +658,18 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     raise
 
             async for chunk in stream_iter:
-                if chunk.text:
-                    yield json.dumps({
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"content": chunk.text},
-                            "finish_reason": chunk.finish_reason,
-                        }],
-                    })
+                for out in _emit_chunk(chunk):
+                    yield out
 
-            # Final chunk
-            yield json.dumps({
-                "id": chunk_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": model_name,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            })
+            # Drain the splitter — handles unclosed <think> at end of stream.
+            for kind, piece in splitter.flush():
+                if kind == "content":
+                    yield _envelope({"content": piece})
+                elif kind == "reasoning" and not reasoning_exclude:
+                    yield _envelope({"reasoning_content": piece})
+
+            # Final chunk — use "tool_calls" finish_reason if model called a tool
+            yield _envelope({}, finish=("tool_calls" if got_tool_calls else "stop"))
         else:
             # No local model — try streaming via direct QUIC peers first
             # (this is the canonical P2P path: chain_builder picks the best
@@ -437,10 +679,16 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 quic_chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
                 role_sent = False
                 any_quic_chunk = False
+                # Apply the same think-splitter on the relay path: peer may not
+                # have suppressed thinking, so split <think> blocks at the
+                # bootstrap and route them to delta.reasoning_content.
+                quic_splitter = make_splitter(body.model or "")
                 async for piece in node.route_inference_stream(
                     body.model, messages,
                     temperature=body.temperature,
                     max_tokens=body.max_tokens or 2048,
+                    tools=body.tools or None,
+                    tool_choice=body.tool_choice,
                 ):
                     if not role_sent:
                         yield json.dumps({
@@ -452,13 +700,48 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                         role_sent = True
                     text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
                     finish = piece.get("finish_reason") if isinstance(piece, dict) else None
-                    if text:
+                    tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
+                    if tool_calls:
                         any_quic_chunk = True
                         yield json.dumps({
                             "id": quic_chunk_id, "object": "chat.completion.chunk",
                             "created": int(time.time()),
                             "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": finish}],
+                            "choices": [{"index": 0, "delta": {"tool_calls": tool_calls}, "finish_reason": finish}],
+                        })
+                    elif text:
+                        for kind, chunk_piece in quic_splitter.feed(text):
+                            if kind == "content":
+                                any_quic_chunk = True
+                                yield json.dumps({
+                                    "id": quic_chunk_id, "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": body.model or "auto",
+                                    "choices": [{"index": 0, "delta": {"content": chunk_piece}, "finish_reason": None}],
+                                })
+                            elif kind == "reasoning" and not reasoning_exclude:
+                                any_quic_chunk = True
+                                yield json.dumps({
+                                    "id": quic_chunk_id, "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": body.model or "auto",
+                                    "choices": [{"index": 0, "delta": {"reasoning_content": chunk_piece}, "finish_reason": None}],
+                                })
+                # Drain splitter (unclosed <think> at end-of-stream)
+                for kind, chunk_piece in quic_splitter.flush():
+                    if kind == "content":
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"content": chunk_piece}, "finish_reason": None}],
+                        })
+                    elif kind == "reasoning" and not reasoning_exclude:
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"reasoning_content": chunk_piece}, "finish_reason": None}],
                         })
                 if any_quic_chunk:
                     yield json.dumps({
@@ -510,16 +793,24 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                         body.model, messages,
                         temperature=body.temperature,
                         max_tokens=body.max_tokens or 2048,
+                        tools=body.tools or None,
+                        tool_choice=body.tool_choice,
                     ):
                         any_chunk = True
                         text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
                         finish = piece.get("finish_reason") if isinstance(piece, dict) else None
-                        if text:
+                        tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
+                        if text or tool_calls:
+                            delta2: dict = {}
+                            if text:
+                                delta2["content"] = text
+                            if tool_calls:
+                                delta2["tool_calls"] = tool_calls
                             yield json.dumps({
                                 "id": chunk_id_q, "object": "chat.completion.chunk",
                                 "created": int(time.time()),
                                 "model": body.model or "auto",
-                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": finish}],
+                                "choices": [{"index": 0, "delta": delta2, "finish_reason": finish}],
                             })
                     if any_chunk:
                         yield json.dumps({
@@ -560,6 +851,10 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                         "max_tokens": body.max_tokens or 2048,
                         "stream": True,
                     }
+                    if body.tools:
+                        payload["tools"] = body.tools
+                    if body.tool_choice is not None:
+                        payload["tool_choice"] = body.tool_choice
 
                     async with httpx.AsyncClient(timeout=120) as client:
                         async with client.stream("POST", url, json=payload, headers=headers) as resp:
@@ -727,12 +1022,18 @@ async def _route_via_fleet(
                 "max_tokens": body.max_tokens or 2048,
                 "top_p": body.top_p,
             }
+            if body.tools:
+                payload["tools"] = body.tools
+            if body.tool_choice is not None:
+                payload["tool_choice"] = body.tool_choice
 
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
-                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    resp_msg = data.get("choices", [{}])[0].get("message", {})
+                    text = resp_msg.get("content") or ""
+                    resp_tool_calls = resp_msg.get("tool_calls")
                     usage = data.get("usage", {})
                     node_name = entry.get("node_name", addr)
                     logger.info(f"Routed '{model_to_route or body.model}' to fleet node {node_name}")
@@ -779,7 +1080,11 @@ async def _route_via_fleet(
                         model=data.get("model", model_to_route or body.model),
                         choices=[
                             ChatCompletionChoice(
-                                message=ChatMessage(role="assistant", content=text),
+                                message=ChatMessage(
+                                    role="assistant",
+                                    content=text or None,
+                                    tool_calls=resp_tool_calls,
+                                ),
                                 finish_reason=data.get("choices", [{}])[0].get("finish_reason", "stop"),
                             )
                         ],
@@ -789,7 +1094,7 @@ async def _route_via_fleet(
                             total_tokens=usage.get("total_tokens", 0),
                         ),
                     )
-                    response = JSONResponse(content=resp_data.model_dump())
+                    response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
                     response.headers["X-Mycellm-Routed-To"] = routed_to
                     return response
                 else:
@@ -811,6 +1116,7 @@ async def model_capabilities(request: Request):
     Returns model metadata (params, quantization, context length, features,
     throughput, queue depth, source) for intelligent routing decisions.
     """
+    from mycellm.inference.reasoning_dialects import supports_thinking
     node = request.app.state.node
     models = []
 
@@ -832,6 +1138,7 @@ async def model_capabilities(request: Request):
             "queue_depth": queue,
             "max_concurrent": node.inference._max_concurrent,
             "supports_grammar": m.backend == "llama.cpp",
+            "supports_thinking": supports_thinking(m.name),
         })
 
     # QUIC peers
@@ -851,6 +1158,7 @@ async def model_capabilities(request: Request):
                 "tier": m.tier or "",
                 "tags": m.tags,
                 "supports_grammar": m.backend == "llama.cpp",
+                "supports_thinking": supports_thinking(m.name),
             })
 
     # Fleet nodes
@@ -860,8 +1168,9 @@ async def model_capabilities(request: Request):
         caps = entry.get("capabilities", {})
         for m_data in caps.get("models", []):
             m = m_data if isinstance(m_data, dict) else {"name": m_data}
+            name = m.get("name", "")
             models.append({
-                "id": m.get("name", ""),
+                "id": name,
                 "source": "fleet",
                 "peer_id": entry.get("peer_id", ""),
                 "node_name": entry.get("node_name", ""),
@@ -875,6 +1184,7 @@ async def model_capabilities(request: Request):
                 "tier": m.get("tier", ""),
                 "tags": m.get("tags", []),
                 "supports_grammar": m.get("backend", "") == "llama.cpp",
+                "supports_thinking": supports_thinking(name),
             })
 
     return {"models": models}
@@ -936,7 +1246,14 @@ async def retrieve_model(request: Request, model_id: str):
 
 @router.get("/models")
 async def list_models(request: Request):
-    """List available models (local + remote via QUIC + fleet via registry)."""
+    """List available models (local + remote via QUIC + fleet via registry).
+
+    Model names are normalized — transport-internal prefixes like `relay:`
+    are stripped so the public model list matches what consumers can
+    actually request.
+    """
+    from mycellm.protocol.capabilities import normalize_model_name
+
     node = request.app.state.node
     models = []
 
@@ -951,25 +1268,26 @@ async def list_models(request: Request):
     # Local models
     for m in node.inference.loaded_models:
         models.append({
-            "id": m.name,
+            "id": normalize_model_name(m.name),
             "object": "model",
             "created": int(time.time()),
             "owned_by": "local",
         })
 
-    seen = {m.name for m in node.inference.loaded_models}
+    seen = {normalize_model_name(m.name) for m in node.inference.loaded_models}
 
     # Remote models from QUIC-connected peers
     for entry in node.registry.connected_peers():
         for m in entry.capabilities.models:
-            if m.name not in seen:
+            display = normalize_model_name(m.name)
+            if display not in seen:
                 models.append({
-                    "id": m.name,
+                    "id": display,
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": f"peer:{entry.peer_id[:8]}",
                 })
-                seen.add(m.name)
+                seen.add(display)
 
     # Fleet models from registry (HTTP-routable)
     for entry in node.node_registry.values():
@@ -977,15 +1295,16 @@ async def list_models(request: Request):
             continue
         caps = entry.get("capabilities", {})
         for m in caps.get("models", []):
-            name = m.get("name", m) if isinstance(m, dict) else m
-            if name not in seen:
+            raw = m.get("name", m) if isinstance(m, dict) else m
+            display = normalize_model_name(raw)
+            if display not in seen:
                 models.append({
-                    "id": name,
+                    "id": display,
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": f"fleet:{entry.get('node_name', entry.get('peer_id', '')[:8])}",
                 })
-                seen.add(name)
+                seen.add(display)
 
     return {"object": "list", "data": models}
 

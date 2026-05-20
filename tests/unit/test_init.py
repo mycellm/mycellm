@@ -1,8 +1,5 @@
 """Unit tests for mycellm init CLI command."""
 
-import pytest
-from pathlib import Path
-from unittest.mock import patch
 
 
 def test_init_creates_account_and_device(tmp_path):

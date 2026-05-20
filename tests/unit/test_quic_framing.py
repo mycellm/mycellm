@@ -2,7 +2,7 @@
 
 import asyncio
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 try:
     from aioquic.quic.events import StreamDataReceived, HandshakeCompleted
@@ -11,7 +11,6 @@ except ImportError:
     HAS_AIOQUIC = False
 
 from mycellm.transport.quic import MycellmQuicProtocol
-from mycellm.protocol.envelope import MessageEnvelope, MessageType
 
 pytestmark = pytest.mark.skipif(not HAS_AIOQUIC, reason="aioquic not installed")
 
@@ -69,7 +68,6 @@ def test_bidirectional_stream_uses_framed_dispatch():
 
     # Spy on _try_framed_dispatch
     framed_calls = []
-    original = proto._try_framed_dispatch
 
     def spy(stream_id):
         framed_calls.append(stream_id)

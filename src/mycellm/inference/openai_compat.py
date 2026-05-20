@@ -50,7 +50,7 @@ class OpenAICompatibleBackend(InferenceBackend):
                 api_base: base URL (e.g. https://openrouter.ai/api/v1)
                 api_key: bearer token
                 api_model: upstream model ID (e.g. anthropic/claude-sonnet-4)
-                ctx_len: context length to advertise (default 4096)
+                ctx_len: context length to advertise (default: settings.default_ctx_len)
                 timeout: request timeout in seconds (default 120)
         """
         model_name = kwargs.get("name", "remote-model")
@@ -96,42 +96,29 @@ class OpenAICompatibleBackend(InferenceBackend):
             logger.info(f"Remote model '{model_name}' unregistered")
 
     async def generate(self, request: InferenceRequest) -> InferenceResult:
-        model_name = request.model or next(iter(self._models), "")
-        if not model_name or model_name not in self._models:
-            raise RuntimeError(f"Remote model '{model_name}' not configured")
+        # Use streaming internally to avoid httpx read timeouts on slow models.
+        # Non-streaming POST blocks until the full response is ready — for a 32B
+        # model that takes ~110s to emit a first token, this races the 120s timeout
+        # and loses.  Streaming with SSE keepalive pings keeps the connection alive
+        # indefinitely, so we collect chunks here and reassemble into an InferenceResult.
+        text = ""
+        finish_reason = "stop"
+        tool_calls: list | None = None
 
-        remote = self._models[model_name]
-        body = {
-            "model": remote.api_model,
-            "messages": request.messages,
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
-            "top_p": request.top_p,
-            "stream": False,
-        }
-        if request.stop:
-            body["stop"] = request.stop
-        if request.frequency_penalty:
-            body["frequency_penalty"] = request.frequency_penalty
-        if request.presence_penalty:
-            body["presence_penalty"] = request.presence_penalty
-        if request.seed is not None:
-            body["seed"] = request.seed
-        if request.response_format:
-            body["response_format"] = request.response_format
-
-        resp = await remote.client.post("/chat/completions", json=body)
-        resp.raise_for_status()
-        data = resp.json()
-
-        choice = data["choices"][0]
-        usage = data.get("usage", {})
+        async for chunk in self.generate_stream(request):
+            if chunk.text:
+                text += chunk.text
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
+            if chunk.tool_calls is not None:
+                tool_calls = chunk.tool_calls
 
         return InferenceResult(
-            text=choice["message"]["content"],
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-            finish_reason=choice.get("finish_reason", "stop"),
+            text=text,
+            tool_calls=tool_calls,
+            prompt_tokens=0,
+            completion_tokens=0,
+            finish_reason=finish_reason,
         )
 
     async def generate_stream(
@@ -160,6 +147,12 @@ class OpenAICompatibleBackend(InferenceBackend):
             body["seed"] = request.seed
         if request.response_format:
             body["response_format"] = request.response_format
+        if request.tools:
+            body["tools"] = request.tools
+        if request.tool_choice is not None:
+            body["tool_choice"] = request.tool_choice
+
+        accumulated_tool_calls: dict[int, dict] = {}
 
         async with remote.client.stream("POST", "/chat/completions", json=body) as resp:
             resp.raise_for_status()
@@ -172,11 +165,34 @@ class OpenAICompatibleBackend(InferenceBackend):
 
                 import json
                 chunk = json.loads(payload)
-                delta = chunk["choices"][0].get("delta", {})
+                choice = chunk["choices"][0]
+                delta = choice.get("delta", {})
                 content = delta.get("content", "")
-                finish = chunk["choices"][0].get("finish_reason")
-                if content or finish:
+                finish = choice.get("finish_reason")
+
+                for tc_delta in delta.get("tool_calls") or []:
+                    idx = tc_delta.get("index", 0)
+                    if idx not in accumulated_tool_calls:
+                        accumulated_tool_calls[idx] = {
+                            "id": tc_delta.get("id", ""),
+                            "type": tc_delta.get("type", "function"),
+                            "function": {"name": "", "arguments": ""},
+                        }
+                    tc = accumulated_tool_calls[idx]
+                    fn = tc_delta.get("function", {})
+                    if fn.get("name") and not tc["function"]["name"]:
+                        tc["function"]["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        tc["function"]["arguments"] += fn["arguments"]
+                    if tc_delta.get("id") and not tc["id"]:
+                        tc["id"] = tc_delta["id"]
+
+                if content or (finish and finish != "tool_calls"):
                     yield InferenceChunk(text=content, finish_reason=finish)
+
+        if accumulated_tool_calls:
+            tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls)]
+            yield InferenceChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls_list)
 
     def get_loaded_models(self) -> list[str]:
         return list(self._models.keys())

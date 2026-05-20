@@ -1,6 +1,5 @@
 """Unit tests for health metrics."""
 
-import pytest
 
 from mycellm.router.health import PeerHealthMetrics
 

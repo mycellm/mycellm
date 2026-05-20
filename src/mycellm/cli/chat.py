@@ -55,7 +55,7 @@ async def _cmd_help(client, endpoint, headers, args):
     console.print("[bold]Slash commands:[/bold]")
     for name, info in sorted(COMMANDS.items()):
         console.print(f"  [green]/{name}[/green]  {info['help']}")
-    console.print(f"  [green]/q[/green]      Exit")
+    console.print("  [green]/q[/green]      Exit")
     console.print()
 
 
@@ -213,7 +213,7 @@ async def _discover_endpoint(endpoint: str, headers: dict, console: Console) -> 
     Returns (endpoint, model_name). Model may be empty if nothing found.
     """
     import httpx
-    from mycellm.cli.banner import SPORE_GREEN, LEDGER_GOLD
+    from mycellm.cli.banner import LEDGER_GOLD
 
     async def _try_endpoint(url: str, client: httpx.AsyncClient) -> list[dict]:
         try:
@@ -261,11 +261,11 @@ async def _discover_endpoint(endpoint: str, headers: dict, console: Console) -> 
 
         # Nothing found — give helpful guidance
         if not local_running:
-            console.print(f"  [red]No mycellm node running.[/red]")
-            console.print(f"  [dim]Start one:  mycellm init && mycellm serve[/dim]")
+            console.print("  [red]No mycellm node running.[/red]")
+            console.print("  [dim]Start one:  mycellm init && mycellm serve[/dim]")
         else:
-            console.print(f"  [yellow]No models available on the network.[/yellow]")
-            console.print(f"  [dim]Load one:   open http://localhost:8420 → Models tab[/dim]")
+            console.print("  [yellow]No models available on the network.[/yellow]")
+            console.print("  [dim]Load one:   open http://localhost:8420 → Models tab[/dim]")
 
     return endpoint, ""
 
@@ -276,9 +276,8 @@ async def _chat_loop(model: str, endpoint: str, api_key: str, trust: str = "") -
     import httpx
     from rich.markdown import Markdown
     from rich.live import Live
-    from rich.panel import Panel
     from rich.text import Text
-    from mycellm.cli.banner import print_chat_header, SPORE_GREEN, COMPUTE_RED, CONSOLE_GRAY
+    from mycellm.cli.banner import print_chat_header, SPORE_GREEN, COMPUTE_RED
 
     print_chat_header(console)
 
@@ -293,13 +292,13 @@ async def _chat_loop(model: str, endpoint: str, api_key: str, trust: str = "") -
     if model:
         console.print(f"  Model: [bold green]{model}[/bold green]")
     else:
-        console.print(f"  Model: [yellow]auto[/yellow] (routes to best available on network)")
+        console.print("  Model: [yellow]auto[/yellow] (routes to best available on network)")
     console.print(f"  Node:  [dim]{endpoint}[/dim]")
     if trust:
         trust_labels = {"local": "local only (no network)", "trusted": "trusted peers only"}
         console.print(f"  Trust: [bold yellow]{trust_labels.get(trust, trust)}[/bold yellow]")
-    console.print(f"  Type [green]/help[/green] for commands, [green]/q[/green] to exit")
-    console.print(f"  [dim]Tip: run 'mycellm init' to configure your node[/dim]\n")
+    console.print("  Type [green]/help[/green] for commands, [green]/q[/green] to exit")
+    console.print("  [dim]Tip: run 'mycellm init' to configure your node[/dim]\n")
 
     messages: list[dict] = []
     current_model = model
@@ -313,7 +312,7 @@ async def _chat_loop(model: str, endpoint: str, api_key: str, trust: str = "") -
                     f"[{SPORE_GREEN}]│[/{SPORE_GREEN}] "
                 )
             except (EOFError, KeyboardInterrupt):
-                console.print(f"\n[dim]Goodbye.[/dim]")
+                console.print("\n[dim]Goodbye.[/dim]")
                 break
 
             # Close the input border
@@ -358,7 +357,7 @@ async def _chat_loop(model: str, endpoint: str, api_key: str, trust: str = "") -
                 for m in matches:
                     icon = f"[{COMPUTE_RED}]!!![/{COMPUTE_RED}]" if m.severity == "high" else f"[{LEDGER_GOLD}]![/{LEDGER_GOLD}]"
                     console.print(f"  {icon} {m.label}: [dim]{m.pattern}[/dim]")
-                console.print(f"  [dim]Prompts are processed by distributed nodes.[/dim]")
+                console.print("  [dim]Prompts are processed by distributed nodes.[/dim]")
                 try:
                     if not typer.confirm("  Send anyway?", default=False):
                         continue
@@ -446,7 +445,7 @@ async def _chat_loop(model: str, endpoint: str, api_key: str, trust: str = "") -
                 console.print(f"\n[red]Cannot connect to {endpoint}[/red]. Is 'mycellm serve' running?\n")
                 messages.pop()
             except KeyboardInterrupt:
-                console.print(f"\n[dim]Interrupted.[/dim]\n")
+                console.print("\n[dim]Interrupted.[/dim]\n")
                 if messages and messages[-1]["role"] == "user":
                     messages.pop()
             except Exception as e:

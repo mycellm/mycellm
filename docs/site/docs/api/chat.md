@@ -73,3 +73,102 @@ data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","model":"Qwen2.5-3B"
 
 data: [DONE]
 ```
+
+### Reasoning ("thinking") control
+
+Thinking-capable models (Qwen3 hybrid, DeepSeek-R1, GLM-4.x-Thinking,
+Gemini Thinking, OpenAI o-series via relay) often emit step-by-step
+reasoning before their final answer, traditionally wrapped in
+`<think>...</think>` tags. mycellm gives clients three options:
+
+```json
+{
+  "messages": [...],
+  "reasoning": {"exclude": true}   // strip thinking, return clean answer
+}
+```
+
+```json
+{
+  "messages": [...],
+  "reasoning": {"exclude": false}  // include thinking in response
+}
+```
+
+Omit `reasoning` to inherit the server-side default. The public bootstrap
+demo sets `MYCELLM_HIDE_REASONING_BY_DEFAULT=true` so unauthenticated
+visitors see clean answers; self-hosted nodes default to false.
+
+When thinking is included, the assistant message carries it on a
+separate `reasoning_content` field — content stays the user-facing
+answer:
+
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "The answer is 42.",
+      "reasoning_content": "Let me work through this step by step..."
+    }
+  }]
+}
+```
+
+Streaming responses emit reasoning and content as separate SSE deltas
+so clients can render them in different visual tracks (e.g. an
+ephemeral "Thinking…" panel):
+
+```
+data: {"choices":[{"delta":{"role":"assistant"}}]}
+data: {"choices":[{"delta":{"reasoning_content":"Let me think"}}]}
+data: {"choices":[{"delta":{"reasoning_content":" about this..."}}]}
+data: {"choices":[{"delta":{"content":"The answer is"}}]}
+data: {"choices":[{"delta":{"content":" 42."}}]}
+data: [DONE]
+```
+
+To find out whether the network has any thinking-capable models loaded
+right now, GET `/v1/models/capabilities` — each model entry includes a
+`supports_thinking` boolean.
+
+### Tool / function calling
+
+Pass `tools` and (optionally) `tool_choice` exactly as you would to the
+OpenAI API. mycellm forwards them to whichever backend ends up serving
+the request — local llama.cpp, MLX, or an OpenAI-compatible relay — and
+across QUIC peer routing if the answering node is remote.
+
+```json
+{
+  "model": "auto",
+  "messages": [{"role": "user", "content": "What's the capital of France?"}],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "get_country_info",
+      "description": "Look up facts about a country.",
+      "parameters": {
+        "type": "object",
+        "properties": {"country": {"type": "string"}},
+        "required": ["country"]
+      }
+    }
+  }],
+  "tool_choice": "auto"
+}
+```
+
+Response contains either a normal text message or a `tool_calls` array
+in OpenAI format (`function.arguments` is a JSON-encoded string).
+
+Local Qwen-family models sometimes emit tool calls as `<tool_call>` XML
+or ```` ```json ```` markdown fences in the content stream. mycellm
+recognises both and normalises them into proper `tool_calls` JSON
+before returning to the client — so clients always see the standard
+OpenAI shape regardless of which model the request landed on.
+
+When exactly one tool is provided and `tool_choice` is unset or
+`"auto"`, the relay path coerces `tool_choice` to the named function
+to coax JSON-structured output from models that would otherwise emit
+inline text.

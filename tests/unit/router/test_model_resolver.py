@@ -1,10 +1,8 @@
 """Unit tests for ModelResolver."""
 
-import pytest
 
 from mycellm.router.model_resolver import (
     ModelResolver,
-    ResolvedModel,
     estimate_param_count,
     derive_tier,
     derive_tags,

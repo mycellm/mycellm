@@ -1,7 +1,5 @@
 """Unit tests for reputation tracking."""
 
-import time
-import pytest
 
 from mycellm.accounting.reputation import PeerReputation, ReputationTracker
 

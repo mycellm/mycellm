@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Monitor, Cpu, Radio } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/api/client'
 import { API } from '@/api/endpoints'
@@ -8,8 +7,6 @@ import { useFleetStore } from '@/stores/fleet'
 import { useFleetHardware } from '@/hooks/useFleetHardware'
 import { useModels } from '@/hooks/useModels'
 import { SortHeader } from '@/components/common/SortHeader'
-import type { HardwareNode } from '@/api/types'
-
 interface DeviceTableProps {
   selected: string
   onSelect: (addr: string, name?: string) => void

@@ -1,16 +1,14 @@
 """Tests for multi-network membership and model scoping."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from mycellm.federation import (
     FederationManager,
     NetworkMembership,
-    InviteToken,
 )
 from mycellm.protocol.capabilities import ModelCapability, Capabilities
-from mycellm.router.registry import PeerRegistry, PeerEntry
+from mycellm.router.registry import PeerRegistry
 from mycellm.transport.connection import PeerState
 
 

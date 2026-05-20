@@ -5,7 +5,7 @@ from __future__ import annotations
 import typer
 from rich.console import Console
 
-from mycellm.cli.banner import SPORE_GREEN, LEDGER_GOLD, styled_tag
+from mycellm.cli.banner import LEDGER_GOLD, styled_tag
 
 console = Console()
 app = typer.Typer(invoke_without_command=True, no_args_is_help=True)
@@ -58,7 +58,7 @@ def list_secrets() -> None:
     names = store.list_names()
     if not names:
         console.print("  [dim]No secrets stored.[/dim]")
-        console.print(f"  [dim]Add one: mycellm secret set <name> -v <value>[/dim]")
+        console.print("  [dim]Add one: mycellm secret set <name> -v <value>[/dim]")
         return
 
     console.print(f"  [{LEDGER_GOLD}]{len(names)} secret(s):[/{LEDGER_GOLD}]")

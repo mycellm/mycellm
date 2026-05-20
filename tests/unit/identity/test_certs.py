@@ -1,6 +1,5 @@
 """Tests for device certificates: creation, verification, expiry, tampering, revocation."""
 
-import time
 
 from mycellm.identity.certs import (
     DeviceCert,

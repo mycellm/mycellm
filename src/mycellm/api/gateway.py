@@ -15,6 +15,7 @@ Restrictions vs authenticated API:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -216,6 +217,11 @@ async def public_chat(request: Request):
     stream = body.get("stream", False)
     max_tokens = min(body.get("max_tokens", _MAX_REQUEST_TOKENS), _MAX_REQUEST_TOKENS)
     temperature = body.get("temperature", 0.7)
+    # Reasoning suppression: explicit body.reasoning.exclude wins, else fall
+    # back to MYCELLM_HIDE_REASONING_BY_DEFAULT. Public bootstraps should set
+    # the env var so demo visitors see clean answers by default.
+    from mycellm.api.openai import _resolve_reasoning_exclude
+    reasoning_exclude = _resolve_reasoning_exclude(body.get("reasoning"))
 
     start_time = time.time()
     request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -235,23 +241,32 @@ async def public_chat(request: Request):
                         _peer = peer_id
 
                         async def _quic_stream_real():
-                            total_text = ""
+                            from mycellm.inference.reasoning_dialects import make_splitter
+                            splitter = make_splitter(_model)
                             token_count = 0
+
+                            def _envelope(delta: dict, finish: str | None = None) -> str:
+                                return f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'model': _model, 'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}], 'mycellm': {'node': _node_hash(_peer), 'served_by': 'mycellm-public'}})}\n\n"
+
                             async for chunk in node.route_inference_stream(
                                 _model, messages,
                                 temperature=temperature,
                                 max_tokens=max_tokens,
                             ):
                                 text = chunk.get("text", "")
-                                total_text += text
                                 token_count += 1
-                                sse_chunk = {
-                                    "id": request_id, "object": "chat.completion.chunk",
-                                    "model": _model,
-                                    "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": chunk.get("finish_reason")}],
-                                    "mycellm": {"node": _node_hash(_peer), "served_by": "mycellm-public"},
-                                }
-                                yield f"data: {json.dumps(sse_chunk)}\n\n"
+                                if text:
+                                    for kind, piece in splitter.feed(text):
+                                        if kind == "content":
+                                            yield _envelope({"content": piece}, chunk.get("finish_reason"))
+                                        elif kind == "reasoning" and not reasoning_exclude:
+                                            yield _envelope({"reasoning_content": piece}, chunk.get("finish_reason"))
+                            # Drain — handles unclosed <think> at stream end
+                            for kind, piece in splitter.flush():
+                                if kind == "content":
+                                    yield _envelope({"content": piece})
+                                elif kind == "reasoning" and not reasoning_exclude:
+                                    yield _envelope({"reasoning_content": piece})
                             latency_ms = round((time.time() - start_time) * 1000)
                             _record_usage(client_ip, token_count)
                             node.activity.record(
@@ -282,7 +297,8 @@ async def public_chat(request: Request):
                             tokens=completion_tokens, latency_ms=latency_ms,
                         )
                         return _clean_response(request_id, model_name, text, "stop",
-                            prompt_tokens, completion_tokens, latency_ms, node_id=_node_hash(peer_id))
+                            prompt_tokens, completion_tokens, latency_ms, node_id=_node_hash(peer_id),
+                            reasoning_exclude=reasoning_exclude)
                 except Exception as e:
                     last_error = str(e)
                     logger.info(f"Gateway QUIC failover: {model_name}@{peer_id[:8]} failed: {e}")
@@ -331,7 +347,8 @@ async def public_chat(request: Request):
 
             return _clean_response(request_id, model_name, result.text,
                                    result.finish_reason, result.prompt_tokens,
-                                   result.completion_tokens, latency_ms)
+                                   result.completion_tokens, latency_ms,
+                                   reasoning_exclude=reasoning_exclude)
 
         except (RuntimeError, _FleetBusyError) as e:
             # Model busy (local queue timeout or fleet 503) — try next candidate
@@ -357,8 +374,17 @@ def _node_hash(addr: str) -> str:
     return hashlib.sha256(addr.encode()).hexdigest()[:8]
 
 
-def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, completion_tokens, latency_ms, node_id=""):
-    """Build a clean, metadata-stripped OpenAI-compatible response."""
+def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, completion_tokens, latency_ms, node_id="", reasoning_exclude=True):
+    """Build a clean, metadata-stripped OpenAI-compatible response.
+
+    Applies reasoning split: <think>...</think> blocks are stripped from
+    content (and routed to reasoning_content when caller opts in).
+    """
+    from mycellm.inference.reasoning_dialects import split_reasoning
+    content, reasoning = split_reasoning(text or "", model_name)
+    message: dict = {"role": "assistant", "content": content or ""}
+    if reasoning and not reasoning_exclude:
+        message["reasoning_content"] = reasoning
     return {
         "id": request_id,
         "object": "chat.completion",
@@ -366,7 +392,7 @@ def _clean_response(request_id, model_name, text, finish_reason, prompt_tokens, 
         "model": model_name,
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": text},
+            "message": message,
             "finish_reason": finish_reason or "stop",
         }],
         "usage": {
@@ -429,6 +455,9 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
             tokens=usage.get("completion_tokens", 0), latency_ms=latency_ms,
         )
 
+        # NOTE: _proxy_fleet doesn't have access to the request-level
+        # reasoning_exclude in this helper signature; default to True (hidden)
+        # since this path serves the public gateway whose policy is hide-by-default.
         return _clean_response(
             request_id, model_name,
             choice.get("message", {}).get("content", ""),
@@ -437,6 +466,7 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
             usage.get("completion_tokens", 0),
             latency_ms,
             node_id=_node_hash(fleet_addr),
+            reasoning_exclude=True,
         )
 
     except Exception as e:

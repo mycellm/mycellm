@@ -1,7 +1,5 @@
 """Tests for model search and download API helpers."""
 
-import pytest
-from pathlib import Path
 
 
 def test_downloads_dict_structure():

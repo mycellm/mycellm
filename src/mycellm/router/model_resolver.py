@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 
 from mycellm.protocol.capabilities import ModelCapability
-from mycellm.router.registry import PeerEntry, PeerRegistry
+from mycellm.router.registry import PeerRegistry
 
 logger = logging.getLogger("mycellm.router")
 
@@ -43,6 +43,43 @@ def derive_tier(param_count_b: float) -> str:
         if param_count_b >= threshold:
             return tier
     return "tiny"
+
+
+_HOST_PLATFORM_CACHE: str | None = None
+
+
+def _host_platform() -> str:
+    """Cached platform string for backend-efficiency scoring."""
+    global _HOST_PLATFORM_CACHE
+    if _HOST_PLATFORM_CACHE is None:
+        import platform
+        sys = platform.system()
+        arch = platform.machine().lower()
+        if sys == "Darwin" and arch == "arm64":
+            _HOST_PLATFORM_CACHE = "darwin-arm64"
+        elif sys == "Linux":
+            _HOST_PLATFORM_CACHE = "linux"
+        else:
+            _HOST_PLATFORM_CACHE = sys.lower()
+    return _HOST_PLATFORM_CACHE
+
+
+def _backend_efficiency(backend: str) -> float:
+    """Multiplier favouring backends well-matched to the host hardware.
+
+    Conservative multipliers (≤1.4) — auto-routing should never *strongly*
+    over-rule a tier-based pick, just break ties when a faster path exists.
+    """
+    plat = _host_platform()
+    if plat == "darwin-arm64":
+        if backend == "mlx":
+            return 1.30
+        return 1.0
+    if plat == "linux":
+        if backend == "llama.cpp":
+            return 1.05
+        return 1.0
+    return 1.0
 
 
 def derive_tags(model_name: str) -> list[str]:
@@ -125,13 +162,14 @@ class ModelResolver:
             param_b = getattr(m, 'param_count_b', 0.0) or estimate_param_count(m.name)
             tier = getattr(m, 'tier', '') or derive_tier(param_b)
             tags = getattr(m, 'tags', []) or derive_tags(m.name)
+            backend = getattr(m, 'backend', '') or ''
             candidates.append(ResolvedModel(
                 model_name=m.name,
                 peer_id="",
                 source="local",
                 tier=tier,
                 tags=tags,
-                score=self._score_model(param_b, tier, source="local"),
+                score=self._score_model(param_b, tier, source="local", backend=backend),
             ))
 
         # Collect QUIC peer models
@@ -313,6 +351,7 @@ class ModelResolver:
         tier: str,
         source: str = "local",
         health: float = 1.0,
+        backend: str = "",
     ) -> float:
         """Score a model candidate."""
         # Base score from tier
@@ -325,6 +364,11 @@ class ModelResolver:
         elif source == "quic":
             score *= 1.2  # QUIC slightly preferred over fleet HTTP
         # fleet gets base score
+
+        # Backend efficiency on the host's hardware (only meaningful for local).
+        # MLX is typically 1.5-3x faster than llama.cpp on Apple Silicon.
+        if source == "local" and backend:
+            score *= _backend_efficiency(backend)
 
         # Health factor
         score *= health

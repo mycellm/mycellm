@@ -1,7 +1,5 @@
 """Unit tests for federation."""
 
-import pytest
-from pathlib import Path
 
 from mycellm.federation import (
     NetworkIdentity,

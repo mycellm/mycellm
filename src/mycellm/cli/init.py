@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -53,7 +52,6 @@ def init(
     from mycellm.config import get_settings
     from mycellm.identity.keys import (
         AccountKey,
-        DeviceKey,
         generate_account_key,
         generate_device_key,
     )
@@ -93,7 +91,6 @@ def init(
 
     # 4. Determine bootstrap config
     bootstrap_addr = DEFAULT_BOOTSTRAP
-    network_name = ""
 
     if invite:
         # Parse invite token (URL or raw)
@@ -101,7 +98,6 @@ def init(
         try:
             from mycellm.federation import InviteToken
             token = InviteToken.from_portable(portable_token)
-            network_name = f"network-{token.network_id[:8]}"
             console.print(f"  {styled_tag('NODE')} Invite token parsed (network: {token.network_id[:12]}...)")
         except Exception as e:
             console.print(f"  [red]Failed to parse invite token: {e}[/red]")
@@ -138,9 +134,9 @@ def init(
     if "MYCELLM_TELEMETRY" not in env_lines and not no_serve:
         console.print()
         console.print(f"  [{SPORE_GREEN}]Telemetry[/{SPORE_GREEN}]")
-        console.print(f"  [dim]Share anonymous usage stats (request counts, TPS, model names)[/dim]")
-        console.print(f"  [dim]with the network? No prompts, IPs, or user data. Helps the[/dim]")
-        console.print(f"  [dim]stats page show real network activity.[/dim]")
+        console.print("  [dim]Share anonymous usage stats (request counts, TPS, model names)[/dim]")
+        console.print("  [dim]with the network? No prompts, IPs, or user data. Helps the[/dim]")
+        console.print("  [dim]stats page show real network activity.[/dim]")
         try:
             opt_in = typer.confirm("  Enable telemetry?", default=True)
         except (EOFError, KeyboardInterrupt):
@@ -168,7 +164,7 @@ def init(
     console.print(f"[{SPORE_GREEN}]Ready.[/{SPORE_GREEN}]")
 
     if serve:
-        console.print(f"\n[dim]Starting daemon in background...[/dim]")
+        console.print("\n[dim]Starting daemon in background...[/dim]")
         subprocess.Popen(
             [sys.executable, "-m", "mycellm", "serve", "--host", "0.0.0.0"],
             start_new_session=True,
@@ -178,5 +174,5 @@ def init(
         console.print(f"[{SPORE_GREEN}]Daemon started.[/{SPORE_GREEN}]")
     elif not no_serve:
         console.print("Next steps:")
-        console.print(f"  mycellm serve                    # Start the node")
-        console.print(f"  mycellm serve --install-service  # Start + auto-restart on boot")
+        console.print("  mycellm serve                    # Start the node")
+        console.print("  mycellm serve --install-service  # Start + auto-restart on boot")

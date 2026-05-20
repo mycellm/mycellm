@@ -16,15 +16,33 @@ List all available models across the network (local + QUIC peers + fleet).
 
 ## `POST /v1/node/models/load`
 
-### Local GGUF model
+### Local GGUF model (llama.cpp backend)
 
 ```json
 {
   "model_path": "/path/to/model.gguf",
   "name": "my-model",
-  "ctx_len": 4096
+  "ctx_len": 32768
 }
 ```
+
+`ctx_len` overrides the default for this load only. The default is
+controlled by `MYCELLM_DEFAULT_CTX_LEN` (32768).
+
+### Local MLX model (Apple Silicon)
+
+```json
+{
+  "model_path": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit",
+  "name": "Qwen3-Coder-30B-A3B-Instruct-MLX-4bit",
+  "backend": "mlx",
+  "ctx_len": 32768
+}
+```
+
+`model_path` accepts either a local directory containing
+`config.json` + safetensors, or a Hugging Face repo id — the MLX
+backend resolves the latter on first load.
 
 ### Remote API model
 

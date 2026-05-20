@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import cbor2
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from mycellm.identity.keys import AccountKey, DeviceKey
-from mycellm.identity.peer_id import peer_id_from_public_key
 
 
 @dataclass
@@ -77,17 +76,13 @@ class DeviceCert:
             return False
         return time.time() > self.expires_at
 
-    def save(self, certs_dir: "Path") -> None:
-        from pathlib import Path
-
+    def save(self, certs_dir: Path | str) -> None:
         certs_dir = Path(certs_dir)
         certs_dir.mkdir(parents=True, exist_ok=True)
         (certs_dir / f"device-{self.device_name}.cert").write_bytes(self.to_cbor())
 
     @classmethod
-    def load(cls, certs_dir: "Path", device_name: str = "default") -> DeviceCert:
-        from pathlib import Path
-
+    def load(cls, certs_dir: Path | str, device_name: str = "default") -> DeviceCert:
         certs_dir = Path(certs_dir)
         return cls.from_cbor((certs_dir / f"device-{device_name}.cert").read_bytes())
 

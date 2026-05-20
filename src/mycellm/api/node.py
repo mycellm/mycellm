@@ -201,6 +201,9 @@ async def load_model(request: Request):
     For local GGUF models (backend=llama.cpp, default):
         {"model_path": "/path/to/model.gguf", "name": "my-model"}
 
+    For local MLX models (Apple Silicon only, backend=mlx):
+        {"model_path": "/path/to/mlx-dir-or-hf-repo-id", "name": "my-model", "backend": "mlx"}
+
     For remote OpenAI-compatible APIs (backend=openai):
         {"name": "claude-sonnet", "backend": "openai",
          "api_base": "https://openrouter.ai/api/v1",
@@ -218,13 +221,20 @@ async def load_model(request: Request):
         api_key = node.secret_store.resolve(api_key)
 
     # Local backends require model_path; remote backends don't
-    if backend_type == "llama.cpp" and not model_path:
-        return {"error": "model_path required for llama.cpp backend"}
+    LOCAL_BACKENDS = ("llama.cpp", "mlx")
+    if backend_type in LOCAL_BACKENDS and not model_path:
+        return {"error": f"model_path required for {backend_type} backend"}
 
-    model_name = name or (model_path.split("/")[-1].replace(".gguf", "") if model_path else "remote-model")
+    if name:
+        model_name = name
+    elif model_path:
+        leaf = model_path.rstrip("/").split("/")[-1]
+        model_name = leaf.replace(".gguf", "")
+    else:
+        model_name = "remote-model"
 
-    # For llama.cpp, load async (can take minutes for large models)
-    if backend_type == "llama.cpp":
+    # For local backends, load async (can take minutes for large models)
+    if backend_type in LOCAL_BACKENDS:
         import asyncio
 
         async def _bg_load():
@@ -317,16 +327,29 @@ async def clear_load_status(request: Request):
 
 @router.get("/models/saved")
 async def list_saved_configs(request: Request):
-    """List all saved model configs (loaded + unloaded API models)."""
+    """List all saved model configs (loaded + unloaded API models).
+
+    Names are normalized — `relay:` prefixes from old HTTP-relay configs
+    are stripped from the displayed name. The original is kept in
+    `internal_name` for the unload/remove endpoints that need an exact match.
+    """
+    from mycellm.protocol.capabilities import normalize_model_name
+
     node = request.app.state.node
     loaded_names = {m.name for m in node.inference.loaded_models}
     configs = []
     for c in node.inference.get_saved_configs():
-        configs.append({
+        raw = c.get("name", "")
+        display = normalize_model_name(raw)
+        entry = {
             **c,
-            "loaded": c.get("name", "") in loaded_names,
-            "api_key": "***" if c.get("api_key") else "",  # mask key
-        })
+            "name": display,
+            "loaded": raw in loaded_names,
+            "api_key": "***" if c.get("api_key") else "",
+        }
+        if raw != display:
+            entry["internal_name"] = raw
+        configs.append(entry)
     return {"configs": configs}
 
 
@@ -348,14 +371,17 @@ async def update_model(request: Request):
         return {"error": f"No config for '{model_name}'"}
 
     # Merge overrides — only update fields that were provided
-    if body.get("api_base"): config["api_base"] = body["api_base"]
-    if body.get("api_model"): config["api_model"] = body["api_model"]
+    if body.get("api_base"):
+        config["api_base"] = body["api_base"]
+    if body.get("api_model"):
+        config["api_model"] = body["api_model"]
     if body.get("api_key"):
         new_key = body["api_key"]
         if hasattr(node, "secret_store") and node.secret_store:
             new_key = node.secret_store.resolve(new_key)
         config["api_key"] = new_key
-    if body.get("ctx_len"): config["ctx_len"] = body["ctx_len"]
+    if body.get("ctx_len"):
+        config["ctx_len"] = body["ctx_len"]
 
     # Unload if currently loaded
     if model_name in {m.name for m in node.inference.loaded_models}:
@@ -834,10 +860,8 @@ async def public_stats(request: Request):
 
     # Network info
     network_name = "mycellm"
-    is_public = False
     if hasattr(node, "federation") and node.federation and node.federation.identity:
         network_name = node.federation.identity.network_name
-        is_public = node.federation.identity.public
 
     # Node counts — combine QUIC peers + fleet registry (deduplicated)
     quic_peers = node.registry.connected_peers()
@@ -871,7 +895,7 @@ async def public_stats(request: Request):
     total_tps = node.activity.tps if hasattr(node, "activity") else 0
 
     # Models (no sensitive info) — with tier classification
-    from mycellm.protocol.capabilities import classify_tier, TIER_NAMES
+    from mycellm.protocol.capabilities import classify_tier
     model_names = set()
     models_by_tier: dict[int, list[dict]] = {1: [], 2: [], 3: []}
     seen_models = set()

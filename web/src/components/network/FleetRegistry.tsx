@@ -6,7 +6,6 @@ import { useFleetStore } from '@/stores/fleet'
 import { useApproveNode, useRemoveNode } from '@/hooks/useFleetNodes'
 import { StatusDot } from '@/components/common/StatusDot'
 import { EmptyState } from '@/components/common/EmptyState'
-import { SystemInfoPanel } from '@/components/common/SystemInfoPanel'
 import { NodeDetailPanel } from './NodeDetailPanel'
 import type { FleetNode } from '@/api/types'
 

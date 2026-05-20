@@ -1,6 +1,5 @@
 """Tests for privacy guardrails — sensitive content detection."""
 
-import pytest
 from mycellm.privacy import scan_sensitive, format_warning, TRUST_LEVELS
 
 

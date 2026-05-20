@@ -1,4 +1,3 @@
-import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { useFleetNodes } from '@/hooks/useFleetNodes'
 import { FleetRegistry } from './FleetRegistry'
@@ -7,7 +6,6 @@ import { NetworkModels } from './NetworkModels'
 import { QuicPeers } from './QuicPeers'
 
 export function NetworkTab() {
-  const { t } = useTranslation('network')
   const { isLoading } = useFleetNodes()
 
   if (isLoading) {

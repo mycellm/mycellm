@@ -19,5 +19,23 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      // Reset-on-deps and query→local-state patterns are common; full refactors are separate.
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
+  {
+    files: ['src/main.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])

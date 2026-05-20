@@ -1,7 +1,6 @@
 """Tests for the encrypted secrets store."""
 
 import pytest
-from pathlib import Path
 
 from mycellm.identity.keys import generate_account_key
 from mycellm.secrets import SecretStore
