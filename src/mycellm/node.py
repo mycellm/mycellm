@@ -620,6 +620,8 @@ class MycellmNode:
         model = payload.get("model", "")
         messages = payload.get("messages", [])
         stream = payload.get("stream", False)
+        tools = payload.get("tools") or None
+        tool_choice = payload.get("tool_choice")
 
         # Determine trust level based on shared network memberships
         peer_trust = self._resolve_peer_trust(msg.from_peer)
@@ -678,10 +680,12 @@ class MycellmNode:
                     async for chunk in self.route_inference_stream(model, messages, **{
                         "temperature": payload.get("temperature", 0.7),
                         "max_tokens": payload.get("max_tokens", 2048),
+                        "tools": tools,
                     }):
                         text = chunk.get("text", "")
-                        if text:
-                            chunk_msg = inference_stream_chunk(self.peer_id, msg.id, text, chunk.get("finish_reason"))
+                        tc = chunk.get("tool_calls")
+                        if text or tc:
+                            chunk_msg = inference_stream_chunk(self.peer_id, msg.id, text or "", chunk.get("finish_reason"), tool_calls=tc)
                             await protocol.send_message(chunk_msg)
                             relayed = True
                     if relayed:
@@ -714,20 +718,51 @@ class MycellmNode:
             await protocol.reply_on_stream(stream_id, err)
             return
 
+        # Apply Qwen single-tool workaround: force tool_choice when exactly one
+        # tool is defined and no choice is set, to reliably get JSON tool_calls.
+        effective_tool_choice = tool_choice
+        if tools and effective_tool_choice in (None, "auto", "none") and len(tools) == 1:
+            try:
+                fn_name = tools[0]["function"]["name"]
+                effective_tool_choice = {"type": "function", "function": {"name": fn_name}}
+            except (KeyError, TypeError, IndexError):
+                pass
+
         req = InferenceRequest(
             messages=messages,
             model=model_name,
             temperature=payload.get("temperature", 0.7),
             max_tokens=payload.get("max_tokens", 2048),
+            tools=tools,
+            tool_choice=effective_tool_choice,
         )
 
         try:
-            if stream:
+            if stream and not tools:
                 async for chunk in self.inference.generate_stream(req):
                     chunk_msg = inference_stream_chunk(
-                        self.peer_id, msg.id, chunk.text, chunk.finish_reason
+                        self.peer_id, msg.id, chunk.text, chunk.finish_reason,
+                        tool_calls=chunk.tool_calls,
                     )
                     await protocol.send_message(chunk_msg)
+                done_msg = inference_done(self.peer_id, msg.id)
+                await protocol.send_message(done_msg)
+            elif stream and tools:
+                # Use non-streaming generate() for tool requests — streaming tool_call
+                # deltas are unreliable; emit the full result as a single stream chunk.
+                result = await self.inference.generate(req)
+                if not result.tool_calls and result.text and "<tool_call>" in result.text:
+                    from mycellm.api.openai import _parse_tool_call_xml
+                    parsed = _parse_tool_call_xml(result.text)
+                    if parsed:
+                        result.tool_calls = parsed
+                        result.text = ""
+                        result.finish_reason = "tool_calls"
+                chunk_msg = inference_stream_chunk(
+                    self.peer_id, msg.id, result.text, result.finish_reason,
+                    tool_calls=result.tool_calls,
+                )
+                await protocol.send_message(chunk_msg)
                 done_msg = inference_done(self.peer_id, msg.id)
                 await protocol.send_message(done_msg)
             else:
@@ -1783,14 +1818,17 @@ class MycellmNode:
                 temperature=kwargs.get("temperature", 0.7),
                 max_tokens=kwargs.get("max_tokens", 2048),
                 stream=True,
+                tools=kwargs.get("tools"),
+                tool_choice=kwargs.get("tool_choice"),
             )
 
             try:
                 async for resp in target.entry.connection.request_stream(req_msg):
                     text = resp.payload.get("text", "")
                     finish_reason = resp.payload.get("finish_reason")
-                    if text:
-                        yield {"text": text, "finish_reason": finish_reason, "peer_id": target.peer_id}
+                    tool_calls = resp.payload.get("tool_calls")
+                    if text or tool_calls:
+                        yield {"text": text, "finish_reason": finish_reason, "tool_calls": tool_calls, "peer_id": target.peer_id}
                 target.entry.failure_count = max(0, target.entry.failure_count - 1)
                 return
             except Exception as e:
