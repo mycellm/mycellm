@@ -132,14 +132,25 @@ class MLXBackend(InferenceBackend):
 
     def _build_prompt(self, tokenizer, request: InferenceRequest) -> str:
         if hasattr(tokenizer, "apply_chat_template"):
+            template_kwargs: dict = {
+                "tokenize": False,
+                "add_generation_prompt": True,
+            }
+            if request.tools:
+                template_kwargs["tools"] = request.tools
             try:
-                return tokenizer.apply_chat_template(
-                    request.messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
+                return tokenizer.apply_chat_template(request.messages, **template_kwargs)
             except Exception as e:
-                logger.warning(f"apply_chat_template failed, falling back to concat: {e}")
+                # Retry without tools — some chat templates raise on unknown kwargs
+                if "tools" in template_kwargs:
+                    logger.warning(f"apply_chat_template with tools failed ({e}), retrying without")
+                    template_kwargs.pop("tools", None)
+                    try:
+                        return tokenizer.apply_chat_template(request.messages, **template_kwargs)
+                    except Exception as e2:
+                        logger.warning(f"apply_chat_template failed, falling back to concat: {e2}")
+                else:
+                    logger.warning(f"apply_chat_template failed, falling back to concat: {e}")
         return "\n".join(
             f"{m.get('role','user')}: {m.get('content','')}" for m in request.messages
         )
