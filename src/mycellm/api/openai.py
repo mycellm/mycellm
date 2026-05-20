@@ -274,11 +274,22 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                         completion_tokens=completion_tokens,
                         latency_ms=round((time.time() - start_time) * 1000),
                     )
+                    # Apply reasoning split locally: peers may not have suppressed
+                    # thinking (older nodes, or didn't get the reasoning param via
+                    # the QUIC envelope). Split <think>...</think> at the bootstrap
+                    # so clients always see a clean answer / side-channel split.
+                    content_text, reasoning_text = _split_text_for_message(
+                        text, best.model_name, reasoning_exclude,
+                    )
                     resp_data = ChatCompletionResponse(
                         model=best.model_name,
                         choices=[
                             ChatCompletionChoice(
-                                message=ChatMessage(role="assistant", content=text),
+                                message=ChatMessage(
+                                    role="assistant",
+                                    content=content_text or None,
+                                    reasoning_content=reasoning_text,
+                                ),
                             )
                         ],
                         usage=Usage(
@@ -287,7 +298,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                             total_tokens=total_tokens,
                         ),
                     )
-                    response = JSONResponse(content=resp_data.model_dump())
+                    response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
                     response.headers["X-Mycellm-Routed-To"] = routed_to
                     return response
             elif best.source == "fleet":
@@ -420,15 +431,22 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             routed_to="quic:peer",
             latency_ms=round((time.time() - start_time) * 1000),
         )
+        content_text, reasoning_text = _split_text_for_message(
+            text, body.model or "", reasoning_exclude,
+        )
         resp_data = ChatCompletionResponse(
             model=body.model or "remote",
             choices=[
                 ChatCompletionChoice(
-                    message=ChatMessage(role="assistant", content=text),
+                    message=ChatMessage(
+                        role="assistant",
+                        content=content_text or None,
+                        reasoning_content=reasoning_text,
+                    ),
                 )
             ],
         )
-        response = JSONResponse(content=resp_data.model_dump())
+        response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
         response.headers["X-Mycellm-Routed-To"] = "quic:peer"
         return response
 
@@ -661,6 +679,10 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 quic_chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
                 role_sent = False
                 any_quic_chunk = False
+                # Apply the same think-splitter on the relay path: peer may not
+                # have suppressed thinking, so split <think> blocks at the
+                # bootstrap and route them to delta.reasoning_content.
+                quic_splitter = make_splitter(body.model or "")
                 async for piece in node.route_inference_stream(
                     body.model, messages,
                     temperature=body.temperature,
@@ -679,18 +701,47 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
                     finish = piece.get("finish_reason") if isinstance(piece, dict) else None
                     tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
-                    if text or tool_calls:
+                    if tool_calls:
                         any_quic_chunk = True
-                        delta: dict = {}
-                        if text:
-                            delta["content"] = text
-                        if tool_calls:
-                            delta["tool_calls"] = tool_calls
                         yield json.dumps({
                             "id": quic_chunk_id, "object": "chat.completion.chunk",
                             "created": int(time.time()),
                             "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                            "choices": [{"index": 0, "delta": {"tool_calls": tool_calls}, "finish_reason": finish}],
+                        })
+                    elif text:
+                        for kind, chunk_piece in quic_splitter.feed(text):
+                            if kind == "content":
+                                any_quic_chunk = True
+                                yield json.dumps({
+                                    "id": quic_chunk_id, "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": body.model or "auto",
+                                    "choices": [{"index": 0, "delta": {"content": chunk_piece}, "finish_reason": None}],
+                                })
+                            elif kind == "reasoning" and not reasoning_exclude:
+                                any_quic_chunk = True
+                                yield json.dumps({
+                                    "id": quic_chunk_id, "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": body.model or "auto",
+                                    "choices": [{"index": 0, "delta": {"reasoning_content": chunk_piece}, "finish_reason": None}],
+                                })
+                # Drain splitter (unclosed <think> at end-of-stream)
+                for kind, chunk_piece in quic_splitter.flush():
+                    if kind == "content":
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"content": chunk_piece}, "finish_reason": None}],
+                        })
+                    elif kind == "reasoning" and not reasoning_exclude:
+                        yield json.dumps({
+                            "id": quic_chunk_id, "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": body.model or "auto",
+                            "choices": [{"index": 0, "delta": {"reasoning_content": chunk_piece}, "finish_reason": None}],
                         })
                 if any_quic_chunk:
                     yield json.dumps({
