@@ -11,7 +11,7 @@ from typing import AsyncIterator
 class InferenceRequest:
     """A single inference request."""
 
-    messages: list[dict[str, str]]
+    messages: list[dict]
     model: str = ""
     temperature: float = 0.7
     max_tokens: int = 2048
@@ -22,6 +22,8 @@ class InferenceRequest:
     seed: int | None = None
     response_format: dict | None = None
     grammar: str | None = None  # GBNF grammar for constrained output
+    tools: list[dict] | None = None        # OpenAI tool definitions
+    tool_choice: str | dict | None = None  # "auto", "none", "required", or specific tool
     priority: str = "normal"  # "normal", "high", "speculative"
     request_group: str = ""  # for batch cancellation
 
@@ -32,6 +34,7 @@ class InferenceChunk:
 
     text: str
     finish_reason: str | None = None
+    tool_calls: list[dict] | None = None  # accumulated tool_calls when finish_reason=="tool_calls"
 
 
 @dataclass
@@ -42,6 +45,7 @@ class InferenceResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     finish_reason: str = "stop"
+    tool_calls: list[dict] | None = None  # populated when model called a tool
 
 
 @dataclass
