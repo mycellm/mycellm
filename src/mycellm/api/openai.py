@@ -15,28 +15,48 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 
-def _parse_tool_call_xml(text: str) -> list | None:
-    """Convert Qwen-style <tool_call>...</tool_call> text to OpenAI tool_calls format.
+_TOOLCALL_PATTERNS = (
+    # Qwen2.5-Instruct style: <tool_call>{"name":..., "arguments":...}</tool_call>
+    re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL),
+    # Qwen-Coder MLX style: ```json\n{"name":..., "arguments":...}\n```
+    re.compile(r"```(?:json|tool_call)?\s*\n?\s*(\{[^`]*?\"name\"[^`]*?\"arguments\"[^`]*?\})\s*\n?\s*```", re.DOTALL),
+)
 
-    Some backends (llama-cpp-python with Qwen models) emit tool calls as XML
-    text instead of proper tool_calls JSON when tool_choice is "auto" or unset.
-    This parses that format back into the standard OpenAI structure.
+
+def _parse_tool_call_xml(text: str) -> list | None:
+    """Convert free-text tool calls into OpenAI tool_calls format.
+
+    Models that don't reliably emit native function_calling JSON often produce
+    tool calls in surrounding markup. We recognise:
+      - Qwen-Instruct: <tool_call>{...}</tool_call>
+      - Qwen-Coder MLX: ```json\\n{...}\\n```  (bare JSON inside a code fence)
+
+    Returned dicts follow OpenAI spec — function.arguments is a JSON string.
     """
-    tool_calls = []
-    for match in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL):
-        try:
-            data = json.loads(match.group(1))
-            name = data.get("name", "")
+    tool_calls: list[dict] = []
+    seen_payloads: set[str] = set()
+    for pattern in _TOOLCALL_PATTERNS:
+        for match in pattern.finditer(text):
+            payload = match.group(1)
+            if payload in seen_payloads:
+                continue
+            try:
+                data = json.loads(payload)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if not isinstance(data, dict) or "name" not in data:
+                continue
+            seen_payloads.add(payload)
             arguments = data.get("arguments", {})
             if isinstance(arguments, dict):
+                arguments = json.dumps(arguments)
+            elif not isinstance(arguments, str):
                 arguments = json.dumps(arguments)
             tool_calls.append({
                 "id": f"call_{uuid.uuid4().hex[:16]}",
                 "type": "function",
-                "function": {"name": name, "arguments": arguments},
+                "function": {"name": data["name"], "arguments": arguments},
             })
-        except (json.JSONDecodeError, AttributeError, KeyError):
-            pass
     return tool_calls if tool_calls else None
 
 
@@ -306,7 +326,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         # Some backends emit tool calls as <tool_call> XML text (e.g. Qwen via
         # llama-cpp-python with tool_choice "auto" or unset).  Parse and normalize
         # to standard tool_calls JSON so callers always see a consistent format.
-        if req.tools and not result.tool_calls and result.text and "<tool_call>" in result.text:
+        if req.tools and not result.tool_calls and result.text and ("<tool_call>" in result.text or '"name"' in result.text):
             parsed = _parse_tool_call_xml(result.text)
             if parsed:
                 result.tool_calls = parsed
@@ -462,7 +482,7 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 result = await node.inference.generate(req)
 
                 # Normalize <tool_call> XML text → tool_calls JSON (Qwen multi-tool case)
-                if not result.tool_calls and result.text and "<tool_call>" in result.text:
+                if not result.tool_calls and result.text and ("<tool_call>" in result.text or '"name"' in result.text):
                     parsed = _parse_tool_call_xml(result.text)
                     if parsed:
                         result.tool_calls = parsed
@@ -591,6 +611,8 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     body.model, messages,
                     temperature=body.temperature,
                     max_tokens=body.max_tokens or 2048,
+                    tools=body.tools or None,
+                    tool_choice=body.tool_choice,
                 ):
                     if not role_sent:
                         yield json.dumps({
@@ -602,13 +624,19 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                         role_sent = True
                     text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
                     finish = piece.get("finish_reason") if isinstance(piece, dict) else None
-                    if text:
+                    tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
+                    if text or tool_calls:
                         any_quic_chunk = True
+                        delta: dict = {}
+                        if text:
+                            delta["content"] = text
+                        if tool_calls:
+                            delta["tool_calls"] = tool_calls
                         yield json.dumps({
                             "id": quic_chunk_id, "object": "chat.completion.chunk",
                             "created": int(time.time()),
                             "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": finish}],
+                            "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
                         })
                 if any_quic_chunk:
                     yield json.dumps({
@@ -660,16 +688,24 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                         body.model, messages,
                         temperature=body.temperature,
                         max_tokens=body.max_tokens or 2048,
+                        tools=body.tools or None,
+                        tool_choice=body.tool_choice,
                     ):
                         any_chunk = True
                         text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
                         finish = piece.get("finish_reason") if isinstance(piece, dict) else None
-                        if text:
+                        tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
+                        if text or tool_calls:
+                            delta2: dict = {}
+                            if text:
+                                delta2["content"] = text
+                            if tool_calls:
+                                delta2["tool_calls"] = tool_calls
                             yield json.dumps({
                                 "id": chunk_id_q, "object": "chat.completion.chunk",
                                 "created": int(time.time()),
                                 "model": body.model or "auto",
-                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": finish}],
+                                "choices": [{"index": 0, "delta": delta2, "finish_reason": finish}],
                             })
                     if any_chunk:
                         yield json.dumps({
