@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Optional
@@ -12,6 +13,31 @@ logger = logging.getLogger("mycellm.api")
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+
+
+def _parse_tool_call_xml(text: str) -> list | None:
+    """Convert Qwen-style <tool_call>...</tool_call> text to OpenAI tool_calls format.
+
+    Some backends (llama-cpp-python with Qwen models) emit tool calls as XML
+    text instead of proper tool_calls JSON when tool_choice is "auto" or unset.
+    This parses that format back into the standard OpenAI structure.
+    """
+    tool_calls = []
+    for match in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL):
+        try:
+            data = json.loads(match.group(1))
+            name = data.get("name", "")
+            arguments = data.get("arguments", {})
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments)
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:16]}",
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            })
+        except (json.JSONDecodeError, AttributeError, KeyError):
+            pass
+    return tool_calls if tool_calls else None
 
 
 def _find_alternative_model(node, busy_model: str) -> str | None:
@@ -30,7 +56,10 @@ router = APIRouter()
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Optional[str] = None
+    tool_calls: Optional[list] = None      # assistant → tool invocations
+    tool_call_id: Optional[str] = None     # tool → result for this call_id
+    name: Optional[str] = None             # tool → function name
 
 
 class MycellmRouting(BaseModel):
@@ -57,6 +86,8 @@ class ChatCompletionRequest(BaseModel):
     seed: int | None = None
     response_format: dict | None = None  # {"type": "json_object"}
     grammar: str | None = None  # GBNF grammar for constrained output (llama.cpp)
+    tools: list | None = None              # OpenAI tool definitions
+    tool_choice: str | dict | None = None  # "auto", "none", "required", or specific tool
     mycellm: MycellmRouting | None = None
 
 
@@ -89,7 +120,18 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     from mycellm.activity import EventType
 
     node = request.app.state.node
-    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    messages = []
+    for m in body.messages:
+        msg: dict = {"role": m.role}
+        if m.content is not None:
+            msg["content"] = m.content
+        if m.tool_calls is not None:
+            msg["tool_calls"] = m.tool_calls
+        if m.tool_call_id is not None:
+            msg["tool_call_id"] = m.tool_call_id
+        if m.name is not None:
+            msg["name"] = m.name
+        messages.append(msg)
     start_time = time.time()
     node.activity.record(EventType.INFERENCE_START, model=body.model, source="api")
 
@@ -222,6 +264,8 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             seed=body.seed,
             response_format=body.response_format,
             grammar=body.grammar,
+            tools=body.tools,
+            tool_choice=body.tool_choice,
         )
         try:
             result = await node.inference.generate(req)
@@ -259,6 +303,16 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                     finish_reason="error",
                 )],
             )
+        # Some backends emit tool calls as <tool_call> XML text (e.g. Qwen via
+        # llama-cpp-python with tool_choice "auto" or unset).  Parse and normalize
+        # to standard tool_calls JSON so callers always see a consistent format.
+        if req.tools and not result.tool_calls and result.text and "<tool_call>" in result.text:
+            parsed = _parse_tool_call_xml(result.text)
+            if parsed:
+                result.tool_calls = parsed
+                result.text = ""
+                result.finish_reason = "tool_calls"
+
         node.activity.record(
             EventType.INFERENCE_COMPLETE,
             model=model_name,
@@ -270,7 +324,11 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             model=model_name,
             choices=[
                 ChatCompletionChoice(
-                    message=ChatMessage(role="assistant", content=result.text),
+                    message=ChatMessage(
+                        role="assistant",
+                        content=result.text or None,
+                        tool_calls=result.tool_calls,
+                    ),
                     finish_reason=result.finish_reason,
                 )
             ],
@@ -280,7 +338,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 total_tokens=result.prompt_tokens + result.completion_tokens,
             ),
         )
-        response = JSONResponse(content=resp_data.model_dump())
+        response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
         response.headers["X-Mycellm-Routed-To"] = "local"
         return response
 
@@ -343,8 +401,24 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
 
     async def generate():
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-        _requested = body.model if body.model != "auto" else ""
-        model_name = node.inference.resolve_model_name(_requested)
+        _requested = body.model if body.model not in ("auto", "") else ""
+
+        # For auto routing, use ModelResolver for quality-based selection
+        # rather than first-loaded model (which could be a tiny model).
+        model_name = ""
+        if not _requested and node.model_resolver:
+            resolved = node.model_resolver.resolve(
+                "",
+                node.inference.loaded_models,
+                fleet_registry=node.node_registry,
+            )
+            if resolved:
+                best = resolved[0]
+                if best.source in ("local", "fleet"):
+                    model_name = best.model_name
+                # quic-only: fall through to the no-local-model path below
+        if not model_name:
+            model_name = node.inference.resolve_model_name(_requested)
 
         if model_name:
             from mycellm.inference.base import InferenceRequest
@@ -366,7 +440,70 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 seed=body.seed,
                 response_format=body.response_format,
                 grammar=body.grammar,
+                tools=body.tools,
+                tool_choice=body.tool_choice,
             )
+
+            # When tools are requested, streaming tool_call deltas are unreliable
+            # (llama-cpp-python and many backends don't emit them).  Fall back to
+            # a single non-streaming generate() call and emit the result as SSE.
+            # Also: "auto" tool_choice causes some backends to return tool calls
+            # as <tool_call> XML text instead of proper JSON tool_calls.  When
+            # exactly one tool is defined and choice is "auto"/"none"/unset, force
+            # it to {"type":"function","function":{"name":<tool>}} which reliably
+            # produces the standard tool_calls response format.
+            if req.tools:
+                if req.tool_choice in (None, "auto", "none") and len(req.tools) == 1:
+                    try:
+                        fn_name = req.tools[0]["function"]["name"]
+                        req.tool_choice = {"type": "function", "function": {"name": fn_name}}
+                    except (KeyError, TypeError, IndexError):
+                        pass
+                result = await node.inference.generate(req)
+
+                # Normalize <tool_call> XML text → tool_calls JSON (Qwen multi-tool case)
+                if not result.tool_calls and result.text and "<tool_call>" in result.text:
+                    parsed = _parse_tool_call_xml(result.text)
+                    if parsed:
+                        result.tool_calls = parsed
+                        result.text = ""
+                        result.finish_reason = "tool_calls"
+
+                yield json.dumps({
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                })
+                if result.tool_calls:
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"tool_calls": result.tool_calls},
+                            "finish_reason": "tool_calls",
+                        }],
+                    })
+                elif result.text:
+                    yield json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": result.text}, "finish_reason": None}],
+                    })
+                yield json.dumps({
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": result.finish_reason}],
+                })
+                return
 
             # Send role delta first
             yield json.dumps({
@@ -377,17 +514,39 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             })
 
+            got_tool_calls = False
+
+            def _emit_chunk(chunk_val):
+                nonlocal got_tool_calls
+                if chunk_val.tool_calls:
+                    got_tool_calls = True
+                    return json.dumps({
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"tool_calls": chunk_val.tool_calls},
+                            "finish_reason": "tool_calls",
+                        }],
+                    })
+                elif chunk_val.text:
+                    return json.dumps({
+                        "id": chunk_id, "object": "chat.completion.chunk",
+                        "created": int(time.time()), "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": chunk_val.text}, "finish_reason": None}],
+                    })
+                return None
+
             try:
                 stream_iter = node.inference.generate_stream(req)
                 # Acquire the lock by getting the first iteration
                 first_chunk_val = await stream_iter.__anext__()
                 # Got the lock — yield first chunk and continue
-                if first_chunk_val.text:
-                    yield json.dumps({
-                        "id": chunk_id, "object": "chat.completion.chunk",
-                        "created": int(time.time()), "model": model_name,
-                        "choices": [{"index": 0, "delta": {"content": first_chunk_val.text}, "finish_reason": None}],
-                    })
+                first_out = _emit_chunk(first_chunk_val)
+                if first_out:
+                    yield first_out
             except RuntimeError as busy_err:
                 if "busy" in str(busy_err).lower() or "timed out" in str(busy_err).lower():
                     alt = _find_alternative_model(node, model_name)
@@ -407,26 +566,17 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                     raise
 
             async for chunk in stream_iter:
-                if chunk.text:
-                    yield json.dumps({
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"content": chunk.text},
-                            "finish_reason": chunk.finish_reason,
-                        }],
-                    })
+                out = _emit_chunk(chunk)
+                if out:
+                    yield out
 
-            # Final chunk
+            # Final chunk — use "tool_calls" finish_reason if model called a tool
             yield json.dumps({
                 "id": chunk_id,
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
                 "model": model_name,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if got_tool_calls else "stop"}],
             })
         else:
             # No local model — try streaming via direct QUIC peers first
@@ -560,6 +710,10 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
                         "max_tokens": body.max_tokens or 2048,
                         "stream": True,
                     }
+                    if body.tools:
+                        payload["tools"] = body.tools
+                    if body.tool_choice is not None:
+                        payload["tool_choice"] = body.tool_choice
 
                     async with httpx.AsyncClient(timeout=120) as client:
                         async with client.stream("POST", url, json=payload, headers=headers) as resp:
@@ -727,12 +881,18 @@ async def _route_via_fleet(
                 "max_tokens": body.max_tokens or 2048,
                 "top_p": body.top_p,
             }
+            if body.tools:
+                payload["tools"] = body.tools
+            if body.tool_choice is not None:
+                payload["tool_choice"] = body.tool_choice
 
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
-                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    resp_msg = data.get("choices", [{}])[0].get("message", {})
+                    text = resp_msg.get("content") or ""
+                    resp_tool_calls = resp_msg.get("tool_calls")
                     usage = data.get("usage", {})
                     node_name = entry.get("node_name", addr)
                     logger.info(f"Routed '{model_to_route or body.model}' to fleet node {node_name}")
@@ -779,7 +939,11 @@ async def _route_via_fleet(
                         model=data.get("model", model_to_route or body.model),
                         choices=[
                             ChatCompletionChoice(
-                                message=ChatMessage(role="assistant", content=text),
+                                message=ChatMessage(
+                                    role="assistant",
+                                    content=text or None,
+                                    tool_calls=resp_tool_calls,
+                                ),
                                 finish_reason=data.get("choices", [{}])[0].get("finish_reason", "stop"),
                             )
                         ],
@@ -789,7 +953,7 @@ async def _route_via_fleet(
                             total_tokens=usage.get("total_tokens", 0),
                         ),
                     )
-                    response = JSONResponse(content=resp_data.model_dump())
+                    response = JSONResponse(content=resp_data.model_dump(exclude_none=True))
                     response.headers["X-Mycellm-Routed-To"] = routed_to
                     return response
                 else:
