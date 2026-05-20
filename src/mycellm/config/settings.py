@@ -97,6 +97,7 @@ class MycellmSettings(BaseSettings):
     # Inference
     model_dir: Optional[Path] = None
     max_concurrent_inferences: int = 2
+    default_ctx_len: int = 32768  # Default context window for loaded models (MYCELLM_DEFAULT_CTX_LEN)
     flash_attn: bool = True  # Metal/CUDA optimized attention kernel
     kv_cache_quant: str = "q8_0"  # KV cache quantization: "none", "q8_0", "q4_0" (legacy, use k/v below)
     kv_cache_quant_k: str = ""  # Key cache quantization (default: use kv_cache_quant)

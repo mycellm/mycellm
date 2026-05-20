@@ -270,10 +270,12 @@ class InferenceManager:
                 max_c = kwargs.get("max_concurrent", 32)
                 self._model_locks[model_name] = asyncio.Semaphore(max_c)
             self._queue_depth[model_name] = 0
+            from mycellm.config import get_settings as _gs
+            _default_ctx = _gs().default_ctx_len
             self._model_info[model_name] = ModelCapability(
                 name=model_name,
                 quant=kwargs.get("quant", ""),
-                ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", 4096)),
+                ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", _default_ctx)),
                 backend=backend_type,
                 loaded_bytes=_model_size_on_disk(model_path) if model_path else 0,
             )
@@ -508,6 +510,8 @@ class InferenceManager:
                 self._saved_configs[name] = config
 
         # Only auto-load enabled configs
+        from mycellm.config import get_settings as _gs
+        _default_ctx = _gs().default_ctx_len
         restored = 0
         for config in configs:
             name = config.get("name", "")
@@ -524,7 +528,7 @@ class InferenceManager:
                         api_base=config.get("api_base", ""),
                         api_key=config.get("api_key", ""),
                         api_model=config.get("api_model", ""),
-                        ctx_len=config.get("ctx_len", 4096),
+                        ctx_len=config.get("ctx_len", _default_ctx),
                     )
                 elif config.get("model_path"):
                     model_path = config["model_path"]
@@ -536,7 +540,7 @@ class InferenceManager:
                             model_path,
                             name=name,
                             backend_type=backend_type,
-                            ctx_len=config.get("ctx_len", 4096),
+                            ctx_len=config.get("ctx_len", _default_ctx),
                             quant=config.get("quant", ""),
                         )
                     else:
