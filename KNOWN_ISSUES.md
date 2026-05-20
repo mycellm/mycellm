@@ -1,6 +1,77 @@
 # mycellm — Known Issues
 
-*Last updated: April 9, 2026 (v0.2.5)*
+*Last updated: May 20, 2026 (v0.3.0)*
+
+## Fixed in 0.3.0
+
+### ~~OpenAI `tools=` parameter silently dropped~~
+`POST /v1/chat/completions` accepted requests carrying `tools` and
+`tool_choice` but the chat-completions Pydantic model didn't define
+those fields, so they were dropped before reaching the backend. Models
+never saw tool definitions and clients got empty replies, repeating
+retries, or `ToolCallError: Retries exhausted` from harnesses like
+[forge](https://github.com/antoinezambelli/forge). **Fixed**: tools and
+tool_choice flow end-to-end through the API layer, both inference
+backends (llama.cpp and MLX), the openai_compat relay, and QUIC peer
+routing.
+
+### ~~Server crash on `tools=` against 7B+ models~~
+On nodes serving Qwen2.5-7B and larger, sending a request with the
+`tools` parameter could crash the entire uvicorn process — clients saw
+`RemoteProtocolError: Server disconnected without sending a response`
+and subsequent requests got connection-refused until the service was
+restarted. Root cause was a combination of the silent-drop bug above
+plus an unrelated `llama_decode = -3` C-level fault in
+`llama-cpp-python`'s non-streaming `create_chat_completion()` path when
+KV state from a prior sequence persisted. **Fixed**: `generate()` now
+delegates to `generate_stream()` internally on both backends,
+sidestepping the C-level fault entirely.
+
+### ~~Tool calls emitted as XML / JSON-fence text instead of structured `tool_calls`~~
+Qwen-family models on local hardware often produce tool calls as
+`<tool_call>{"name":..., "arguments":...}</tool_call>` XML or
+```` ```json\n{...}\n``` ```` markdown fences in the `content` field,
+even when `tools` is provided. Clients expecting OpenAI-format
+`tool_calls` JSON failed to parse them. **Fixed**: the API layer
+recognises both formats and normalises into proper `tool_calls` entries
+(OpenAI spec: `function.arguments` as a JSON-encoded string). Single
+tool definitions also auto-coerce `tool_choice` to the named function
+for reliable JSON output.
+
+### ~~Slow OpenAI-compat remote backends timed out on `generate()`~~
+The `openai_compat` relay backend's non-streaming `generate()` POSTed
+and waited for a complete response. On a remote 32B model that takes
+~110s to emit its first token, this raced the 120s default httpx
+timeout and lost. **Fixed**: `generate()` now streams internally and
+reassembles into an `InferenceResult`. SSE keepalive pings keep the
+connection alive regardless of first-token latency.
+
+### ~~`load_model` ignored `ctx_len` kwarg~~
+`InferenceManager.load_model(ctx_len=N, ...)` would still hand
+`n_ctx=4096` to llama-cpp because the kwarg wasn't read. Loaded models
+silently truncated long inputs. **Fixed**: `ctx_len` is honored and
+defaults to `MYCELLM_DEFAULT_CTX_LEN` (32768).
+
+### ~~Streaming path used first-loaded model instead of resolver~~
+`/v1/chat/completions` with `stream: true` and `model: "auto"` (or any
+unresolved name) bypassed `ModelResolver` and just picked whichever
+model was loaded first. **Fixed**: streaming now uses the same resolver
+the non-streaming path uses, including quality constraints.
+
+### ~~`relay:` prefix accumulation on relayed models~~
+Model names accumulated `relay:` prefixes (`relay:relay:relay:foo`)
+when routed across multiple hops. **Fixed**: prefix normalised at API
+display boundaries.
+
+### ~~Auto-loaded MLX models required local path, not HF repo id~~
+The MLX autoload path rejected `mlx-community/Qwen3-1.7B-4bit`-style
+repo ids and required a fully resolved local cache path. **Fixed**: MLX
+backend accepts HF repo ids directly; the backend resolves them.
+
+### ~~Peer flapping under transient network drops~~
+A single failed ping demoted a peer to `DISCONNECTED` and never
+recovered it. **Fixed**: tolerant ping logic restores `DISCONNECTED`
+peers on next successful response.
 
 ## Fixed in 0.2.5
 

@@ -122,8 +122,11 @@ You (consumer) ──QUIC──▶ Bootstrap (relay) ──QUIC──▶ Seeder 
 
 ### Inference
 - **llama.cpp** backend with Metal, CUDA, ROCm, and CPU support
+- **MLX** backend for Apple Silicon (M-series) — typically faster than Metal-via-llama.cpp for the same quantization, uses unified memory more efficiently
+- **OpenAI tool/function calling** — `tools` and `tool_choice` pass through local backends, the OpenAI-compat relay, and QUIC peer routing
 - **Streaming** token generation via SSE
-- **Model management** — download from HuggingFace, load/unload, scope control
+- **Grammar-constrained output** via GBNF (`grammar` field on chat completions)
+- **Model management** — download from HuggingFace, load/unload, scope control, platform-aware recommender
 - **Thermal throttling** — auto-adjusts on mobile devices
 
 ### Networking
@@ -186,12 +189,14 @@ Requires iOS 17.0+. Also works on iPhone. [Source on GitHub.](https://github.com
 
 ```bash
 # Environment variables
-MYCELLM_API_HOST=0.0.0.0        # API listen address
+MYCELLM_API_HOST=0.0.0.0         # API listen address
 MYCELLM_API_PORT=8420            # API port
 MYCELLM_QUIC_PORT=8421           # QUIC transport port
 MYCELLM_LOG_LEVEL=INFO           # Logging level
 MYCELLM_FLEET_ADMIN_KEY=...      # Fleet management key (optional)
 MYCELLM_NO_DHT=true              # Disable Kademlia DHT
+MYCELLM_DEFAULT_CTX_LEN=32768    # Default context window for loaded models
+MYCELLM_RELAY_BACKENDS=...       # Comma-separated OpenAI-compatible relay URLs
 ```
 
 See [docs/config](https://docs.mycellm.dev/config/settings/) for full reference.

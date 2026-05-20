@@ -73,3 +73,44 @@ data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","model":"Qwen2.5-3B"
 
 data: [DONE]
 ```
+
+### Tool / function calling
+
+Pass `tools` and (optionally) `tool_choice` exactly as you would to the
+OpenAI API. mycellm forwards them to whichever backend ends up serving
+the request — local llama.cpp, MLX, or an OpenAI-compatible relay — and
+across QUIC peer routing if the answering node is remote.
+
+```json
+{
+  "model": "auto",
+  "messages": [{"role": "user", "content": "What's the capital of France?"}],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "get_country_info",
+      "description": "Look up facts about a country.",
+      "parameters": {
+        "type": "object",
+        "properties": {"country": {"type": "string"}},
+        "required": ["country"]
+      }
+    }
+  }],
+  "tool_choice": "auto"
+}
+```
+
+Response contains either a normal text message or a `tool_calls` array
+in OpenAI format (`function.arguments` is a JSON-encoded string).
+
+Local Qwen-family models sometimes emit tool calls as `<tool_call>` XML
+or ```` ```json ```` markdown fences in the content stream. mycellm
+recognises both and normalises them into proper `tool_calls` JSON
+before returning to the client — so clients always see the standard
+OpenAI shape regardless of which model the request landed on.
+
+When exactly one tool is provided and `tool_choice` is unset or
+`"auto"`, the relay path coerces `tool_choice` to the named function
+to coax JSON-structured output from models that would otherwise emit
+inline text.
