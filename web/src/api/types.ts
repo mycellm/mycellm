@@ -251,6 +251,9 @@ export interface ChatMessage {
     prompt: number
     completion: number
   }
+  // OpenAI-o-series style: model's internal reasoning, separated from the
+  // user-facing answer so the UI can render it in a collapsible panel.
+  reasoning_content?: string
   timestamp: number
 }
 
@@ -259,6 +262,11 @@ export interface RoutingOptions {
   required_tags: string[]
   routing: 'best' | 'fastest'
   fallback: 'downgrade' | 'reject'
+  // Whether to ask thinking-capable models to surface their reasoning.
+  // When false (default), the server strips <think>...</think> blocks and
+  // suppresses thinking on Qwen3-family templates. When true, reasoning is
+  // returned on reasoning_content and shown in a collapsible UI panel.
+  show_reasoning: boolean
 }
 
 export type Tab = 'overview' | 'network' | 'models' | 'chat' | 'credits' | 'logs' | 'settings'

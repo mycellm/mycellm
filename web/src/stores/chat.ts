@@ -22,6 +22,7 @@ export const useChatStore = create<ChatState>()((set) => ({
     required_tags: [],
     routing: 'best',
     fallback: 'downgrade',
+    show_reasoning: false,
   },
   sending: false,
   addMessage: (message) =>

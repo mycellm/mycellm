@@ -243,6 +243,10 @@ export function ChatTab() {
         model: model || '',
         messages: history,
         max_tokens: 2048,
+        // OpenAI-o-series style reasoning control. Toggle off → server strips
+        // <think> blocks and asks Qwen3 templates to suppress thinking. Toggle
+        // on → server returns reasoning_content for UI to render.
+        reasoning: { exclude: !routingOpts.show_reasoning },
         ...(model === '' &&
         (routingOpts.min_tier !== 'any' || routingOpts.required_tags.length > 0)
           ? {
@@ -314,6 +318,7 @@ export function ChatTab() {
 
           const data = await resp.json()
           const respText = data.choices?.[0]?.message?.content || '[no response]'
+          const reasoning = data.choices?.[0]?.message?.reasoning_content || undefined
           const usage = data.usage || {}
           const routedTo = data.model || 'unknown'
 
@@ -323,6 +328,7 @@ export function ChatTab() {
             content: respText,
             model: routedTo,
             routed_to: data.routed_to || routedTo,
+            reasoning_content: reasoning,
             tokens: {
               prompt: usage.prompt_tokens || 0,
               completion: usage.completion_tokens || 0,
