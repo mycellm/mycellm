@@ -26,17 +26,24 @@ def inference_request(
     temperature: float = 0.7,
     max_tokens: int = 2048,
     stream: bool = False,
+    tools: list | None = None,
+    tool_choice: Any = None,
 ) -> MessageEnvelope:
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": stream,
+    }
+    if tools:
+        payload["tools"] = tools
+    if tool_choice is not None:
+        payload["tool_choice"] = tool_choice
     return MessageEnvelope(
         type=MessageType.INFERENCE_REQ,
         from_peer=from_peer,
-        payload={
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": stream,
-        },
+        payload=payload,
     )
 
 
@@ -68,12 +75,16 @@ def inference_stream_chunk(
     request_id: str,
     text: str,
     finish_reason: str | None = None,
+    tool_calls: list | None = None,
 ) -> MessageEnvelope:
+    payload: dict[str, Any] = {"text": text, "finish_reason": finish_reason}
+    if tool_calls:
+        payload["tool_calls"] = tool_calls
     return MessageEnvelope(
         type=MessageType.INFERENCE_STREAM,
         from_peer=from_peer,
         id=request_id,
-        payload={"text": text, "finish_reason": finish_reason},
+        payload=payload,
     )
 
 
