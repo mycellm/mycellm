@@ -235,51 +235,30 @@ class LlamaCppBackend(InferenceBackend):
             logger.info(f"Model {model_name} unloaded")
 
     async def generate(self, request: InferenceRequest) -> InferenceResult:
-        model_name = request.model or next(iter(self._models), "")
-        if not model_name or model_name not in self._models:
-            raise RuntimeError(f"Model '{model_name}' not loaded")
+        # Use streaming internally — the non-streaming create_chat_completion path
+        # can crash with llama_decode errors on large models (e.g. llama_decode
+        # returned -3 on 32B with KV cache state from a previous sequence).
+        # The streaming path via generate_stream() is stable across all model sizes.
+        text = ""
+        finish_reason = "stop"
+        tool_calls: list | None = None
+        prompt_tokens = 0
+        completion_tokens = 0
 
-        llm = self._models[model_name]
-        extra_kwargs = {}
-        if request.stop:
-            extra_kwargs["stop"] = request.stop
-        if request.frequency_penalty:
-            extra_kwargs["frequency_penalty"] = request.frequency_penalty
-        if request.presence_penalty:
-            extra_kwargs["presence_penalty"] = request.presence_penalty
-        if request.seed is not None:
-            extra_kwargs["seed"] = request.seed
-        if request.response_format:
-            extra_kwargs["response_format"] = request.response_format
-        if request.grammar:
-            try:
-                from llama_cpp import LlamaGrammar
-                extra_kwargs["grammar"] = LlamaGrammar.from_string(request.grammar)
-            except (ImportError, Exception) as e:
-                logger.warning(f"Grammar constraint ignored: {e}")
-        if request.tools:
-            extra_kwargs["tools"] = request.tools
-        if request.tool_choice is not None:
-            extra_kwargs["tool_choice"] = request.tool_choice
-        response = await asyncio.to_thread(
-            llm.create_chat_completion,
-            messages=request.messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            top_p=request.top_p,
-            **extra_kwargs,
-        )
-
-        choice = response["choices"][0]
-        usage = response.get("usage", {})
-        msg = choice["message"]
+        async for chunk in self.generate_stream(request):
+            if chunk.text:
+                text += chunk.text
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
+            if chunk.tool_calls is not None:
+                tool_calls = chunk.tool_calls
 
         return InferenceResult(
-            text=msg.get("content") or "",
-            tool_calls=msg.get("tool_calls"),
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-            finish_reason=choice.get("finish_reason", "stop"),
+            text=text,
+            tool_calls=tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            finish_reason=finish_reason,
         )
 
     async def generate_stream(
@@ -366,11 +345,11 @@ class LlamaCppBackend(InferenceBackend):
                     }
                 tc = accumulated_tool_calls[idx]
                 fn = tc_delta.get("function", {})
-                if fn.get("name"):
-                    tc["function"]["name"] += fn["name"]
+                if fn.get("name") and not tc["function"]["name"]:
+                    tc["function"]["name"] = fn["name"]
                 if fn.get("arguments"):
                     tc["function"]["arguments"] += fn["arguments"]
-                if tc_delta.get("id"):
+                if tc_delta.get("id") and not tc["id"]:
                     tc["id"] = tc_delta["id"]
 
             if content or (finish and finish != "tool_calls"):
