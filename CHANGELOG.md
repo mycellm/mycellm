@@ -24,6 +24,21 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 - **`MYCELLM_DEFAULT_CTX_LEN`** setting (default 32768) replaces the prior
   hard-coded 4096 fallback in auto-load + restore paths. Explicit `ctx_len`
   in load requests still wins.
+- **Reasoning ("thinking") suppression** for chat completions. New
+  `reasoning` block on `/v1/chat/completions` (OpenAI o-series style):
+  - `{"exclude": true}` strips `<think>...</think>` blocks and asks the
+    chat template to suppress thinking on Qwen3-family models.
+  - `{"exclude": false}` includes reasoning in the response.
+  - Omitted falls back to `MYCELLM_HIDE_REASONING_BY_DEFAULT` (public
+    bootstraps should set this so demo visitors see clean answers).
+  - Non-streaming responses surface a `reasoning_content` field on the
+    assistant message; streaming responses emit `delta.reasoning_content`
+    events alongside `delta.content`, mirroring OpenAI's spec.
+  - Per-model `supports_thinking` advertised on `/v1/models/capabilities`
+    so clients can gate UI affordances.
+  - Recognised model families today: Qwen3 hybrid, Qwen3-Coder/Instruct,
+    DeepSeek-R1, GLM-4.x-Thinking, Gemini 2.0 Thinking, GPT-O1/O3/O4.
+    New families add one line in `inference/reasoning_dialects.py`.
 - **GitHub Actions CI** for lint + tests on push/PR, contributed by
   Nathan Pierce ([@NorseGaud](https://github.com/NorseGaud)).
 - **Ruff** Python linting + **ESLint** JavaScript/TypeScript linting,
