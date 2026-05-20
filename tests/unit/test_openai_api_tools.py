@@ -38,6 +38,63 @@ _TOOL_CALLS = [
 ]
 
 
+# generate() in openai_compat delegates internally to generate_stream() to avoid
+# request timeouts on slow remote models. Tests must mock client.stream(), not
+# client.post().
+
+
+class _MockSSEResponse:
+    def __init__(self, lines: list[str]):
+        self._lines = lines
+
+    def raise_for_status(self) -> None:
+        pass
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _MockSSEContext:
+    def __init__(self, lines: list[str]):
+        self._lines = lines
+
+    async def __aenter__(self) -> _MockSSEResponse:
+        return _MockSSEResponse(self._lines)
+
+    async def __aexit__(self, *args) -> None:
+        return None
+
+
+def _sse_text_lines(content: str, finish: str = "stop") -> list[str]:
+    return [
+        'data: {"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}',
+        f'data: {{"choices":[{{"index":0,"delta":{{"content":"{content}"}},"finish_reason":null}}]}}',
+        f'data: {{"choices":[{{"index":0,"delta":{{}},"finish_reason":"{finish}"}}]}}',
+        'data: [DONE]',
+    ]
+
+
+def _sse_tool_call_lines(tool_calls: list[dict]) -> list[str]:
+    lines = ['data: {"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}']
+    for i, tc in enumerate(tool_calls):
+        delta = {
+            "tool_calls": [{
+                "index": i,
+                "id": tc["id"],
+                "type": "function",
+                "function": {
+                    "name": tc["function"]["name"],
+                    "arguments": tc["function"]["arguments"],
+                },
+            }]
+        }
+        lines.append(f'data: {json.dumps({"choices": [{"index": 0, "delta": delta, "finish_reason": None}]})}')
+    lines.append('data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}')
+    lines.append('data: [DONE]')
+    return lines
+
+
 # ── Model field tests ──
 
 
@@ -169,28 +226,10 @@ class TestOpenAICompatToolsForwarding:
         """tools and tool_choice appear in the HTTP payload to the remote."""
         from mycellm.inference.openai_compat import OpenAICompatibleBackend
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "id": "chatcmpl-test",
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": _TOOL_CALLS,
-                    },
-                    "finish_reason": "tool_calls",
-                }
-            ],
-            "usage": {"prompt_tokens": 20, "completion_tokens": 15, "total_tokens": 35},
-        }
-
         with patch("mycellm.inference.openai_compat.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=MagicMock(status_code=200))
-            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.stream = MagicMock(return_value=_MockSSEContext(_sse_tool_call_lines(_TOOL_CALLS)))
             mock_client.aclose = AsyncMock()
             MockClient.return_value = mock_client
 
@@ -211,7 +250,7 @@ class TestOpenAICompatToolsForwarding:
             result = await backend.generate(req)
 
             # Payload sent to remote must include tools
-            call_kwargs = mock_client.post.call_args[1]["json"]
+            call_kwargs = mock_client.stream.call_args[1]["json"]
             assert "tools" in call_kwargs
             assert call_kwargs["tools"] == [_REPLY_TOOL]
             assert call_kwargs["tool_choice"] == {"type": "function", "function": {"name": "reply"}}
@@ -226,21 +265,10 @@ class TestOpenAICompatToolsForwarding:
         """Without tools, no tools/tool_choice key in the payload."""
         from mycellm.inference.openai_compat import OpenAICompatibleBackend
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "id": "chatcmpl-test",
-            "choices": [
-                {"message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}
-            ],
-            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
-        }
-
         with patch("mycellm.inference.openai_compat.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=MagicMock(status_code=200))
-            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.stream = MagicMock(return_value=_MockSSEContext(_sse_text_lines("hi")))
             mock_client.aclose = AsyncMock()
             MockClient.return_value = mock_client
 
@@ -255,7 +283,7 @@ class TestOpenAICompatToolsForwarding:
                 model="test-model",
             )
             result = await backend.generate(req)
-            call_kwargs = mock_client.post.call_args[1]["json"]
+            call_kwargs = mock_client.stream.call_args[1]["json"]
             assert "tools" not in call_kwargs
             assert "tool_choice" not in call_kwargs
             assert result.tool_calls is None
