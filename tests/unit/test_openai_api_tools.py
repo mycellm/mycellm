@@ -9,11 +9,9 @@ import pytest
 
 from mycellm.api.openai import (
     ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionChoice,
     ChatMessage,
 )
-from mycellm.inference.base import InferenceRequest, InferenceResult, InferenceChunk
+from mycellm.inference.base import InferenceRequest, InferenceResult
 
 
 _REPLY_TOOL = {

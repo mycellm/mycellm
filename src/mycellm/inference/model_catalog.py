@@ -9,8 +9,6 @@ Layout: see `model_catalog.yaml` next to this module for the schema.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import time
 from pathlib import Path
