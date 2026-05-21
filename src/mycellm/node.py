@@ -726,6 +726,17 @@ class MycellmNode:
             except (KeyError, TypeError, IndexError):
                 pass
 
+        # reasoning_exclude propagates from the originating client through
+        # the gateway and across the QUIC relay. None = honor this peer's
+        # local default (MYCELLM_HIDE_REASONING_BY_DEFAULT). When set, it
+        # tells the chat-template layer to pass enable_thinking=False so
+        # hybrid models like Qwen3 don't burn the token budget on thinking
+        # that the upstream gateway is just going to strip.
+        peer_reasoning_exclude = payload.get("reasoning_exclude")
+        if peer_reasoning_exclude is None:
+            from mycellm.config.settings import settings
+            peer_reasoning_exclude = settings.hide_reasoning_by_default
+
         req = InferenceRequest(
             messages=messages,
             model=model_name,
@@ -733,6 +744,7 @@ class MycellmNode:
             max_tokens=payload.get("max_tokens", 2048),
             tools=tools,
             tool_choice=effective_tool_choice,
+            reasoning_exclude=peer_reasoning_exclude,
         )
 
         try:
@@ -1716,6 +1728,9 @@ class MycellmNode:
 
         Uses ModelResolver for empty model requests to find the best candidate.
         Supports failover across multiple QUIC peers.
+
+        kwargs forwarded to InferenceRequest / peer message:
+          temperature, max_tokens, reasoning_exclude
         """
         # Resolve empty model via ModelResolver
         effective_model = model
@@ -1732,6 +1747,7 @@ class MycellmNode:
                     effective_model = best.model_name
 
         model_name = self.inference.resolve_model_name(effective_model)
+        reasoning_exclude = kwargs.get("reasoning_exclude")
 
         # Try local inference first
         if model_name:
@@ -1741,6 +1757,7 @@ class MycellmNode:
                 model=model_name,
                 temperature=kwargs.get("temperature", 0.7),
                 max_tokens=kwargs.get("max_tokens", 2048),
+                reasoning_exclude=reasoning_exclude if reasoning_exclude is not None else False,
             )
             return await self.inference.generate(req)
 
@@ -1758,6 +1775,7 @@ class MycellmNode:
                 self.peer_id, effective_model, messages,
                 temperature=kwargs.get("temperature", 0.7),
                 max_tokens=kwargs.get("max_tokens", 2048),
+                reasoning_exclude=reasoning_exclude,
             )
 
             try:
@@ -1813,6 +1831,7 @@ class MycellmNode:
                 stream=True,
                 tools=kwargs.get("tools"),
                 tool_choice=kwargs.get("tool_choice"),
+                reasoning_exclude=kwargs.get("reasoning_exclude"),
             )
 
             try:

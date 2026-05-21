@@ -27,6 +27,7 @@ def inference_request(
     stream: bool = False,
     tools: list | None = None,
     tool_choice: Any = None,
+    reasoning_exclude: bool | None = None,
 ) -> MessageEnvelope:
     payload: dict[str, Any] = {
         "model": model,
@@ -39,6 +40,13 @@ def inference_request(
         payload["tools"] = tools
     if tool_choice is not None:
         payload["tool_choice"] = tool_choice
+    # Forward reasoning suppression to the peer so hybrid models like
+    # Qwen3 can pass enable_thinking=False to their chat template and
+    # not waste the token budget on <think>...</think> that gateways
+    # then strip — which leaves an empty response on small max_tokens.
+    # None lets the peer decide per its own default.
+    if reasoning_exclude is not None:
+        payload["reasoning_exclude"] = reasoning_exclude
     return MessageEnvelope(
         type=MessageType.INFERENCE_REQ,
         from_peer=from_peer,

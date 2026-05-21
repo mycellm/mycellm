@@ -279,11 +279,16 @@ async def public_chat(request: Request):
                         return StreamingResponse(_quic_stream_real(), media_type="text/event-stream",
                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-                    # Non-streaming: wait for full response
+                    # Non-streaming: wait for full response. Forward
+                    # reasoning_exclude so the homelab peer can pass
+                    # enable_thinking=False to the model's template
+                    # (closes the empty-content-on-low-max_tokens bug
+                    # where thinking ate the budget then got stripped).
                     result = await node.route_inference(
                         model_name, messages,
                         temperature=temperature,
                         max_tokens=max_tokens,
+                        reasoning_exclude=reasoning_exclude,
                     )
                     if result:
                         text = result.get("text", "") if isinstance(result, dict) else ""
@@ -332,6 +337,7 @@ async def public_chat(request: Request):
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                reasoning_exclude=reasoning_exclude,
             )
 
             result = await node.inference.generate(inf_req)

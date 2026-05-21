@@ -342,7 +342,12 @@ class GrowthRepository:
             return deltas
 
     async def get_history(self, limit: int = 168) -> list[dict]:
-        """Get recent growth history (default: 7 days at hourly = 168)."""
+        """Get recent growth history (default: 7 days at hourly = 168).
+
+        Includes requests / tokens / tps / vram_gb so the stats page can
+        render per-metric sparklines (previously only node/model counts
+        were surfaced, leaving the requests sparkline blank).
+        """
         async with get_session() as session:
             result = await session.execute(
                 select(GrowthSnapshot)
@@ -356,6 +361,10 @@ class GrowthRepository:
                     "nodes": s.total_nodes,
                     "online": s.online_nodes,
                     "models": s.total_models,
+                    "requests": s.total_requests,
+                    "tokens": s.total_tokens,
+                    "tps": s.total_tps,
+                    "vram_gb": s.total_vram_gb,
                 }
                 for s in reversed(snapshots)
             ]

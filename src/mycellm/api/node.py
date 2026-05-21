@@ -942,17 +942,47 @@ async def public_stats(request: Request):
             network_tokens += t.get("tokens_total", 0)
             network_tps += t.get("tps", 0)
 
-    # Top contributors (by node name only — no IPs or peer IDs)
+    # Top contributors (by node name only — no IPs or peer IDs).
+    # Iterate ALL sources: self, QUIC-connected peers, and fleet-only.
+    # Previous version only iterated `online_nodes` (fleet registry),
+    # which left contributors empty on public networks where most peers
+    # connect over QUIC and never register a fleet entry.
     contributors = []
-    for entry in online_nodes:
+
+    # Self — the bootstrap / serving node itself.
+    self_tps = node.activity.tps if hasattr(node, "activity") else 0.0
+    self_requests = local_stats.get("requests_total", 0) if local_stats else 0
+    contributors.append({
+        "name": node._settings.node_name if hasattr(node, "_settings") else "self",
+        "tps": round(self_tps, 1),
+        "models": len(node.inference.loaded_models),
+        "requests": self_requests,
+    })
+
+    # QUIC-connected peers (the main source on the public bootstrap).
+    for entry in quic_peers:
+        peer_name = (entry.capabilities.network_ids[0] if entry.capabilities.network_ids else "") or f"peer-{entry.peer_id[:8]}"
+        contributors.append({
+            "name": peer_name,
+            "tps": round(entry.capabilities.est_tok_s, 1),
+            "models": len(entry.capabilities.models),
+            "requests": 0,  # Not exposed over QUIC handshake; would need separate telemetry call.
+        })
+
+    # Fleet-only nodes (HTTP-registered via the fleet registry).
+    for entry in fleet_only:
         t = entry.get("telemetry", {})
         contributors.append({
             "name": entry.get("node_name", "anonymous"),
-            "tps": t.get("tps", 0),
+            "tps": round(t.get("tps", 0), 1),
             "models": len(t.get("models_loaded", entry.get("capabilities", {}).get("models", []))),
             "requests": t.get("requests_total", 0),
         })
-    contributors.sort(key=lambda c: c["tps"], reverse=True)
+
+    # Sort by tps desc; tied entries fall back to requests served, then
+    # models loaded, so the leaderboard still ranks idle-but-loaded
+    # contributors above truly empty ones.
+    contributors.sort(key=lambda c: (c["tps"], c["requests"], c["models"]), reverse=True)
 
     # Growth data if available
     growth = {}
