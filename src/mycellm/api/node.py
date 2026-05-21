@@ -960,8 +960,12 @@ async def public_stats(request: Request):
     })
 
     # QUIC-connected peers (the main source on the public bootstrap).
+    # Anonymized — capabilities don't carry a friendly node name and
+    # network_ids is a *network* identifier (which swarm), not the
+    # peer's name, so we surface a short peer-id prefix instead. Keeps
+    # the contributor list narrow + privacy-preserving.
     for entry in quic_peers:
-        peer_name = (entry.capabilities.network_ids[0] if entry.capabilities.network_ids else "") or f"peer-{entry.peer_id[:8]}"
+        peer_name = f"peer-{entry.peer_id[:6]}"
         contributors.append({
             "name": peer_name,
             "tps": round(entry.capabilities.est_tok_s, 1),
