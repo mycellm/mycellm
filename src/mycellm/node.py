@@ -734,8 +734,7 @@ class MycellmNode:
         # that the upstream gateway is just going to strip.
         peer_reasoning_exclude = payload.get("reasoning_exclude")
         if peer_reasoning_exclude is None:
-            from mycellm.config.settings import settings
-            peer_reasoning_exclude = settings.hide_reasoning_by_default
+            peer_reasoning_exclude = self._settings.hide_reasoning_by_default
 
         req = InferenceRequest(
             messages=messages,
@@ -1732,19 +1731,15 @@ class MycellmNode:
         kwargs forwarded to InferenceRequest / peer message:
           temperature, max_tokens, reasoning_exclude
         """
-        # Resolve empty model via ModelResolver
+        # Resolve empty/"auto" model via ModelResolver
         effective_model = model
-        if not model and self.model_resolver:
+        if model in ("", "auto") and self.model_resolver:
             resolved = self.model_resolver.resolve(
                 "", self.inference.loaded_models,
                 fleet_registry=self.node_registry,
             )
             if resolved:
-                best = resolved[0]
-                if best.source == "local":
-                    effective_model = best.model_name
-                else:
-                    effective_model = best.model_name
+                effective_model = resolved[0].model_name
 
         model_name = self.inference.resolve_model_name(effective_model)
         reasoning_exclude = kwargs.get("reasoning_exclude")
@@ -1807,7 +1802,7 @@ class MycellmNode:
     async def route_inference_stream(self, model: str, messages: list[dict], **kwargs):
         """Route streaming inference to a peer. Yields text chunks."""
         effective_model = model
-        if not model and self.model_resolver:
+        if model in ("", "auto") and self.model_resolver:
             resolved = self.model_resolver.resolve(
                 "", self.inference.loaded_models,
                 fleet_registry=self.node_registry,
