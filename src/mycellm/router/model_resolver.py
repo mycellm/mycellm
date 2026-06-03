@@ -172,9 +172,14 @@ class ModelResolver:
                 score=self._score_model(param_b, tier, source="local", backend=backend),
             ))
 
-        # Collect QUIC peer models
+        # Collect QUIC peer models. Skip peers that are not handshaked or whose
+        # session has dropped — a dead/zombie peer must never be ranked as a
+        # routing candidate (let alone #1), or "auto" resolves to a model that
+        # cannot actually answer.
         for entry in self._registry.all_peers():
             if entry.state.value not in ("routable", "serving", "authenticated"):
+                continue
+            if not entry.is_live():
                 continue
             for m in entry.capabilities.models:
                 param_b = getattr(m, 'param_count_b', 0.0) or estimate_param_count(m.name)

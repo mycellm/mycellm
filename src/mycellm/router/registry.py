@@ -36,6 +36,25 @@ class PeerEntry:
         """Return addresses sorted by score (best first)."""
         return sorted(self.addresses, key=lambda a: self.address_scores.get(a, 0), reverse=True)
 
+    def is_live(self) -> bool:
+        """True if this peer has an open QUIC connection usable for inference.
+
+        State alone is not sufficient evidence of routability: a peer can
+        linger in ROUTABLE — kept warm by DHT announces or stray PINGs — long
+        after its inference loop has died or its session dropped. Routing
+        targets and "online" counts must key off an actually-open connection,
+        not just the advertised state, so a wedged / zombie seeder is neither
+        offered for routing nor counted as an online node. (Mirrors the
+        liveness check peer_manager already uses: ``protocol._is_closed``.)
+        """
+        conn = self.connection
+        if conn is None:
+            return False
+        proto = getattr(conn, "protocol", None)
+        if proto is None:
+            return False
+        return not getattr(proto, "_is_closed", False)
+
 
 class PeerRegistry:
     """In-memory peer registry indexed by model capability."""
@@ -86,15 +105,16 @@ class PeerRegistry:
         entries = []
         for pid in peer_ids:
             entry = self._peers.get(pid)
-            # Accept any peer that has completed the NodeHello handshake.
-            # ROUTABLE is the steady-state but a freshly-authenticated peer
-            # is also able to serve — the only state that should disqualify
-            # them is DISCOVERED (no live connection yet).
+            # Accept any peer that has completed the NodeHello handshake AND
+            # still has a live connection. ROUTABLE is the steady-state but a
+            # freshly-authenticated peer is also able to serve; conversely a
+            # peer whose session has dropped (but whose entry is stuck ROUTABLE
+            # via stale DHT announces) must NOT be offered for routing.
             if entry and entry.state in (
                 PeerState.AUTHENTICATED,
                 PeerState.ROUTABLE,
                 PeerState.SERVING,
-            ):
+            ) and entry.is_live():
                 entries.append(entry)
         return entries
 
@@ -102,9 +122,16 @@ class PeerRegistry:
         return list(self._peers.values())
 
     def connected_peers(self) -> list[PeerEntry]:
+        """Peers that are handshaked AND still have an open connection.
+
+        Used for online/seeder counts and `/v1/models` enumeration, so the
+        liveness gate keeps zombie entries (ROUTABLE but session-dead) from
+        being counted as online or advertised as serving.
+        """
         return [
             p for p in self._peers.values()
             if p.state in (PeerState.AUTHENTICATED, PeerState.ROUTABLE, PeerState.SERVING)
+            and p.is_live()
         ]
 
     def peers_for_tag(self, tag: str) -> list[PeerEntry]:

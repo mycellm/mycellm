@@ -120,6 +120,17 @@ def test_resolver_tier_match():
     assert results[0].model_name == "llama-70b-chat"
 
 
+class _LiveConn:
+    """Open-connection stand-in (is_live() only checks protocol._is_closed)."""
+
+    class _Proto:
+        _is_closed = False
+
+    def __init__(self, closed: bool = False):
+        self.protocol = self._Proto()
+        self.protocol._is_closed = closed
+
+
 def test_resolver_includes_peer_models():
     reg = PeerRegistry()
     caps = Capabilities(
@@ -128,12 +139,31 @@ def test_resolver_includes_peer_models():
     )
     reg.register("peer1", capabilities=caps)
     reg.get("peer1").state = PeerState.ROUTABLE
+    reg.get("peer1").connection = _LiveConn()
 
     resolver = ModelResolver(reg)
     results = resolver.resolve("", [])
 
     assert len(results) >= 1
     assert any(r.model_name == "remote-model-13b" and r.source == "quic" for r in results)
+
+
+def test_resolver_excludes_dead_peer_models():
+    """A peer with a dropped session must not surface as an 'auto' candidate,
+    so resolution never picks a model that cannot actually answer."""
+    reg = PeerRegistry()
+    caps = Capabilities(
+        models=[ModelCapability(name="remote-model-13b")],
+        est_tok_s=50.0,
+    )
+    reg.register("peer1", capabilities=caps)
+    reg.get("peer1").state = PeerState.ROUTABLE
+    reg.get("peer1").connection = _LiveConn(closed=True)  # zombie
+
+    resolver = ModelResolver(reg)
+    results = resolver.resolve("", [])
+
+    assert all(r.source != "quic" for r in results)
 
 
 def test_resolver_includes_fleet_models():

@@ -247,10 +247,12 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 )
                 # We'll add a warning header below
 
-        if resolved:
-            best = resolved[0]
+        # Try each ranked candidate in turn — if the best model's seeder is
+        # down, fall through to the next-best rather than failing the request.
+        for best in (resolved or []):
             if best.source == "local":
                 model_name = best.model_name
+                break  # handled by the local-inference path below
             elif best.source == "quic":
                 # Route via QUIC peer
                 result = await node.route_inference(
