@@ -121,6 +121,16 @@ class InferenceManager:
         """
         import time as _time
 
+        # MLX continuous batching is the default: models configured with
+        # backend="mlx" run on the batched engine (mlx-lm BatchGenerator) unless
+        # explicitly disabled. model_configs.json stays "mlx" (portable); only
+        # the runtime backend object + concurrency policy change.
+        runtime_backend_type = backend_type
+        if backend_type == "mlx":
+            from mycellm.config import get_settings as _gs
+            if _gs().mlx_continuous_batching:
+                runtime_backend_type = "mlx-batched"
+
         # Auto-download from HuggingFace if path starts with "hf:"
         if model_path.startswith("hf:"):
             model_path = await self._resolve_hf_path(model_path)
@@ -145,7 +155,7 @@ class InferenceManager:
 
         try:
             self._load_status[model_name]["phase"] = "creating backend"
-            backend = self._create_backend(backend_type)
+            backend = self._create_backend(runtime_backend_type)
 
             # Memory check for any local backend (llama.cpp or mlx)
             if backend_type in LOCAL_BACKENDS and model_path:
@@ -269,7 +279,7 @@ class InferenceManager:
             #   own worker thread, so requests must be allowed in concurrently.
             # - Remote/relay: configurable via max_concurrent kwarg, default 32
             #   The remote server handles its own backpressure via HTTP 429/503
-            if backend_type in LOCAL_BACKENDS and backend_type not in SELF_BATCHING_BACKENDS:
+            if backend_type in LOCAL_BACKENDS and runtime_backend_type not in SELF_BATCHING_BACKENDS:
                 # Local model objects (llama.cpp Llama / MLX model+tokenizer)
                 # are not safe for parallel forward passes — serialize.
                 self._model_locks[model_name] = asyncio.Lock()

@@ -105,6 +105,12 @@ class MycellmSettings(BaseSettings):
     # nodes default to false so devs see the full model output.
     hide_reasoning_by_default: bool = False  # MYCELLM_HIDE_REASONING_BY_DEFAULT
     flash_attn: bool = True  # Metal/CUDA optimized attention kernel
+    # MLX continuous batching: when true (default), models configured with
+    # backend="mlx" load via the BatchedMLXBackend (mlx-lm BatchGenerator), so a
+    # seeder serves concurrent requests in one batch instead of one-at-a-time.
+    # Set false (MYCELLM_MLX_CONTINUOUS_BATCHING=false) to force the legacy
+    # single-stream MLX backend.
+    mlx_continuous_batching: bool = True  # MYCELLM_MLX_CONTINUOUS_BATCHING
     kv_cache_quant: str = "q8_0"  # KV cache quantization: "none", "q8_0", "q4_0" (legacy, use k/v below)
     kv_cache_quant_k: str = ""  # Key cache quantization (default: use kv_cache_quant)
     kv_cache_quant_v: str = ""  # Value cache quantization (default: q4_0 for asymmetric)
