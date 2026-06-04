@@ -20,7 +20,11 @@ logger = logging.getLogger("mycellm.inference")
 # Backends that load model bytes into local memory (need RAM check, file-based
 # progress tracking, single-threaded Lock). Remote backends (openai-compat)
 # stream over HTTP and don't need any of that.
-LOCAL_BACKENDS = ("llama.cpp", "mlx")
+LOCAL_BACKENDS = ("llama.cpp", "mlx", "mlx-batched")
+# Local backends that manage their own internal concurrency (own the Metal
+# queue via a worker thread) and so must NOT be serialized with a per-model
+# Lock — they get a Semaphore so requests flow into the batcher concurrently.
+SELF_BATCHING_BACKENDS = ("mlx-batched",)
 
 
 def _model_size_on_disk(model_path: str) -> int:
@@ -259,10 +263,13 @@ class InferenceManager:
                 self._model_paths[model_name] = model_path
             self._backends[model_name] = backend
             # Per-model concurrency control:
-            # - llama.cpp: Lock (1 concurrent) — C context is NOT thread-safe
+            # - llama.cpp / plain mlx: Lock (1 concurrent) — the C context /
+            #   single Metal queue are NOT safe for parallel forward passes.
+            # - mlx-batched: Semaphore — the backend batches internally on its
+            #   own worker thread, so requests must be allowed in concurrently.
             # - Remote/relay: configurable via max_concurrent kwarg, default 32
             #   The remote server handles its own backpressure via HTTP 429/503
-            if backend_type in LOCAL_BACKENDS:
+            if backend_type in LOCAL_BACKENDS and backend_type not in SELF_BATCHING_BACKENDS:
                 # Local model objects (llama.cpp Llama / MLX model+tokenizer)
                 # are not safe for parallel forward passes — serialize.
                 self._model_locks[model_name] = asyncio.Lock()
@@ -642,6 +649,9 @@ class InferenceManager:
         if backend_type == "mlx":
             from mycellm.inference.mlx import MLXBackend
             return MLXBackend()
+        if backend_type == "mlx-batched":
+            from mycellm.inference.mlx_batched import BatchedMLXBackend
+            return BatchedMLXBackend()
         if backend_type in ("openai", "openai-compatible"):
             from mycellm.inference.openai_compat import OpenAICompatibleBackend
             return OpenAICompatibleBackend()

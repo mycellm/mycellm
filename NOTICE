@@ -1,0 +1,16 @@
+mycellm
+Copyright (c) mycellm contributors
+
+This product includes software developed as part of the mycellm project,
+licensed under the Apache License, Version 2.0.
+
+---
+
+Third-party attributions:
+
+* The continuous-batching MLX backend (src/mycellm/inference/mlx_batched.py)
+  and the batching benchmark (scripts/bench_mlx_batching.py) were informed by
+  the engine design of oMLX (https://github.com/jundot/omlx), in particular
+  omlx/engine/batched.py, which is licensed under the Apache License,
+  Version 2.0. mycellm's implementation drives mlx-lm's BatchGenerator directly
+  and does not copy oMLX source; oMLX is credited as a design reference.
