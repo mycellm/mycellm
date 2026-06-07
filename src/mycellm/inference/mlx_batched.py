@@ -10,8 +10,22 @@ This backend instead runs a single **worker thread** that owns the model and a
 ``mlx_lm.generate.BatchGenerator`` — mlx-lm's token-level continuous-batching
 engine. Requests are admitted into the running batch dynamically (``insert``),
 decoded together one step at a time (``next``), and finished sequences drop out
-automatically. Solo requests pay no penalty; concurrent requests share each
-forward pass, so aggregate tok/s scales with batch size.
+automatically. Concurrent requests share each forward pass, so aggregate tok/s
+scales with batch size.
+
+Single-request fast path (opt-in, ``solo_fast_path``, default OFF): when a
+request arrives with nothing else in flight, the worker can decode it on
+``mlx_lm.stream_generate`` (simple KV cache) instead of stepping a batch of 1
+through the BatchGenerator, escalating to the batcher only if a second request
+shows up mid-decode (the in-progress job is folded back in — prompt + tokens-
+so-far — and resumes under continuous batching).
+
+This was motivated by the oMLX 0.4.0 regression (single-row decode falling into
+a slower batched cache path, ~1.48x Qwen tg loss). However, benchmarking on M1 /
+mlx-lm 0.31.3 (``scripts/bench_solo_fastpath.py``) showed only ~1.5% — that
+regression lives in the jundot/omlx engine, not mlx-lm's BatchGenerator — so the
+fast path is **disabled by default**. It's retained behind the flag in case a
+future mlx-lm regresses, or for reuse on the VLM single-stream path.
 
 Concurrency model: because the worker thread is the sole owner of the Metal
 queue, the manager must NOT serialize this backend with a Lock — it hands it a
@@ -39,6 +53,7 @@ from mycellm.inference.base import (
     InferenceChunk,
     InferenceRequest,
     InferenceResult,
+    flatten_message_content,
 )
 
 logger = logging.getLogger("mycellm.inference")
@@ -79,13 +94,26 @@ class _Job:
 class BatchedMLXBackend(InferenceBackend):
     """MLX backend with continuous batching via mlx_lm BatchGenerator."""
 
-    def __init__(self, completion_batch_size: int = 32, prefill_batch_size: int = 8):
+    def __init__(
+        self,
+        completion_batch_size: int = 32,
+        prefill_batch_size: int = 8,
+        solo_fast_path: bool = False,
+    ):
         self._model = None
         self._tokenizer = None
         self._model_name = ""
         self._path = ""
         self._completion_batch_size = completion_batch_size
         self._prefill_batch_size = prefill_batch_size
+        # When True, a request that arrives with nothing else in flight is
+        # decoded on mlx-lm's single-stream path instead of a batch-of-1.
+        # Default False: benchmarked on M1 / mlx-lm 0.31.3 (scripts/
+        # bench_solo_fastpath.py) at only ~1.5% over BatchGenerator-at-1 — the
+        # oMLX regression that motivated it does NOT reproduce in mlx-lm's
+        # BatchGenerator. Kept as an opt-in flag in case a future mlx-lm
+        # regresses or for the VLM single-stream path.
+        self._solo_fast_path = solo_fast_path
 
         # Worker thread + admission queue. The worker owns the Metal queue and
         # the BatchGenerator; nothing else may touch them.
@@ -150,6 +178,9 @@ class BatchedMLXBackend(InferenceBackend):
 
     def _build_prompt_ids(self, request: InferenceRequest) -> list[int]:
         tok = self._tokenizer
+        # Text backend: flatten any multimodal content to text (VLM requests
+        # route to the mlx-vlm backend; this is defensive).
+        messages = flatten_message_content(request.messages)
         if hasattr(tok, "apply_chat_template"):
             kw: dict = {"tokenize": True, "add_generation_prompt": True}
             if request.tools:
@@ -158,15 +189,15 @@ class BatchedMLXBackend(InferenceBackend):
                 from mycellm.inference.reasoning_dialects import chat_template_suppress_kwargs
                 kw.update(chat_template_suppress_kwargs(request.model))
             try:
-                return list(tok.apply_chat_template(request.messages, **kw))
+                return list(tok.apply_chat_template(messages, **kw))
             except Exception as e:
                 for shed in ("enable_thinking", "tools"):
                     kw.pop(shed, None)
                 try:
-                    return list(tok.apply_chat_template(request.messages, **kw))
+                    return list(tok.apply_chat_template(messages, **kw))
                 except Exception:
                     logger.warning(f"apply_chat_template failed, concat fallback: {e}")
-        text = "\n".join(f"{m.get('role','user')}: {m.get('content','')}" for m in request.messages)
+        text = "\n".join(f"{m.get('role','user')}: {m.get('content','')}" for m in messages)
         return list(tok.encode(text))
 
     # ---- worker loop ---------------------------------------------------
@@ -191,22 +222,36 @@ class BatchedMLXBackend(InferenceBackend):
 
         try:
             while self._running:
-                # 1) Admit any newly-queued jobs into the running batch.
-                self._drain_admissions(gen, uid_map)
+                # A) A batch is already in flight: admit any arrivals and step.
+                if uid_map:
+                    self._drain_admissions(gen, uid_map)
+                    _, gen_responses = gen.next()
+                    for r in gen_responses:
+                        job = uid_map.get(r.uid)
+                        if job is None:
+                            continue
+                        self._handle_token(gen, uid_map, job, r)
+                    continue
 
-                # 2) Nothing in flight and nothing pending → sleep until woken.
-                if not uid_map:
+                # B) Idle: take one pending job, or sleep until one arrives.
+                try:
+                    job = self._admit.get_nowait()
+                except queue.Empty:
                     self._wake.wait(timeout=1.0)
                     self._wake.clear()
                     continue
 
-                # 3) Step the batch once; route generated tokens to jobs.
-                _, gen_responses = gen.next()
-                for r in gen_responses:
-                    job = uid_map.get(r.uid)
-                    if job is None:
-                        continue
-                    self._handle_token(gen, uid_map, job, r)
+                # C) Exactly one job and nothing else queued → single-stream
+                # fast path (skip the batched-cache per-token overhead). If a
+                # second request lands mid-decode, _run_solo returns False and
+                # we fold the in-progress job into the batcher below.
+                if self._solo_fast_path and self._admit.empty():
+                    if self._run_solo(gen, uid_map, job):
+                        continue  # ran to completion on the fast path
+
+                # D) Batched admission: insert this job + drain the rest.
+                self._insert_job(gen, uid_map, job)
+                self._drain_admissions(gen, uid_map)
         except Exception as e:  # pragma: no cover
             logger.error(f"mlx batch worker crashed: {e}")
             for job in list(uid_map.values()):
@@ -217,20 +262,87 @@ class BatchedMLXBackend(InferenceBackend):
             except Exception:
                 pass
 
+    def _insert_job(self, gen, uid_map: dict, job: _Job) -> None:
+        try:
+            uids = gen.insert(
+                [job.tokens], max_tokens=[job.max_tokens], samplers=[job.sampler]
+            )
+            job.uid = uids[0]
+            uid_map[job.uid] = job
+        except Exception as e:
+            self._fail(job, e)
+
     def _drain_admissions(self, gen, uid_map: dict) -> None:
         while True:
             try:
                 job = self._admit.get_nowait()
             except queue.Empty:
                 return
-            try:
-                uids = gen.insert(
-                    [job.tokens], max_tokens=[job.max_tokens], samplers=[job.sampler]
-                )
-                job.uid = uids[0]
-                uid_map[job.uid] = job
-            except Exception as e:
-                self._fail(job, e)
+            self._insert_job(gen, uid_map, job)
+
+    def _run_solo(self, gen, uid_map: dict, job: _Job) -> bool:
+        """Decode a lone request on mlx-lm's single-stream path.
+
+        Returns True if the job ran to completion (terminal chunk + done
+        sentinel already emitted). Returns False if another request was
+        admitted mid-decode: ``job.tokens`` is rewritten to ``prompt +
+        tokens-generated-so-far`` and ``job.max_tokens`` decremented, so the
+        caller can ``_insert_job`` it to resume under continuous batching.
+        """
+        import mlx.core as mx
+        from mlx_lm import stream_generate
+
+        original_prompt = job.tokens
+
+        for resp in stream_generate(
+            self._model, self._tokenizer,
+            prompt=mx.array(original_prompt),
+            max_tokens=job.max_tokens,
+            sampler=job.sampler,
+        ):
+            if not self._running:
+                self._emit(job, None)  # unblock the consumer on shutdown
+                return True
+
+            text = getattr(resp, "text", "") or ""
+            tok = getattr(resp, "token", None)
+            finish = getattr(resp, "finish_reason", None)
+
+            if tok is not None:
+                job.all_token_ids.append(tok)
+
+            if text:
+                job.emitted_text += text
+                hit = next((s for s in job.stop if s in job.emitted_text), None)
+                if hit:
+                    cut = job.emitted_text.split(hit)[0]
+                    tail = cut[len(job.emitted_text) - len(text):]
+                    if tail:
+                        self._emit(job, InferenceChunk(text=tail))
+                    self._finish(gen, uid_map, job, "stop")
+                    return True
+                self._emit(job, InferenceChunk(text=text))
+
+            if finish is not None:
+                self._finish(gen, uid_map, job, finish)
+                return True
+
+            # Another request is waiting — stop monopolizing the Metal queue
+            # and continue this job under batching. Fold what we've produced
+            # into the prompt so the re-prefill resumes where we left off.
+            if not self._admit.empty():
+                job.tokens = original_prompt + job.all_token_ids
+                job.max_tokens = max(1, job.max_tokens - len(job.all_token_ids))
+                # Re-baseline emitted_text to a token-id decode so the batched
+                # delta math in _handle_token lines up at the seam (a tiny
+                # detokenization seam glitch is possible but bounded; escalation
+                # is rare — only when a 2nd request lands mid-solo-decode).
+                job.emitted_text = self._tokenizer.decode(job.all_token_ids)
+                return False
+
+        # stream_generate exhausted without an explicit finish_reason.
+        self._finish(gen, uid_map, job, "stop")
+        return True
 
     def _handle_token(self, gen, uid_map: dict, job: _Job, r) -> None:
         # finish_reason == "stop": r.token is the stop/eos token, not output.
@@ -345,7 +457,8 @@ class BatchedMLXBackend(InferenceBackend):
 
     def get_capabilities(self) -> dict:
         info = {"backend": "mlx-batched", "continuous_batching": True,
-                "completion_batch_size": self._completion_batch_size}
+                "completion_batch_size": self._completion_batch_size,
+                "solo_fast_path": self._solo_fast_path}
         try:
             import mlx.core as mx
             info["device"] = str(mx.default_device())
