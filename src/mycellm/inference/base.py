@@ -59,6 +59,42 @@ class InferenceResult:
     reasoning_content: str = ""
 
 
+def content_to_text(content) -> str:
+    """Collapse an OpenAI message ``content`` to plain text.
+
+    ``content`` may be a string or a list of content parts (the multimodal
+    shape: ``[{"type":"text","text":...}, {"type":"image_url",...}]``). Text
+    parts are concatenated; non-text parts (image/audio) are dropped. Used by
+    text-only backends and by request guards that need the textual payload.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return "" if content is None else str(content)
+
+
+def flatten_message_content(messages: list[dict]) -> list[dict]:
+    """Return ``messages`` with any list-valued ``content`` collapsed to text.
+
+    Multimodal (image/audio) parts are dropped — text-only backends can't
+    consume them; multimodal requests should route to a VLM backend instead.
+    Messages whose content is already a string pass through unchanged.
+    """
+    out: list[dict] = []
+    for m in messages:
+        if isinstance(m.get("content"), list):
+            nm = dict(m)
+            nm["content"] = content_to_text(m["content"])
+            out.append(nm)
+        else:
+            out.append(m)
+    return out
+
+
 @dataclass
 class EmbeddingRequest:
     input: str | list[str]

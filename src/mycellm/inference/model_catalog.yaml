@@ -6,6 +6,11 @@
 # Schema:
 #   catalog_version: ISO date string, used for cache invalidation
 #   models[].family:   short slug, used as the canonical name in the recommender
+#   models[].modalities: input modalities, default [text]. Add "image" for
+#                        vision-language models — the recommender maps an mlx
+#                        variant of a vision family to the "mlx-vlm" backend
+#                        (text-only families use "mlx"/"llama.cpp" as before).
+#   models[].roles:    capability tags ("reasoning", "coding", "vision", ...)
 #   models[].variants[]:
 #     format:    "mlx" | "gguf"
 #     repo:      Hugging Face repo id
@@ -14,8 +19,12 @@
 #     size_gb:   on-disk bytes, GB (10^9)
 #     ram_gb:    recommended free RAM headroom in GB
 #     platforms: [darwin-arm64, linux-x86_64, linux-aarch64, win-x86_64, ios]
+#
+# Note: vision (VLM) families are mlx + darwin-arm64 only for now — the
+# llama.cpp backend doesn't wire an mmproj vision projector, and the iOS app
+# still uses the text-only prompt path. See mlx_vlm.py / multimodal status.
 
-catalog_version: "2026-04-17"
+catalog_version: "2026-06-07"
 
 models:
   - family: qwen3.6-35b-a3b
@@ -132,3 +141,57 @@ models:
         size_gb: 2.5
         ram_gb: 4
         platforms: [linux-x86_64, linux-aarch64, darwin-arm64, win-x86_64]
+
+  # --- Vision-language (VLM) families ---------------------------------------
+  # mlx + darwin-arm64 only: routed to the mlx-vlm backend (single-stream).
+  # No gguf/ios variants yet (see schema note above).
+
+  - family: qwen2.5-vl-7b
+    description: "Qwen 2.5 VL 7B — strong general vision-language: OCR, charts, UI"
+    roles: [vision, chat, generation]
+    modalities: [text, image]
+    param_count_b: 8.3
+    variants:
+      - format: mlx
+        repo: mlx-community/Qwen2.5-VL-7B-Instruct-4bit
+        quant: 4bit
+        size_gb: 4.8
+        ram_gb: 8
+        platforms: [darwin-arm64]
+      - format: mlx
+        repo: mlx-community/Qwen2.5-VL-7B-Instruct-8bit
+        quant: 8bit
+        size_gb: 8.9
+        ram_gb: 13
+        platforms: [darwin-arm64]
+
+  - family: qwen2.5-vl-3b
+    description: "Qwen 2.5 VL 3B — lighter VLM for image Q&A and OCR"
+    roles: [vision, chat]
+    modalities: [text, image]
+    param_count_b: 3.75
+    variants:
+      - format: mlx
+        repo: mlx-community/Qwen2.5-VL-3B-Instruct-4bit
+        quant: 4bit
+        size_gb: 2.4
+        ram_gb: 5
+        platforms: [darwin-arm64]
+
+  - family: gemma-3-4b-vision
+    description: "Gemma 3 4B — multimodal (image+text) instruct, broad language coverage"
+    roles: [vision, chat]
+    modalities: [text, image]
+    param_count_b: 4.3
+    variants:
+      - format: mlx
+        repo: mlx-community/gemma-3-4b-it-4bit
+        quant: 4bit
+        size_gb: 2.6
+        ram_gb: 5
+        platforms: [darwin-arm64]
+
+  # NOTE: mlx-community/SmolVLM-Instruct-4bit was evaluated (2026-06-07) but its
+  # preprocessor_config.json is missing `image_processor_type`, so it fails to
+  # load under current transformers/mlx-vlm (Qwen2.5-VL-3B loads fine as the
+  # small option). Re-add a SmolVLM variant once a working quant is published.

@@ -17,6 +17,7 @@ from mycellm.inference.base import (
     InferenceChunk,
     InferenceRequest,
     InferenceResult,
+    flatten_message_content,
 )
 
 logger = logging.getLogger("mycellm.inference")
@@ -300,7 +301,7 @@ class LlamaCppBackend(InferenceBackend):
         def _run_stream():
             try:
                 stream = llm.create_chat_completion(
-                    messages=request.messages,
+                    messages=flatten_message_content(request.messages),
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
                     top_p=request.top_p,

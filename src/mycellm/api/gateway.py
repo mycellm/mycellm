@@ -173,9 +173,14 @@ async def public_chat(request: Request):
     if not messages:
         return JSONResponse(status_code=400, content={"error": {"message": "messages required"}})
 
+    # Extract textual content per message. content may be a string or a list
+    # of multimodal parts; length-check and the privacy scan operate on text.
+    from mycellm.inference.base import content_to_text
+    msg_texts = [content_to_text(msg.get("content", "")) for msg in messages]
+
     # Validate message lengths
-    for msg in messages:
-        if len(msg.get("content", "")) > _MAX_MESSAGE_LENGTH:
+    for text in msg_texts:
+        if len(text) > _MAX_MESSAGE_LENGTH:
             return JSONResponse(status_code=400, content={
                 "error": {"message": f"Message too long (max {_MAX_MESSAGE_LENGTH} chars)"}
             })
@@ -185,7 +190,7 @@ async def public_chat(request: Request):
     privacy_override = request.headers.get("x-privacy-override", "") == "acknowledged"
     if not privacy_override:
         from mycellm.privacy import scan_with_policy
-        all_content = " ".join(msg.get("content", "") for msg in messages)
+        all_content = " ".join(msg_texts)
         guard_result = scan_with_policy(all_content, trust_level="untrusted")
     else:
         guard_result = {"action": "allow", "matches": [], "highest_severity": "none"}

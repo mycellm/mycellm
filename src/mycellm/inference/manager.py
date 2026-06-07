@@ -20,7 +20,7 @@ logger = logging.getLogger("mycellm.inference")
 # Backends that load model bytes into local memory (need RAM check, file-based
 # progress tracking, single-threaded Lock). Remote backends (openai-compat)
 # stream over HTTP and don't need any of that.
-LOCAL_BACKENDS = ("llama.cpp", "mlx", "mlx-batched")
+LOCAL_BACKENDS = ("llama.cpp", "mlx", "mlx-batched", "mlx-vlm")
 # Local backends that manage their own internal concurrency (own the Metal
 # queue via a worker thread) and so must NOT be serialized with a per-model
 # Lock — they get a Semaphore so requests flow into the batcher concurrently.
@@ -127,9 +127,19 @@ class InferenceManager:
         # the runtime backend object + concurrency policy change.
         runtime_backend_type = backend_type
         if backend_type == "mlx":
-            from mycellm.config import get_settings as _gs
-            if _gs().mlx_continuous_batching:
-                runtime_backend_type = "mlx-batched"
+            # Vision-language models can't run on the text engines (mlx-lm /
+            # BatchGenerator). Detect them from config.json and route to the
+            # single-stream mlx-vlm backend. Detection needs the files on disk,
+            # so it only applies to already-local dirs — an "hf:" path that
+            # resolves to a VLM model should be loaded with an explicit
+            # backend_type="mlx-vlm".
+            from mycellm.inference.mlx_vlm import is_mlx_vlm_model_path
+            if model_path and not model_path.startswith("hf:") and is_mlx_vlm_model_path(model_path):
+                runtime_backend_type = "mlx-vlm"
+            else:
+                from mycellm.config import get_settings as _gs
+                if _gs().mlx_continuous_batching:
+                    runtime_backend_type = "mlx-batched"
 
         # Auto-download from HuggingFace if path starts with "hf:"
         if model_path.startswith("hf:"):
@@ -662,6 +672,9 @@ class InferenceManager:
         if backend_type == "mlx-batched":
             from mycellm.inference.mlx_batched import BatchedMLXBackend
             return BatchedMLXBackend()
+        if backend_type == "mlx-vlm":
+            from mycellm.inference.mlx_vlm import MLXVLMBackend
+            return MLXVLMBackend()
         if backend_type in ("openai", "openai-compatible"):
             from mycellm.inference.openai_compat import OpenAICompatibleBackend
             return OpenAICompatibleBackend()

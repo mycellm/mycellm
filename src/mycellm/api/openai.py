@@ -107,7 +107,11 @@ router = APIRouter()
 
 class ChatMessage(BaseModel):
     role: str
-    content: Optional[str] = None
+    # content is a plain string for text, or a list of OpenAI content parts for
+    # multimodal input — [{"type":"text",...}, {"type":"image_url",...}]. It
+    # flows through to the backend as-is: text backends flatten it to text
+    # (base.flatten_message_content), the mlx-vlm backend splits out images.
+    content: Optional[str | list[dict]] = None
     tool_calls: Optional[list] = None      # assistant → tool invocations
     tool_call_id: Optional[str] = None     # tool → result for this call_id
     name: Optional[str] = None             # tool → function name

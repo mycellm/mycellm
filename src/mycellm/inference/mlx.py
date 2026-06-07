@@ -27,6 +27,7 @@ from mycellm.inference.base import (
     InferenceChunk,
     InferenceRequest,
     InferenceResult,
+    flatten_message_content,
 )
 
 logger = logging.getLogger("mycellm.inference")
@@ -131,6 +132,10 @@ class MLXBackend(InferenceBackend):
         return self._models[name]
 
     def _build_prompt(self, tokenizer, request: InferenceRequest) -> str:
+        # Text backend: drop any multimodal parts down to their text. (A VLM
+        # request should have routed to the mlx-vlm backend; this is defensive
+        # so a text model that receives image content degrades gracefully.)
+        messages = flatten_message_content(request.messages)
         if hasattr(tokenizer, "apply_chat_template"):
             template_kwargs: dict = {
                 "tokenize": False,
@@ -142,7 +147,7 @@ class MLXBackend(InferenceBackend):
                 from mycellm.inference.reasoning_dialects import chat_template_suppress_kwargs
                 template_kwargs.update(chat_template_suppress_kwargs(request.model))
             try:
-                return tokenizer.apply_chat_template(request.messages, **template_kwargs)
+                return tokenizer.apply_chat_template(messages, **template_kwargs)
             except Exception as e:
                 # Retry shedding optional kwargs one at a time — some chat
                 # templates raise on unknown kwargs.
@@ -151,13 +156,13 @@ class MLXBackend(InferenceBackend):
                         logger.warning(f"apply_chat_template with {shed_key} failed ({e}), retrying without")
                         template_kwargs.pop(shed_key, None)
                         try:
-                            return tokenizer.apply_chat_template(request.messages, **template_kwargs)
+                            return tokenizer.apply_chat_template(messages, **template_kwargs)
                         except Exception as e_retry:
                             e = e_retry
                             continue
                 logger.warning(f"apply_chat_template failed, falling back to concat: {e}")
         return "\n".join(
-            f"{m.get('role','user')}: {m.get('content','')}" for m in request.messages
+            f"{m.get('role','user')}: {m.get('content','')}" for m in messages
         )
 
     async def generate(self, request: InferenceRequest) -> InferenceResult:

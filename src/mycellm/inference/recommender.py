@@ -21,6 +21,20 @@ logger = logging.getLogger("mycellm.recommender")
 FORMAT_BACKEND = {"mlx": "mlx", "gguf": "llama.cpp"}
 
 
+def _resolve_backend(fmt: str, modalities: list[str]) -> str:
+    """Map a variant's format + family modalities to an InferenceManager backend.
+
+    A vision-language family (declares "image") in mlx format runs on the
+    single-stream mlx-vlm backend. The manager also auto-detects this from
+    config.json at load time, but the catalog can't read a not-yet-downloaded
+    config, so we surface the right backend here for /suggested + auto-load.
+    """
+    backend = FORMAT_BACKEND.get(fmt, fmt)
+    if fmt == "mlx" and "image" in modalities:
+        return "mlx-vlm"
+    return backend
+
+
 def detect_platform() -> str:
     """Return the catalog `platforms` token for this host."""
     sys = platform.system()
@@ -93,6 +107,7 @@ class Recommendation:
     param_count_b: float
     active_param_count_b: float
     roles: list[str]
+    modalities: list[str]
     score: float
     why: str
     fits_ram: bool
@@ -132,13 +147,14 @@ def recommend(
             continue
 
         family_name = fam.get("family", "")
+        modalities = list(fam.get("modalities", ["text"]))
         for v in fam.get("variants", []):
             platforms = v.get("platforms", [])
             if plat not in platforms:
                 continue
 
             fmt = v.get("format", "")
-            backend = FORMAT_BACKEND.get(fmt, fmt)
+            backend = _resolve_backend(fmt, modalities)
             ram_needed = float(v.get("ram_gb", 0))
             size = float(v.get("size_gb", 0))
 
@@ -158,6 +174,8 @@ def recommend(
                     base_score += 0.10 * math.log10(pc + 1)
 
             why_parts = []
+            if "image" in modalities:
+                why_parts.append("vision (image input)")
             if plat == "darwin-arm64" and fmt == "mlx":
                 why_parts.append("native MLX on Apple Silicon")
             elif fmt == "gguf":
@@ -185,6 +203,7 @@ def recommend(
                     param_count_b=float(fam.get("param_count_b", 0)),
                     active_param_count_b=float(fam.get("active_param_count_b", 0)),
                     roles=list(fam.get("roles", [])),
+                    modalities=modalities,
                     score=round(base_score, 3),
                     why="; ".join(why_parts) or "available",
                     fits_ram=fits_ram,
