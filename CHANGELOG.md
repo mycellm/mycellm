@@ -4,6 +4,35 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [0.4.0] — 2026-06-07
+
+### Added
+- **MLX vision-language (multimodal) inference** for Apple Silicon. New
+  `MLXVLMBackend` (`mlx-vlm`) loads vision models (Qwen2.5-VL, Gemma 3, …);
+  `InferenceManager` auto-routes a `backend="mlx"` model whose `config.json`
+  declares a vision tower to it. Single-stream (mlx-vlm has no batched path).
+- **Multimodal chat content** end-to-end: `/v1/chat/completions` `content`
+  now accepts OpenAI content-part arrays (`text` + `image_url`) as well as a
+  plain string. Text backends flatten images out via the new
+  `content_to_text` / `flatten_message_content` helpers.
+- **Vision model catalog entries** (Qwen2.5-VL 7B/3B, Gemma 3 4B) behind a
+  new `modalities` family field; the recommender maps vision MLX variants to
+  the `mlx-vlm` backend.
+- **`scripts/bench_solo_fastpath.py`** — benchmarks the batched-MLX solo
+  decode path (single-stream vs BatchGenerator-at-1).
+
+### Changed
+- **Pinned `mlx-lm>=0.31.3`** (was `>=0.31.0`) — avoids the 0.31.2 cache
+  broadcast regression (mlx-lm #1139) that surfaces under continuous batching.
+- `BatchedMLXBackend` gained an **opt-in single-stream solo fast path**
+  (`solo_fast_path`, default **off** — benchmarked at only ~1.5% over
+  BatchGenerator-at-1 on mlx-lm 0.31.3, so not worth the default complexity).
+
+### Fixed
+- Public gateway no longer mishandles multimodal `content` arrays — the length
+  check and sensitive-data scan operate on extracted text instead of assuming
+  a string (previously would have raised on a list payload).
+
 ## [0.3.0] — 2026-05-20
 
 ### Added
