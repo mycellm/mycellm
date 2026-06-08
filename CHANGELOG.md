@@ -20,6 +20,15 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
   the `mlx-vlm` backend.
 - **`scripts/bench_solo_fastpath.py`** — benchmarks the batched-MLX solo
   decode path (single-stream vs BatchGenerator-at-1).
+- **Tracker-authoritative credit system.** A network's source-of-truth node
+  (the public prime) keeps a per-network ledger (`NetworkAccount`) settled from
+  **consumer co-signed** receipts: the seeder signs, the consumer co-signs the
+  same canonical bytes, and the tracker verifies both, replay/rate-limits, then
+  debits consumer / credits seeder. New `POST /v1/public/receipts` (ingest) and
+  `GET /v1/public/credits/{peer_id}` (authoritative balance + served count).
+  Receipts now also flow for **streaming** completions (previously only
+  non-streamed served earned). A tracker self-designates treasury credit on
+  networks it is the authority for.
 
 ### Changed
 - **Pinned `mlx-lm>=0.31.3`** (was `>=0.31.0`) — avoids the 0.31.2 cache
