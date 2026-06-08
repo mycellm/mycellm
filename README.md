@@ -112,7 +112,7 @@ You (consumer) ──QUIC──▶ Bootstrap (relay) ──QUIC──▶ Seeder 
 | **Canopy** | Client access | iOS app, CLI chat, web UI, OpenAI API |
 | **Mycelium** | Routing & discovery | QUIC transport, Kademlia DHT, STUN/ICE |
 | **Roots** | Inference compute | llama.cpp (Metal/CUDA/ROCm/CPU), vLLM |
-| **Ledger** | Accounting | Ed25519 signed receipts, per-network credit tracking |
+| **Ledger** | Accounting | Consumer co-signed Ed25519 receipts, per-network tracker-authoritative balances |
 
 ## Features
 
@@ -123,6 +123,7 @@ You (consumer) ──QUIC──▶ Bootstrap (relay) ──QUIC──▶ Seeder 
 ### Inference
 - **llama.cpp** backend with Metal, CUDA, ROCm, and CPU support
 - **MLX** backend for Apple Silicon (M-series) — typically faster than Metal-via-llama.cpp for the same quantization, uses unified memory more efficiently
+- **Multimodal (vision)** — vision-language models (Qwen2.5-VL, Gemma 3) via the MLX-VLM backend; `/v1/chat/completions` accepts OpenAI image content parts (`image_url`), and the public gateway routes image requests only to vision-capable nodes
 - **OpenAI tool/function calling** — `tools` and `tool_choice` pass through local backends, the OpenAI-compat relay, and QUIC peer routing
 - **Streaming** token generation via SSE
 - **Grammar-constrained output** via GBNF (`grammar` field on chat completions)
@@ -177,7 +178,7 @@ When dozens of nodes contribute compute, mycellm's quality-aware routing shines:
 
 Native app for iPad and iPhone. Your iPad is a full peer on the network — serve inference at 30+ tokens/sec on Metal, earn credits, and chat with privacy protection.
 
-- **On-device inference** — llama.cpp on Metal, optimized for M-series iPads
+- **On-device inference** — llama.cpp and MLX on Metal, optimized for M-series iPads (incl. vision models)
 - **Network + local routing** — toggle between network and on-device per message, with automatic fallback
 - **Chat persistence** — threaded conversations with full metadata (model, node, tokens/sec, route). Export and share threads. Private ephemeral sessions.
 - **Sensitive Data Guard** — prompts are scanned on-device; sensitive queries route to your local model
