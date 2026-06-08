@@ -206,7 +206,6 @@ class BatchedMLXBackend(InferenceBackend):
         """Owns the model + BatchGenerator. Admits jobs, steps the batch,
         and routes generated tokens back to each job's asyncio queue."""
         try:
-            import mlx.core as mx
             from mlx_lm.generate import BatchGenerator
         except Exception as e:  # pragma: no cover
             logger.error(f"mlx batch worker import failed: {e}")

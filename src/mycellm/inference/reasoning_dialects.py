@@ -16,7 +16,7 @@ helpers below and never need to know which family they're dealing with.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
