@@ -191,7 +191,8 @@ async def submit_receipts(request: Request):
         if not isinstance(r, dict):
             results.append({"ok": False, "reason": "malformed"})
             continue
-        res = await settle_cosigned_receipt(tracker_ledger, node.receipt_validator, r)
+        validator = getattr(node, "tracker_validator", None) or node.receipt_validator
+        res = await settle_cosigned_receipt(tracker_ledger, validator, r)
         if res.get("ok"):
             settled += 1
         results.append({"request_id": r.get("request_id", ""), **res})

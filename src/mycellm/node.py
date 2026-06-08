@@ -134,6 +134,10 @@ class MycellmNode:
         self.ledger = None  # initialized in run()
         self.reputation = ReputationTracker()
         self.receipt_validator = ReceiptValidator()
+        # Separate validator for the tracker role (settling co-signed receipts):
+        # keeps its replay/rate window independent of the consumer-side one, so
+        # a node that is both consumer and tracker doesn't double-burn request_ids.
+        self.tracker_validator = ReceiptValidator()
 
         # Peer manager
         self.peer_manager = PeerManager(self)
@@ -788,7 +792,12 @@ class MycellmNode:
                 from mycellm.accounting.pricing import compute_reward
                 reward = compute_reward(max(tokens, 1))
 
-                # Generate signed receipt
+                # Generate signed receipt. network_id settles the receipt into
+                # the right per-net tracker ledger; v1 stamps the public net for
+                # the public fleet (older peers omit it -> the consumer reads it
+                # back from the message, so cross-version verification still
+                # matches).
+                receipt_network_id = "public"
                 sig = ""
                 ts = time.time()
                 if not stream:
@@ -800,6 +809,7 @@ class MycellmNode:
                         cost=reward,
                         request_id=msg.id,
                         timestamp=ts,
+                        network_id=receipt_network_id,
                     )
                     sig = sign_receipt(self.device_key, receipt_data)
 
@@ -820,6 +830,7 @@ class MycellmNode:
                     )
                     # Include request_id for replay protection
                     receipt_msg.payload["request_id"] = msg.id
+                    receipt_msg.payload["network_id"] = receipt_network_id
                     await protocol.send_message(receipt_msg)
 
                 self.reputation.record_success(msg.from_peer, result.completion_tokens if not stream else 0, 0.0)
@@ -927,7 +938,9 @@ class MycellmNode:
                 pass
             return
 
-        # Verify Ed25519 signature
+        # Verify Ed25519 signature. network_id is read back from the message
+        # (not assumed) so receipts from older peers that omit it still verify.
+        receipt_network_id = payload.get("network_id", "")
         if signature and conn.hello and conn.hello.cert:
             receipt_data = build_receipt_data(
                 consumer_id=payload.get("consumer_id", ""),
@@ -937,6 +950,7 @@ class MycellmNode:
                 cost=payload.get("cost", 0.0),
                 request_id=request_id,
                 timestamp=payload.get("timestamp", 0.0),
+                network_id=receipt_network_id,
             )
             seeder_pubkey = conn.hello.cert.device_pubkey
             if not verify_receipt_signature(receipt_data, signature, seeder_pubkey):
@@ -947,6 +961,16 @@ class MycellmNode:
                 except ImportError:
                     pass
                 return
+
+            # Stage 3: co-sign the verified receipt and settle it into the
+            # network tracker (the source of truth). Best-effort — never let
+            # accounting affect the receipt-handling path.
+            try:
+                await self._cosign_and_settle_receipt(
+                    payload, receipt_data, signature, seeder_pubkey, receipt_network_id
+                )
+            except Exception as e:
+                logger.debug(f"Co-sign/settle failed for {request_id}: {e}")
 
         # Store verified receipt
         if self.ledger:
@@ -966,6 +990,57 @@ class MycellmNode:
             receipts_received_total.labels(status="verified").inc()
         except ImportError:
             pass
+
+    async def _cosign_and_settle_receipt(
+        self, payload: dict, receipt_data: bytes, seeder_sig: str,
+        seeder_pubkey: bytes, network_id: str,
+    ) -> None:
+        """Co-sign a verified seeder receipt and settle it into the network
+        tracker (the source of truth for balances).
+
+        If this node IS the tracker for the net (a public bootstrap), settle
+        in-process against our own ledger — no HTTP round-trip to ourselves.
+        Otherwise submit the co-signed receipt to the public tracker over HTTP.
+        """
+        if not (self.device_key and self.device_cert):
+            return
+        consumer_sig = sign_receipt(self.device_key, receipt_data)
+        cosigned = {
+            "consumer": payload.get("consumer_id", ""),
+            "seeder": payload.get("seeder_id", ""),
+            "model": payload.get("model", ""),
+            "tokens": payload.get("tokens", 0),
+            "cost": payload.get("cost", 0.0),
+            "request_id": payload.get("request_id", ""),
+            "ts": payload.get("timestamp", 0.0),
+            "network_id": network_id,
+            "seeder_signature": seeder_sig,
+            "consumer_signature": consumer_sig,
+            "seeder_pubkey": seeder_pubkey.hex(),
+            "consumer_pubkey": self.device_cert.device_pubkey.hex(),
+        }
+
+        # We are the tracker for this net (a public bootstrap): settle directly.
+        if getattr(self._settings, "public", False) and self.ledger:
+            from mycellm.accounting.tracker import settle_cosigned_receipt
+            from mycellm.storage.repositories import NetworkLedgerRepository
+            res = await settle_cosigned_receipt(
+                NetworkLedgerRepository(), self.tracker_validator, cosigned
+            )
+            if not res.get("ok"):
+                logger.debug(f"Tracker settle skipped: {res.get('reason')} ({cosigned['request_id']})")
+            return
+
+        # Remote consumer: submit to the public tracker over HTTP (best-effort).
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.mycellm.dev/v1/public/receipts",
+                json={"receipts": [cosigned]},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    logger.debug(f"Receipt submit returned HTTP {resp.status}")
 
     def _handle_peer_exchange(self, msg: MessageEnvelope) -> None:
         """Handle peer exchange -- learn about peers from connected peer."""
