@@ -1543,6 +1543,16 @@ architecture.</p>
 <td>Ollama-compatible routes</td>
 </tr>
 <tr>
+<td><code>/v1/public/receipts</code></td>
+<td>POST</td>
+<td>Submit consumer co-signed credit receipts to the network tracker for settlement</td>
+</tr>
+<tr>
+<td><code>/v1/public/credits/{peer_id}</code></td>
+<td>GET</td>
+<td>A peer's authoritative per-network balance + served-inference count (<code>?network_id=</code>)</td>
+</tr>
+<tr>
 <td><code>/health</code> <code>/metrics</code></td>
 <td>GET</td>
 <td>Always public</td>

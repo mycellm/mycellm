@@ -852,6 +852,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#vision-multimodal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vision (multimodal)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#response" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -867,6 +878,28 @@
     <span class="md-ellipsis">
       
         Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reasoning-thinking-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reasoning ("thinking") control
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool-function-calling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool / function calling
       
     </span>
   </a>
@@ -1418,6 +1451,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#vision-multimodal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vision (multimodal)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#response" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1433,6 +1477,28 @@
     <span class="md-ellipsis">
       
         Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reasoning-thinking-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reasoning ("thinking") control
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool-function-calling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool / function calling
       
     </span>
   </a>
@@ -1519,32 +1585,129 @@
 </tr>
 </tbody>
 </table>
-<h3 id="response">Response<a class="headerlink" href="#response" title="Permanent link">&para;</a></h3>
+<h3 id="vision-multimodal">Vision (multimodal)<a class="headerlink" href="#vision-multimodal" title="Permanent link">&para;</a></h3>
+<p>Send images alongside text using OpenAI-style content parts. A <code>user</code> message's
+<code>content</code> becomes an array of <code>text</code> and <code>image_url</code> parts; an image may be a
+<code>data:</code> URL (base64) or an <code>https://</code> URL.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chatcmpl-abc123&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;object&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chat.completion&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">&quot;created&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1711234567</span><span class="p">,</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Qwen2.5-3B-Instruct-Q8_0&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">&quot;choices&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">&quot;index&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;assistant&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Hello!&quot;</span><span class="p">},</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">&quot;finish_reason&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stop&quot;</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="p">}],</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="nt">&quot;usage&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="nt">&quot;prompt_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">&quot;completion_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">    </span><span class="nt">&quot;total_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">15</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="p">}</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;messages&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;user&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;text&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;text&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;What&#39;s in this image?&quot;</span><span class="p">},</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;image_url&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;image_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data:image/jpeg;base64,/9j/4AAQ...&quot;</span><span class="p">}}</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="p">]}</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="p">}</span>
+</code></pre></div>
+<p>Image requests are routed to a <strong>vision-capable</strong> node (e.g. a Qwen2.5-VL or
+Gemma 3 vision model); the public gateway will not silently fall back to a
+text-only model — if no vision node is available you get a <code>503</code> rather than a
+hallucinated answer. Nodes that load a vision model advertise the <code>vision</code> tag
+automatically. Text-only backends flatten image parts out and answer the text.</p>
+<h3 id="response">Response<a class="headerlink" href="#response" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chatcmpl-abc123&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">&quot;object&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chat.completion&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">&quot;created&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1711234567</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Qwen2.5-3B-Instruct-Q8_0&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="nt">&quot;choices&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">&quot;index&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;assistant&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Hello!&quot;</span><span class="p">},</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">&quot;finish_reason&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stop&quot;</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="p">}],</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span><span class="nt">&quot;usage&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">    </span><span class="nt">&quot;prompt_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">    </span><span class="nt">&quot;completion_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">    </span><span class="nt">&quot;total_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">15</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="p">}</span>
 </code></pre></div>
 <h3 id="streaming">Streaming<a class="headerlink" href="#streaming" title="Permanent link">&para;</a></h3>
 <p>Set <code>"stream": true</code>. Response is Server-Sent Events:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>data: {&quot;id&quot;:&quot;chatcmpl-abc&quot;,&quot;object&quot;:&quot;chat.completion.chunk&quot;,&quot;model&quot;:&quot;Qwen2.5-3B&quot;,&quot;choices&quot;:[{&quot;delta&quot;:{&quot;content&quot;:&quot;Hello&quot;},&quot;finish_reason&quot;:null}]}
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>data: {&quot;id&quot;:&quot;chatcmpl-abc&quot;,&quot;object&quot;:&quot;chat.completion.chunk&quot;,&quot;model&quot;:&quot;Qwen2.5-3B&quot;,&quot;choices&quot;:[{&quot;delta&quot;:{},&quot;finish_reason&quot;:&quot;stop&quot;}]}
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>data: [DONE]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>data: {&quot;id&quot;:&quot;chatcmpl-abc&quot;,&quot;object&quot;:&quot;chat.completion.chunk&quot;,&quot;model&quot;:&quot;Qwen2.5-3B&quot;,&quot;choices&quot;:[{&quot;delta&quot;:{&quot;content&quot;:&quot;Hello&quot;},&quot;finish_reason&quot;:null}]}
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>data: {&quot;id&quot;:&quot;chatcmpl-abc&quot;,&quot;object&quot;:&quot;chat.completion.chunk&quot;,&quot;model&quot;:&quot;Qwen2.5-3B&quot;,&quot;choices&quot;:[{&quot;delta&quot;:{},&quot;finish_reason&quot;:&quot;stop&quot;}]}
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>data: [DONE]
 </code></pre></div>
+<h3 id="reasoning-thinking-control">Reasoning ("thinking") control<a class="headerlink" href="#reasoning-thinking-control" title="Permanent link">&para;</a></h3>
+<p>Thinking-capable models (Qwen3 hybrid, DeepSeek-R1, GLM-4.x-Thinking,
+Gemini Thinking, OpenAI o-series via relay) often emit step-by-step
+reasoning before their final answer, traditionally wrapped in
+<code>&lt;think&gt;...&lt;/think&gt;</code> tags. mycellm gives clients three options:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">&quot;messages&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">&quot;reasoning&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;exclude&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span><span class="w">   </span><span class="c1">// strip thinking, return clean answer</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">&quot;messages&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">&quot;reasoning&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;exclude&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span><span class="w">  </span><span class="c1">// include thinking in response</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="p">}</span>
+</code></pre></div>
+<p>Omit <code>reasoning</code> to inherit the server-side default. The public bootstrap
+demo sets <code>MYCELLM_HIDE_REASONING_BY_DEFAULT=true</code> so unauthenticated
+visitors see clean answers; self-hosted nodes default to false.</p>
+<p>When thinking is included, the assistant message carries it on a
+separate <code>reasoning_content</code> field — content stays the user-facing
+answer:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">&quot;choices&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">      </span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;assistant&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The answer is 42.&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">&quot;reasoning_content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Let me work through this step by step...&quot;</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">  </span><span class="p">}]</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="p">}</span>
+</code></pre></div>
+<p>Streaming responses emit reasoning and content as separate SSE deltas
+so clients can render them in different visual tracks (e.g. an
+ephemeral "Thinking…" panel):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>data: {&quot;choices&quot;:[{&quot;delta&quot;:{&quot;role&quot;:&quot;assistant&quot;}}]}
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>data: {&quot;choices&quot;:[{&quot;delta&quot;:{&quot;reasoning_content&quot;:&quot;Let me think&quot;}}]}
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>data: {&quot;choices&quot;:[{&quot;delta&quot;:{&quot;reasoning_content&quot;:&quot; about this...&quot;}}]}
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>data: {&quot;choices&quot;:[{&quot;delta&quot;:{&quot;content&quot;:&quot;The answer is&quot;}}]}
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>data: {&quot;choices&quot;:[{&quot;delta&quot;:{&quot;content&quot;:&quot; 42.&quot;}}]}
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>data: [DONE]
+</code></pre></div>
+<p>To find out whether the network has any thinking-capable models loaded
+right now, GET <code>/v1/models/capabilities</code> — each model entry includes a
+<code>supports_thinking</code> boolean.</p>
+<h3 id="tool-function-calling">Tool / function calling<a class="headerlink" href="#tool-function-calling" title="Permanent link">&para;</a></h3>
+<p>Pass <code>tools</code> and (optionally) <code>tool_choice</code> exactly as you would to the
+OpenAI API. mycellm forwards them to whichever backend ends up serving
+the request — local llama.cpp, MLX, or an OpenAI-compatible relay — and
+across QUIC peer routing if the answering node is remote.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">&quot;model&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">&quot;messages&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;user&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;What&#39;s the capital of France?&quot;</span><span class="p">}],</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="nt">&quot;tools&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;function&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">&quot;function&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;get_country_info&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">      </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Look up facts about a country.&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">      </span><span class="nt">&quot;parameters&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">        </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;object&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">        </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;country&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">}},</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">        </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;country&quot;</span><span class="p">]</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">  </span><span class="p">}],</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="w">  </span><span class="nt">&quot;tool_choice&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="p">}</span>
+</code></pre></div>
+<p>Response contains either a normal text message or a <code>tool_calls</code> array
+in OpenAI format (<code>function.arguments</code> is a JSON-encoded string).</p>
+<p>Local Qwen-family models sometimes emit tool calls as <code>&lt;tool_call&gt;</code> XML
+or <code>```json</code> markdown fences in the content stream. mycellm
+recognises both and normalises them into proper <code>tool_calls</code> JSON
+before returning to the client — so clients always see the standard
+OpenAI shape regardless of which model the request landed on.</p>
+<p>When exactly one tool is provided and <code>tool_choice</code> is unset or
+<code>"auto"</code>, the relay path coerces <code>tool_choice</code> to the named function
+to coax JSON-structured output from models that would otherwise emit
+inline text.</p>
 
 
 
