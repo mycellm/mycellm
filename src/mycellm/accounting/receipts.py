@@ -26,9 +26,16 @@ def build_receipt_data(
     cost: float,
     request_id: str = "",
     timestamp: float = 0.0,
+    network_id: str = "",
 ) -> bytes:
-    """Build canonical CBOR receipt data for signing/verification."""
-    return cbor2.dumps({
+    """Build canonical CBOR receipt data for signing/verification.
+
+    Both the seeder and (for co-signed receipts) the consumer sign these
+    exact bytes, so the same fields in the same order must be produced on
+    every implementation (Python + Swift). ``network_id`` is appended last
+    and only when non-empty, so existing single-net receipts are unchanged.
+    """
+    d = {
         "consumer": consumer_id,
         "seeder": seeder_id,
         "model": model,
@@ -36,7 +43,10 @@ def build_receipt_data(
         "cost": cost,
         "request_id": request_id,
         "ts": timestamp or time.time(),
-    })
+    }
+    if network_id:
+        d["network_id"] = network_id
+    return cbor2.dumps(d)
 
 
 def sign_receipt(device_key, receipt_data: bytes) -> str:
@@ -66,6 +76,34 @@ def verify_receipt_signature(
     except (InvalidSignature, ValueError, Exception) as e:
         logger.debug(f"Receipt signature verification failed: {e}")
         return False
+
+
+def verify_cosigned_receipt(
+    receipt_data: bytes,
+    seeder_signature_hex: str,
+    seeder_pubkey_bytes: bytes,
+    consumer_signature_hex: str,
+    consumer_pubkey_bytes: bytes,
+) -> bool:
+    """Verify a two-party (co-signed) receipt: BOTH the seeder and the
+    consumer must have signed the same canonical receipt bytes.
+
+    The consumer's co-signature is what makes a receipt trustworthy to a
+    tracker — a seeder can't mint credit by fabricating receipts, because a
+    real counterparty had to attest "I received this service" over the exact
+    same `tokens`/`cost`/`request_id`. The tracker should additionally check
+    replay (request_id) and rate limits before settling.
+
+    Returns True only if both signatures verify.
+    """
+    seeder_ok = verify_receipt_signature(
+        receipt_data, seeder_signature_hex, seeder_pubkey_bytes
+    )
+    if not seeder_ok:
+        return False
+    return verify_receipt_signature(
+        receipt_data, consumer_signature_hex, consumer_pubkey_bytes
+    )
 
 
 class ReceiptValidator:
