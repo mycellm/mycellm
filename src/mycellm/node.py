@@ -1454,8 +1454,16 @@ class MycellmNode:
                 # bootstrap decide what to do with the announcement — public
                 # bootstraps auto-approve (see api/admin.py::_is_public_network).
                 payload = {**base_payload}
-                api_port = port if port != 8421 else 8420
-                url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
+                # Port 443 → announce via HTTPS through the public reverse proxy
+                # (e.g. Caddy fronting api.mycellm.dev → the prime's localhost-only
+                # API on 8420). Home seeders reach the public bootstrap this way
+                # without the prime having to expose 8420 publicly. Otherwise plain
+                # HTTP to the API port (a QUIC :8421 entry maps to the :8420 API).
+                if port == 443:
+                    url = f"https://{host}/v1/admin/nodes/announce"
+                else:
+                    api_port = port if port != 8421 else 8420
+                    url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
                 payload["node_name"] = self._settings.node_name
                 payload["system"] = sys_info
                 try:
