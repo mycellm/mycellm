@@ -36,6 +36,4 @@ def test_base_backend_embed_not_implemented():
 
     backend = DummyBackend()
     with pytest.raises(NotImplementedError):
-        asyncio.get_event_loop().run_until_complete(
-            backend.embed(EmbeddingRequest(input="test"))
-        )
+        asyncio.run(backend.embed(EmbeddingRequest(input="test")))
