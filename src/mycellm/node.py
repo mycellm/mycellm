@@ -767,6 +767,7 @@ class MycellmNode:
         )
 
         try:
+            completion_tokens = 0
             if stream and not tools:
                 async for chunk in self.inference.generate_stream(req):
                     chunk_msg = inference_stream_chunk(
@@ -774,6 +775,8 @@ class MycellmNode:
                         tool_calls=chunk.tool_calls,
                     )
                     await protocol.send_message(chunk_msg)
+                    if chunk.text:
+                        completion_tokens += 1  # ~1 token per streamed chunk
                 done_msg = inference_done(self.peer_id, msg.id)
                 await protocol.send_message(done_msg)
             elif stream and tools:
@@ -802,32 +805,35 @@ class MycellmNode:
                 )
                 await protocol.reply_on_stream(stream_id, resp)
 
-            # Credit the seeder (with rate limiting)
-            if self.ledger:
-                tokens = result.completion_tokens if not stream else 0
-                from mycellm.accounting.pricing import compute_reward
-                reward = compute_reward(max(tokens, 1))
+            # Non-streamed (incl. tool) paths report the token count on the
+            # result; the streamed path counted chunks above.
+            if not (stream and not tools):
+                completion_tokens = result.completion_tokens
 
-                # Generate signed receipt. network_id settles the receipt into
-                # the right per-net tracker ledger; v1 stamps the public net for
-                # the public fleet (older peers omit it -> the consumer reads it
-                # back from the message, so cross-version verification still
-                # matches).
+            # Credit the seeder + emit a co-signable receipt for BOTH streamed
+            # and non-streamed completions. Streaming is the common chat case,
+            # so it must earn too — previously only non-streamed served earned.
+            if self.ledger:
+                from mycellm.accounting.pricing import compute_reward
+                reward = compute_reward(max(completion_tokens, 1))
+
+                # network_id settles the receipt into the right per-net tracker
+                # ledger; v1 stamps the public net for the public fleet (older
+                # peers omit it -> the consumer reads it back from the message,
+                # so cross-version verification still matches).
                 receipt_network_id = "public"
-                sig = ""
                 ts = time.time()
-                if not stream:
-                    receipt_data = build_receipt_data(
-                        consumer_id=msg.from_peer,
-                        seeder_id=self.peer_id,
-                        model=model_name,
-                        tokens=result.completion_tokens,
-                        cost=reward,
-                        request_id=msg.id,
-                        timestamp=ts,
-                        network_id=receipt_network_id,
-                    )
-                    sig = sign_receipt(self.device_key, receipt_data)
+                receipt_data = build_receipt_data(
+                    consumer_id=msg.from_peer,
+                    seeder_id=self.peer_id,
+                    model=model_name,
+                    tokens=completion_tokens,
+                    cost=reward,
+                    request_id=msg.id,
+                    timestamp=ts,
+                    network_id=receipt_network_id,
+                )
+                sig = sign_receipt(self.device_key, receipt_data)
 
                 if self.receipt_validator.check_credit_rate(self.peer_id):
                     await self.ledger.credit(self.peer_id, reward, "inference_served",
@@ -836,18 +842,15 @@ class MycellmNode:
                 else:
                     logger.warning("Credit rate limit reached, skipping self-credit")
 
-                # Send signed receipt to consumer
-                if sig:
-                    from mycellm.transport.messages import signed_credit_receipt
-                    receipt_msg = signed_credit_receipt(
-                        self.peer_id, msg.from_peer, self.peer_id,
-                        model_name, result.completion_tokens, reward,
-                        ts, sig,
-                    )
-                    # Include request_id for replay protection
-                    receipt_msg.payload["request_id"] = msg.id
-                    receipt_msg.payload["network_id"] = receipt_network_id
-                    await protocol.send_message(receipt_msg)
+                # Send signed receipt to the consumer (who co-signs + settles).
+                from mycellm.transport.messages import signed_credit_receipt
+                receipt_msg = signed_credit_receipt(
+                    self.peer_id, msg.from_peer, self.peer_id,
+                    model_name, completion_tokens, reward, ts, sig,
+                )
+                receipt_msg.payload["request_id"] = msg.id
+                receipt_msg.payload["network_id"] = receipt_network_id
+                await protocol.send_message(receipt_msg)
 
                 self.reputation.record_success(msg.from_peer, result.completion_tokens if not stream else 0, 0.0)
 
