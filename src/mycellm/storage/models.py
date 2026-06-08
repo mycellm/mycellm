@@ -32,6 +32,28 @@ class Account(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class NetworkAccount(Base):
+    """Per-network credit account held by a tracker (the source-of-truth node
+    for a network — the public prime for the public net, a homelab bootstrap
+    for a private one).
+
+    Distinct from Account (a node's own local view): keyed by
+    (peer_id, network_id) so one peer has an independent, authoritative balance
+    per network. A new table rather than altering Account's primary key, so it
+    is created cleanly by create_all with no migration of existing data.
+    """
+
+    __tablename__ = "network_accounts"
+
+    peer_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    network_id: Mapped[str] = mapped_column(String(64), primary_key=True, default="")
+    balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_earned: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_spent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class Transaction(Base):
     """Credit transaction record."""
 

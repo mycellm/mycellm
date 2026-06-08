@@ -11,6 +11,7 @@ from mycellm.storage.engine import get_session
 from mycellm.storage.models import (
     Account,
     GrowthSnapshot,
+    NetworkAccount,
     NodeRegistryEntry,
     Receipt,
     Transaction,
@@ -199,6 +200,104 @@ class LedgerRepository:
                 }
                 for r in result.scalars().all()
             ]
+
+
+class NetworkLedgerRepository:
+    """Per-network credit ledger for a tracker node — the source of truth for
+    a network's balances. Backed by NetworkAccount (composite peer_id+network_id
+    key). Exposes the same async surface the tracker settlement expects, with
+    every method network_id-aware. Receipts reuse the existing Receipt table.
+    """
+
+    async def ensure_account(
+        self, peer_id: str, initial_balance: float = 0.0, network_id: str = ""
+    ) -> None:
+        now = time.time()
+        async with get_session() as session:
+            existing = await session.get(NetworkAccount, (peer_id, network_id))
+            if existing is None:
+                session.add(NetworkAccount(
+                    peer_id=peer_id, network_id=network_id,
+                    balance=initial_balance, total_earned=0.0, total_spent=0.0,
+                    created_at=now, updated_at=now,
+                ))
+                await session.commit()
+
+    async def balance(self, peer_id: str, network_id: str = "") -> float:
+        async with get_session() as session:
+            acct = await session.get(NetworkAccount, (peer_id, network_id))
+            return acct.balance if acct else 0.0
+
+    async def credit(
+        self, peer_id: str, amount: float, reason: str = "",
+        counterparty_id: str = "", receipt_signature: str = "", network_id: str = "",
+    ) -> str:
+        tx_id = uuid.uuid4().hex[:16]
+        now = time.time()
+        async with get_session() as session:
+            acct = await session.get(NetworkAccount, (peer_id, network_id))
+            if acct:
+                acct.balance += amount
+                acct.total_earned += amount
+                acct.updated_at = now
+            session.add(Transaction(
+                id=tx_id, peer_id=peer_id, counterparty_id=counterparty_id,
+                amount=amount, direction="credit", reason=reason,
+                receipt_signature=receipt_signature, timestamp=now,
+            ))
+            await session.commit()
+        return tx_id
+
+    async def debit(
+        self, peer_id: str, amount: float, reason: str = "",
+        counterparty_id: str = "", receipt_signature: str = "", network_id: str = "",
+    ) -> str:
+        tx_id = uuid.uuid4().hex[:16]
+        now = time.time()
+        async with get_session() as session:
+            acct = await session.get(NetworkAccount, (peer_id, network_id))
+            if acct and acct.balance < amount:
+                raise ValueError(
+                    f"Insufficient credits: balance={acct.balance:.4f}, cost={amount:.4f}"
+                )
+            if acct:
+                acct.balance -= amount
+                acct.total_spent += amount
+                acct.updated_at = now
+            session.add(Transaction(
+                id=tx_id, peer_id=peer_id, counterparty_id=counterparty_id,
+                amount=amount, direction="debit", reason=reason,
+                receipt_signature=receipt_signature, timestamp=now,
+            ))
+            await session.commit()
+        return tx_id
+
+    async def get_account(self, peer_id: str, network_id: str = "") -> dict | None:
+        async with get_session() as session:
+            acct = await session.get(NetworkAccount, (peer_id, network_id))
+            if acct is None:
+                return None
+            return {
+                "peer_id": acct.peer_id, "network_id": acct.network_id,
+                "balance": acct.balance, "total_earned": acct.total_earned,
+                "total_spent": acct.total_spent,
+                "created_at": acct.created_at, "updated_at": acct.updated_at,
+            }
+
+    async def store_receipt(
+        self, tx_id: str, consumer_id: str, seeder_id: str,
+        model: str, tokens: int, cost: float, signature: str,
+    ) -> None:
+        now = time.time()
+        async with get_session() as session:
+            existing = await session.get(Receipt, tx_id)
+            if existing is None:
+                session.add(Receipt(
+                    tx_id=tx_id, consumer_id=consumer_id, seeder_id=seeder_id,
+                    model=model, tokens=tokens, cost=cost,
+                    signature=signature, timestamp=now,
+                ))
+                await session.commit()
 
 
 class NodeRegistryRepository:

@@ -184,12 +184,14 @@ async def submit_receipts(request: Request):
         return JSONResponse(status_code=400, content={"error": {"message": "'receipts' must be a list"}})
 
     from mycellm.accounting.tracker import settle_cosigned_receipt
+    from mycellm.storage.repositories import NetworkLedgerRepository
+    tracker_ledger = NetworkLedgerRepository()
     results, settled = [], 0
     for r in receipts[:100]:  # cap submissions per request
         if not isinstance(r, dict):
             results.append({"ok": False, "reason": "malformed"})
             continue
-        res = await settle_cosigned_receipt(node.ledger, node.receipt_validator, r)
+        res = await settle_cosigned_receipt(tracker_ledger, node.receipt_validator, r)
         if res.get("ok"):
             settled += 1
         results.append({"request_id": r.get("request_id", ""), **res})
@@ -207,7 +209,8 @@ async def get_peer_credits(peer_id: str, request: Request):
     if not getattr(node, "ledger", None):
         return JSONResponse(status_code=503, content={"error": {"message": "Tracker ledger unavailable."}})
     network_id = request.query_params.get("network_id", "")
-    acct = await node.ledger.get_account(peer_id, network_id)
+    from mycellm.storage.repositories import NetworkLedgerRepository
+    acct = await NetworkLedgerRepository().get_account(peer_id, network_id)
     if not acct:
         return {"peer_id": peer_id, "network_id": network_id, "tracked": False,
                 "balance": 0.0, "total_earned": 0.0, "total_spent": 0.0}
