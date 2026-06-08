@@ -211,13 +211,15 @@ async def get_peer_credits(peer_id: str, request: Request):
         return JSONResponse(status_code=503, content={"error": {"message": "Tracker ledger unavailable."}})
     network_id = request.query_params.get("network_id", "")
     from mycellm.storage.repositories import NetworkLedgerRepository
-    acct = await NetworkLedgerRepository().get_account(peer_id, network_id)
+    repo = NetworkLedgerRepository()
+    acct = await repo.get_account(peer_id, network_id)
+    served = await repo.served_count(peer_id)
     if not acct:
         return {"peer_id": peer_id, "network_id": network_id, "tracked": False,
-                "balance": 0.0, "total_earned": 0.0, "total_spent": 0.0}
+                "balance": 0.0, "total_earned": 0.0, "total_spent": 0.0, "served": served}
     return {"peer_id": peer_id, "network_id": network_id, "tracked": True,
             "balance": acct["balance"], "total_earned": acct["total_earned"],
-            "total_spent": acct["total_spent"]}
+            "total_spent": acct["total_spent"], "served": served}
 
 
 @router.post("/chat/completions")

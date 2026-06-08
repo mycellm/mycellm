@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, func, or_, select
 
 from mycellm.storage.engine import get_session
 from mycellm.storage.models import (
@@ -319,6 +319,16 @@ class NetworkLedgerRepository:
                 acct.balance = target
                 acct.updated_at = now
                 await session.commit()
+
+    async def served_count(self, peer_id: str) -> int:
+        """Number of inferences this peer has served — counted from settled
+        receipts where it was the seeder. The authoritative served count, so a
+        node's inference total survives restart/reinstall like its balance."""
+        async with get_session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(Receipt).where(Receipt.seeder_id == peer_id)
+            )
+            return int(result.scalar() or 0)
 
 
 class NodeRegistryRepository:
