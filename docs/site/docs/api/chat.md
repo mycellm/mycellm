@@ -41,6 +41,30 @@ OpenAI-compatible chat completions with streaming support.
 | `routing` | string | `best` (quality) or `fastest` (latency) |
 | `fallback` | string | `downgrade` or `reject` |
 
+### Vision (multimodal)
+
+Send images alongside text using OpenAI-style content parts. A `user` message's
+`content` becomes an array of `text` and `image_url` parts; an image may be a
+`data:` URL (base64) or an `https://` URL.
+
+```json
+{
+  "model": "auto",
+  "messages": [
+    {"role": "user", "content": [
+      {"type": "text", "text": "What's in this image?"},
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ..."}}
+    ]}
+  ]
+}
+```
+
+Image requests are routed to a **vision-capable** node (e.g. a Qwen2.5-VL or
+Gemma 3 vision model); the public gateway will not silently fall back to a
+text-only model — if no vision node is available you get a `503` rather than a
+hallucinated answer. Nodes that load a vision model advertise the `vision` tag
+automatically. Text-only backends flatten image parts out and answer the text.
+
 ### Response
 
 ```json

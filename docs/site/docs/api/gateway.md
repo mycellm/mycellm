@@ -20,6 +20,8 @@ When `MYCELLM_PUBLIC=true`, these are open to the public:
 | `/v1/completions` | POST | Legacy OpenAI completions |
 | `/v1/embeddings` | POST | If a backing model supports embeddings |
 | `/api/tags` `/api/show` `/api/chat` | GET/POST | Ollama-compatible routes |
+| `/v1/public/receipts` | POST | Submit consumer co-signed credit receipts to the network tracker for settlement |
+| `/v1/public/credits/{peer_id}` | GET | A peer's authoritative per-network balance + served-inference count (`?network_id=`) |
 | `/health` `/metrics` | GET | Always public |
 
 Admin and node-management endpoints (`/v1/node/*`, `/v1/admin/*`) **still
