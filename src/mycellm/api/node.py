@@ -134,6 +134,57 @@ async def node_credits(request: Request):
     return await node.get_credits()
 
 
+@router.get("/credits/networks")
+async def node_credits_networks(request: Request):
+    """Per-network authoritative credit balances for THIS node, read from the
+    tracker (source of truth). If this node is the tracker (a public bootstrap)
+    the ledger is queried in-process; otherwise it's fetched from the public
+    tracker over HTTP. Returns each network's balance plus an aggregate.
+    """
+    node = request.app.state.node
+    peer_id = node.peer_id
+    # v1: surface the public net + the default net. Future: derive from the
+    # node's actual network memberships.
+    nets = ["public", ""]
+    results = []
+
+    if getattr(node._settings, "public", False) and node.ledger:
+        from mycellm.storage.repositories import NetworkLedgerRepository
+        repo = NetworkLedgerRepository()
+        for net in nets:
+            acct = await repo.get_account(peer_id, net)
+            results.append({
+                "network_id": net, "label": net or "default",
+                "balance": acct["balance"] if acct else 0.0,
+                "earned": acct["total_earned"] if acct else 0.0,
+                "spent": acct["total_spent"] if acct else 0.0,
+                "tracked": bool(acct),
+            })
+    else:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            for net in nets:
+                entry = {"network_id": net, "label": net or "default",
+                         "balance": 0.0, "earned": 0.0, "spent": 0.0, "tracked": False}
+                try:
+                    async with session.get(
+                        f"https://api.mycellm.dev/v1/public/credits/{peer_id}",
+                        params={"network_id": net},
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as resp:
+                        d = await resp.json()
+                    entry.update({"balance": d.get("balance", 0.0),
+                                  "earned": d.get("total_earned", 0.0),
+                                  "spent": d.get("total_spent", 0.0),
+                                  "tracked": d.get("tracked", False)})
+                except Exception:
+                    pass
+                results.append(entry)
+
+    aggregate = sum(r["balance"] for r in results if r["tracked"])
+    return {"peer_id": peer_id, "networks": results, "aggregate_balance": aggregate}
+
+
 @router.get("/credits/tier")
 async def credit_tier(request: Request):
     """Get the consumer's current credit tier and access level."""

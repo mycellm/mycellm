@@ -8,6 +8,7 @@ export const API = {
     credits: '/v1/node/credits',
     creditsHistory: '/v1/node/credits/history',
     creditsTier: '/v1/node/credits/tier',
+    creditsNetworks: '/v1/node/credits/networks',
     connections: '/v1/node/connections',
     logs: '/v1/node/logs',
     logsStream: '/v1/node/logs/stream',

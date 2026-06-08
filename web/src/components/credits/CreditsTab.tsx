@@ -6,6 +6,7 @@ import type { CreditTier, Transaction } from '@/api/types'
 import { useCreditsStore } from '@/stores/credits'
 import { useCredits } from '@/hooks/useCredits'
 import { CreditsSummary } from './CreditsSummary'
+import { NetworkBalancesCard } from './NetworkBalancesCard'
 import { TierCard } from './TierCard'
 import { ReceiptsCard } from './ReceiptsCard'
 import { TransactionHistory } from './TransactionHistory'
@@ -60,6 +61,8 @@ export function CreditsTab() {
   return (
     <div className="space-y-6">
       <CreditsSummary />
+
+      <NetworkBalancesCard />
 
       {tier && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
