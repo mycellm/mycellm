@@ -14,20 +14,23 @@ class LocalLedger:
     def __init__(self, db_path: str):
         self._db_path = db_path
 
-    async def ensure_account(self, peer_id: str, initial_balance: float = 0.0) -> None:
+    async def ensure_account(
+        self, peer_id: str, initial_balance: float = 0.0, network_id: str = ""
+    ) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             now = time.time()
             await db.execute(
-                """INSERT OR IGNORE INTO accounts (peer_id, balance, total_earned, total_spent, created_at, updated_at)
-                   VALUES (?, ?, 0.0, 0.0, ?, ?)""",
-                (peer_id, initial_balance, now, now),
+                """INSERT OR IGNORE INTO accounts (peer_id, network_id, balance, total_earned, total_spent, created_at, updated_at)
+                   VALUES (?, ?, ?, 0.0, 0.0, ?, ?)""",
+                (peer_id, network_id, initial_balance, now, now),
             )
             await db.commit()
 
-    async def balance(self, peer_id: str) -> float:
+    async def balance(self, peer_id: str, network_id: str = "") -> float:
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
-                "SELECT balance FROM accounts WHERE peer_id = ?", (peer_id,)
+                "SELECT balance FROM accounts WHERE peer_id = ? AND network_id = ?",
+                (peer_id, network_id),
             )
             row = await cursor.fetchone()
             return row[0] if row else 0.0
@@ -53,8 +56,8 @@ class LocalLedger:
 
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
-                "UPDATE accounts SET balance = balance + ?, total_earned = total_earned + ?, updated_at = ? WHERE peer_id = ?",
-                (amount, amount, now, peer_id),
+                "UPDATE accounts SET balance = balance + ?, total_earned = total_earned + ?, updated_at = ? WHERE peer_id = ? AND network_id = ?",
+                (amount, amount, now, peer_id, network_id),
             )
             await db.execute(
                 "INSERT INTO transactions (id, peer_id, counterparty_id, amount, direction, reason, receipt_signature, network_id, timestamp) VALUES (?, ?, ?, ?, 'credit', ?, ?, ?, ?)",
@@ -87,15 +90,16 @@ class LocalLedger:
         async with aiosqlite.connect(self._db_path) as db:
             # Check balance first
             cursor = await db.execute(
-                "SELECT balance FROM accounts WHERE peer_id = ?", (peer_id,)
+                "SELECT balance FROM accounts WHERE peer_id = ? AND network_id = ?",
+                (peer_id, network_id),
             )
             row = await cursor.fetchone()
             if row and row[0] < amount:
                 raise ValueError(f"Insufficient credits: balance={row[0]:.4f}, cost={amount:.4f}")
 
             await db.execute(
-                "UPDATE accounts SET balance = balance - ?, total_spent = total_spent + ?, updated_at = ? WHERE peer_id = ?",
-                (amount, amount, now, peer_id),
+                "UPDATE accounts SET balance = balance - ?, total_spent = total_spent + ?, updated_at = ? WHERE peer_id = ? AND network_id = ?",
+                (amount, amount, now, peer_id, network_id),
             )
             await db.execute(
                 "INSERT INTO transactions (id, peer_id, counterparty_id, amount, direction, reason, receipt_signature, network_id, timestamp) VALUES (?, ?, ?, ?, 'debit', ?, ?, ?, ?)",
@@ -114,11 +118,12 @@ class LocalLedger:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-    async def get_account(self, peer_id: str) -> dict | None:
+    async def get_account(self, peer_id: str, network_id: str = "") -> dict | None:
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT * FROM accounts WHERE peer_id = ?", (peer_id,)
+                "SELECT * FROM accounts WHERE peer_id = ? AND network_id = ?",
+                (peer_id, network_id),
             )
             row = await cursor.fetchone()
             return dict(row) if row else None

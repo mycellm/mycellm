@@ -161,6 +161,61 @@ def _get_candidates(node, require_vision: bool = False) -> list[tuple[str, str |
     return [(c[0], c[1], c[2]) for c in rotated]
 
 
+@router.post("/receipts")
+async def submit_receipts(request: Request):
+    """Ingest co-signed receipts into the tracker's per-network ledger.
+
+    Public + unauthenticated by design — the security is the consumer
+    co-signature + pubkey↔peer_id binding (verified per receipt), not an API
+    key. Body: {"receipts": [ {consumer, seeder, model, tokens, cost,
+    request_id, ts, network_id?, seeder_signature, consumer_signature,
+    seeder_pubkey, consumer_pubkey}, ... ]}.
+    """
+    node = request.app.state.node
+    if not getattr(node, "ledger", None):
+        return JSONResponse(status_code=503, content={"error": {"message": "Tracker ledger unavailable."}})
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON"}})
+
+    receipts = body.get("receipts", [])
+    if not isinstance(receipts, list):
+        return JSONResponse(status_code=400, content={"error": {"message": "'receipts' must be a list"}})
+
+    from mycellm.accounting.tracker import settle_cosigned_receipt
+    results, settled = [], 0
+    for r in receipts[:100]:  # cap submissions per request
+        if not isinstance(r, dict):
+            results.append({"ok": False, "reason": "malformed"})
+            continue
+        res = await settle_cosigned_receipt(node.ledger, node.receipt_validator, r)
+        if res.get("ok"):
+            settled += 1
+        results.append({"request_id": r.get("request_id", ""), **res})
+    return {"received": len(receipts), "settled": settled, "results": results}
+
+
+@router.get("/credits/{peer_id}")
+async def get_peer_credits(peer_id: str, request: Request):
+    """The tracker's authoritative credit balance for a peer on a network.
+
+    Query: ?network_id=... (default ''). Public — balances aren't secret and a
+    node reads its own to reconcile its local cache against the source of truth.
+    """
+    node = request.app.state.node
+    if not getattr(node, "ledger", None):
+        return JSONResponse(status_code=503, content={"error": {"message": "Tracker ledger unavailable."}})
+    network_id = request.query_params.get("network_id", "")
+    acct = await node.ledger.get_account(peer_id, network_id)
+    if not acct:
+        return {"peer_id": peer_id, "network_id": network_id, "tracked": False,
+                "balance": 0.0, "total_earned": 0.0, "total_spent": 0.0}
+    return {"peer_id": peer_id, "network_id": network_id, "tracked": True,
+            "balance": acct["balance"], "total_earned": acct["total_earned"],
+            "total_spent": acct["total_spent"]}
+
+
 @router.post("/chat/completions")
 async def public_chat(request: Request):
     """Public chat completions — rate-limited, Tier 1 only, no auth required.

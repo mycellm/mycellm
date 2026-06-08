@@ -4,12 +4,14 @@ from __future__ import annotations
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS accounts (
-    peer_id TEXT PRIMARY KEY,
+    peer_id TEXT NOT NULL,
+    network_id TEXT NOT NULL DEFAULT '',
     balance REAL NOT NULL DEFAULT 0.0,
     total_earned REAL NOT NULL DEFAULT 0.0,
     total_spent REAL NOT NULL DEFAULT 0.0,
     created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (peer_id, network_id)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -21,8 +23,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     reason TEXT NOT NULL,
     receipt_signature TEXT,
     network_id TEXT DEFAULT '',
-    timestamp REAL NOT NULL,
-    FOREIGN KEY (peer_id) REFERENCES accounts(peer_id)
+    timestamp REAL NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_peer ON transactions(peer_id);
@@ -62,6 +63,35 @@ async def init_db(db_path: str) -> None:
     import aiosqlite
 
     async with aiosqlite.connect(db_path) as db:
+        await _migrate_accounts_per_net(db)
         await db.executescript(SCHEMA_SQL)
         await db.execute("PRAGMA journal_mode=WAL")
         await db.commit()
+
+
+async def _migrate_accounts_per_net(db) -> None:
+    """Migrate a pre-per-net accounts table (peer_id PRIMARY KEY) to the
+    composite (peer_id, network_id) key. Existing balances land in the
+    default network ('') so nothing is lost. No-op on fresh DBs or
+    already-migrated ones."""
+    cursor = await db.execute("PRAGMA table_info(accounts)")
+    cols = [row[1] for row in await cursor.fetchall()]
+    if not cols or "network_id" in cols:
+        return  # fresh DB (SCHEMA_SQL will create it) or already migrated
+    await db.executescript("""
+        ALTER TABLE accounts RENAME TO accounts_legacy;
+        CREATE TABLE accounts (
+            peer_id TEXT NOT NULL,
+            network_id TEXT NOT NULL DEFAULT '',
+            balance REAL NOT NULL DEFAULT 0.0,
+            total_earned REAL NOT NULL DEFAULT 0.0,
+            total_spent REAL NOT NULL DEFAULT 0.0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (peer_id, network_id)
+        );
+        INSERT INTO accounts (peer_id, network_id, balance, total_earned, total_spent, created_at, updated_at)
+            SELECT peer_id, '', balance, total_earned, total_spent, created_at, updated_at FROM accounts_legacy;
+        DROP TABLE accounts_legacy;
+    """)
+    await db.commit()
