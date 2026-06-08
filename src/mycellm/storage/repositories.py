@@ -299,6 +299,27 @@ class NetworkLedgerRepository:
                 ))
                 await session.commit()
 
+    async def grant_treasury(self, peer_id: str, network_id: str, target: float) -> None:
+        """Designate (mint) credit for an authority's own account on a network
+        it is the source of truth for — top its balance up to ``target``. This
+        is how a tracker gives itself effectively-unlimited credit to spend
+        (the public prime for the public net, a private net's tracker for its
+        own net). Idempotent: never lowers an existing balance.
+        """
+        now = time.time()
+        async with get_session() as session:
+            acct = await session.get(NetworkAccount, (peer_id, network_id))
+            if acct is None:
+                session.add(NetworkAccount(
+                    peer_id=peer_id, network_id=network_id, balance=target,
+                    total_earned=0.0, total_spent=0.0, created_at=now, updated_at=now,
+                ))
+                await session.commit()
+            elif acct.balance < target:
+                acct.balance = target
+                acct.updated_at = now
+                await session.commit()
+
 
 class NodeRegistryRepository:
     """Node registry operations backed by SQLAlchemy.

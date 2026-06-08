@@ -24,6 +24,11 @@ logger = logging.getLogger("mycellm.accounting.tracker")
 # Faucet the tracker grants the first time it sees an account on a network.
 SEED_BALANCE = 100.0
 
+# Treasury an authority (tracker) designates for its OWN account on a network
+# it is the source of truth for — effectively unlimited credit to spend as the
+# consumer (e.g. the public prime serving demo traffic). Refreshed on startup.
+TRACKER_TREASURY = 1_000_000_000.0
+
 
 async def settle_cosigned_receipt(ledger, validator, r: dict) -> dict:
     """Verify and settle one co-signed receipt into the per-net ledger.

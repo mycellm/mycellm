@@ -277,6 +277,22 @@ class MycellmNode:
         self.growth_repo = GrowthRepository()
         await self.ledger.ensure_account(self.peer_id, self._settings.initial_credits)
 
+        # Tracker treasury: if this node is a network's source of truth (a
+        # public bootstrap is the authority for the public net), designate
+        # itself effectively-unlimited credit so it never runs out spending as
+        # the consumer for demo traffic. Chat-client rate limits are enforced
+        # separately at the gateway, independent of this ledger.
+        if getattr(self._settings, "public", False):
+            try:
+                from mycellm.storage.repositories import NetworkLedgerRepository
+                from mycellm.accounting.tracker import TRACKER_TREASURY
+                treasury_repo = NetworkLedgerRepository()
+                for _net in ("public", ""):
+                    await treasury_repo.grant_treasury(self.peer_id, _net, TRACKER_TREASURY)
+                logger.info(f"{styled_tag('CREDIT')} Tracker treasury designated for public net")
+            except Exception as e:
+                logger.warning(f"Tracker treasury grant failed: {e}")
+
         # Migrate JSON registry to DB if it exists
         await self._migrate_json_registry()
 
