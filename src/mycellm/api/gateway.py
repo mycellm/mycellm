@@ -95,29 +95,39 @@ def _select_tier1_model(node) -> tuple[str | None, str | None]:
 _round_robin_counter = 0
 
 
-def _get_candidates(node) -> list[tuple[str, str | None, int]]:
+def _is_vision_model(name: str, backend: str = "") -> bool:
+    """True if a candidate can accept image input — by advertised backend
+    (``mlx-vlm``) or a vision marker in the model name (fallback for models
+    served via other backends or where backend isn't advertised)."""
+    if (backend or "").lower() == "mlx-vlm":
+        return True
+    n = (name or "").lower()
+    return any(tok in n for tok in ("-vl-", "-vl", "vl-", "vision", "llava", "pixtral", "smolvlm", "-vlm"))
+
+
+def _get_candidates(node, require_vision: bool = False) -> list[tuple[str, str | None, int]]:
     """Get all available model candidates, load-balanced across equal tiers.
 
     Returns list of (model_name, fleet_addr_or_None, tier).
     Candidates within the same tier are rotated via round-robin so
     concurrent requests spread across models/nodes instead of always
-    hitting the same one first.
+    hitting the same one first. When ``require_vision`` is set (the request
+    carries an image), only vision-capable candidates are kept — otherwise an
+    image could be load-balanced onto a text model that silently drops it.
     """
     global _round_robin_counter
     _round_robin_counter += 1
 
-    candidates = []
+    candidates = []  # (name, fleet_addr, tier, backend)
 
     # Local models (preferred — no network hop)
     for m in node.inference.loaded_models:
-        tier = classify_tier(m.param_count_b)
-        candidates.append((m.name, None, tier))
+        candidates.append((m.name, None, classify_tier(m.param_count_b), getattr(m, "backend", "")))
 
     # QUIC-connected peers (can serve inference over existing connection — NAT-friendly)
     for entry in node.registry.connected_peers():
         for m in entry.capabilities.models:
-            tier = classify_tier(m.param_count_b)
-            candidates.append((m.name, f"quic:{entry.peer_id}", tier))
+            candidates.append((m.name, f"quic:{entry.peer_id}", classify_tier(m.param_count_b), getattr(m, "backend", "")))
 
     # Fleet nodes (HTTP proxy — requires reachable api_addr)
     import time as _time
@@ -129,13 +139,13 @@ def _get_candidates(node) -> list[tuple[str, str | None, int]]:
         addr = entry.get("api_addr", "")
         for m in entry.get("capabilities", {}).get("models", []):
             if isinstance(m, dict):
-                name = m.get("name", "")
-                param_b = m.get("param_count_b", 0)
-                tier = classify_tier(param_b)
+                candidates.append((m.get("name", ""), addr, classify_tier(m.get("param_count_b", 0)), m.get("backend", "")))
             else:
-                name = m
-                tier = 1
-            candidates.append((name, addr, tier))
+                candidates.append((m, addr, 1, ""))
+
+    # Multimodal requests must go to a vision-capable model.
+    if require_vision:
+        candidates = [c for c in candidates if _is_vision_model(c[0], c[3])]
 
     # Group by tier, rotate within each tier via round-robin
     from itertools import groupby
@@ -148,7 +158,7 @@ def _get_candidates(node) -> list[tuple[str, str | None, int]]:
             items = items[offset:] + items[:offset]
         rotated.extend(items)
 
-    return rotated
+    return [(c[0], c[1], c[2]) for c in rotated]
 
 
 @router.post("/chat/completions")
@@ -212,12 +222,21 @@ async def public_chat(request: Request):
     if not allowed:
         return JSONResponse(status_code=429, content={"error": {"message": reason}})
 
+    # Multimodal: if the prompt carries an image, only vision-capable models can
+    # serve it (a text model would silently flatten the image to text). Filter
+    # candidates so an image never lands on a text model.
+    has_image = any(
+        isinstance(m.get("content"), list) and
+        any(isinstance(p, dict) and p.get("type") == "image_url" for p in m["content"])
+        for m in messages
+    )
+
     # Get all available candidates, try each until one succeeds
-    candidates = _get_candidates(node)
+    candidates = _get_candidates(node, require_vision=has_image)
     if not candidates:
-        return JSONResponse(status_code=503, content={
-            "error": {"message": "No models currently available. Try again later."}
-        })
+        msg = ("No vision-capable model is available for image input right now. Try again later."
+               if has_image else "No models currently available. Try again later.")
+        return JSONResponse(status_code=503, content={"error": {"message": msg}})
 
     stream = body.get("stream", False)
     max_tokens = min(body.get("max_tokens", _MAX_REQUEST_TOKENS), _MAX_REQUEST_TOKENS)
