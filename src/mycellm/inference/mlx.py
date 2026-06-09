@@ -32,6 +32,46 @@ from mycellm.inference.base import (
 
 logger = logging.getLogger("mycellm.inference")
 
+# Chat-template end markers that model configs sometimes fail to register as
+# eos_token_id (e.g. mlx-community/Qwen2.5-Coder-*-4bit ships
+# eos=<|endoftext|> while its chat template terminates turns with <|im_end|>).
+# mlx_lm only stops on eos_token_ids, so an unregistered terminator
+# detokenizes straight into the output text. Treated as implicit stop strings.
+# Deliberately excludes "</s>" (legitimate in generated HTML); </s>-style eos
+# tokens are picked up from tokenizer.eos_token instead.
+CHAT_END_MARKERS = (
+    "<|im_end|>",  # ChatML / Qwen
+    "<|eot_id|>",  # Llama 3
+    "<|end|>",  # Phi
+    "<|endoftext|>",
+)
+
+
+def chat_stop_strings(tokenizer, extra: list[str] | None = None) -> list[str]:
+    """Request stop strings plus implicit chat-template terminators."""
+    stops = list(extra or [])
+    for marker in CHAT_END_MARKERS:
+        if marker not in stops:
+            stops.append(marker)
+    eos = getattr(tokenizer, "eos_token", None)
+    if isinstance(eos, str) and eos and eos not in stops:
+        stops.append(eos)
+    return stops
+
+
+def truncate_at_stops(text: str, stops: list[str]) -> tuple[str, str | None]:
+    """Truncate at the earliest stop-string occurrence.
+
+    Returns (truncated_text, hit) where hit is the matched stop string or
+    None if no stop occurs in the text.
+    """
+    cut, hit = len(text), None
+    for s in stops:
+        i = text.find(s)
+        if i != -1 and i < cut:
+            cut, hit = i, s
+    return text[:cut], hit
+
 
 def _require_apple_silicon() -> None:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
@@ -195,12 +235,7 @@ class MLXBackend(InferenceBackend):
         completion_tokens = len(tokenizer.encode(text)) if hasattr(tokenizer, "encode") else 0
 
         finish = "stop"
-        if request.stop:
-            for s in request.stop:
-                if s in text:
-                    text = text.split(s)[0]
-                    finish = "stop"
-                    break
+        text, _ = truncate_at_stops(text, chat_stop_strings(tokenizer, request.stop))
 
         return InferenceResult(
             text=text,
@@ -223,7 +258,7 @@ class MLXBackend(InferenceBackend):
         loop = asyncio.get_running_loop()
         chunk_queue: asyncio.Queue = asyncio.Queue()
         _SENTINEL = object()
-        stop_strings = list(request.stop or [])
+        stop_strings = chat_stop_strings(tokenizer, request.stop)
         seen_text = ""
 
         def _run_stream():
@@ -255,14 +290,10 @@ class MLXBackend(InferenceBackend):
 
             if stop_strings:
                 seen_text += text
-                hit = next((s for s in stop_strings if s in seen_text), None)
+                cut, hit = truncate_at_stops(seen_text, stop_strings)
                 if hit:
-                    cut = seen_text.split(hit)[0]
                     tail = cut[len(seen_text) - len(text):]
-                    if tail:
-                        yield InferenceChunk(text=tail, finish_reason="stop")
-                    else:
-                        yield InferenceChunk(text="", finish_reason="stop")
+                    yield InferenceChunk(text=tail, finish_reason="stop")
                     break
 
             if text or finish:

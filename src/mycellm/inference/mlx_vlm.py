@@ -55,6 +55,7 @@ from mycellm.inference.base import (
     InferenceRequest,
     InferenceResult,
 )
+from mycellm.inference.mlx import chat_stop_strings, truncate_at_stops
 
 logger = logging.getLogger("mycellm.inference")
 
@@ -316,11 +317,8 @@ class MLXVLMBackend(InferenceBackend):
             text = out if isinstance(out, str) else str(out)
 
         finish = "stop"
-        if request.stop:
-            for s in request.stop:
-                if s in text:
-                    text = text.split(s)[0]
-                    break
+        tok = getattr(processor, "tokenizer", None) or processor
+        text, _ = truncate_at_stops(text, chat_stop_strings(tok, request.stop))
 
         prompt_tokens, completion_tokens = self._count_tokens(processor, prompt, text)
         return InferenceResult(
@@ -341,7 +339,8 @@ class MLXVLMBackend(InferenceBackend):
         loop = asyncio.get_running_loop()
         chunk_queue: asyncio.Queue = asyncio.Queue()
         _SENTINEL = object()
-        stop_strings = list(request.stop or [])
+        tok = getattr(processor, "tokenizer", None) or processor
+        stop_strings = chat_stop_strings(tok, request.stop)
         seen_text = ""
 
         def _run_stream():
@@ -378,9 +377,8 @@ class MLXVLMBackend(InferenceBackend):
 
             if stop_strings:
                 seen_text += text
-                hit = next((s for s in stop_strings if s in seen_text), None)
+                cut, hit = truncate_at_stops(seen_text, stop_strings)
                 if hit:
-                    cut = seen_text.split(hit)[0]
                     tail = cut[len(seen_text) - len(text):]
                     yield InferenceChunk(text=tail, finish_reason="stop")
                     break

@@ -4,6 +4,22 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [Unreleased]
+
+### Fixed
+- **Chat terminator tokens leaking into MLX completions** (e.g. a literal
+  `<|im_end|>` at the end of Qwen2.5-Coder responses). Some model configs
+  don't register their chat template's turn terminator as `eos_token_id`
+  (mlx-community Qwen2.5-Coder ships `eos=<|endoftext|>` while the template
+  ends turns with `<|im_end|>`), and `mlx_lm`/`mlx-vlm` only stop on
+  registered eos ids, so the marker detokenized straight into the output.
+  All three MLX backends (mlx, mlx-batched, mlx-vlm) now treat well-known
+  chat terminators (`<|im_end|>`, `<|eot_id|>`, `<|end|>`, `<|endoftext|>`)
+  plus the tokenizer's declared `eos_token` as implicit stop strings, and
+  stop-string truncation now cuts at the earliest match when several stops
+  occur. `</s>` is deliberately not implicit (legitimate in generated HTML);
+  it is honored only when the tokenizer declares it as eos.
+
 ## [0.4.1] — 2026-06-08
 
 ### Fixed

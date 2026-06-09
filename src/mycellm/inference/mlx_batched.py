@@ -55,6 +55,7 @@ from mycellm.inference.base import (
     InferenceResult,
     flatten_message_content,
 )
+from mycellm.inference.mlx import chat_stop_strings, truncate_at_stops
 
 logger = logging.getLogger("mycellm.inference")
 
@@ -312,9 +313,8 @@ class BatchedMLXBackend(InferenceBackend):
 
             if text:
                 job.emitted_text += text
-                hit = next((s for s in job.stop if s in job.emitted_text), None)
+                cut, hit = truncate_at_stops(job.emitted_text, job.stop)
                 if hit:
-                    cut = job.emitted_text.split(hit)[0]
                     tail = cut[len(job.emitted_text) - len(text):]
                     if tail:
                         self._emit(job, InferenceChunk(text=tail))
@@ -352,9 +352,8 @@ class BatchedMLXBackend(InferenceBackend):
             if delta:
                 job.emitted_text = full
                 # Custom stop-string handling (token-level stop covers eos only).
-                hit = next((s for s in job.stop if s in job.emitted_text), None)
+                cut, hit = truncate_at_stops(job.emitted_text, job.stop)
                 if hit:
-                    cut = job.emitted_text.split(hit)[0]
                     tail = cut[len(job.emitted_text) - len(delta):]
                     if tail:
                         self._emit(job, InferenceChunk(text=tail))
@@ -410,7 +409,7 @@ class BatchedMLXBackend(InferenceBackend):
             tokens=self._build_prompt_ids(request),
             max_tokens=request.max_tokens,
             sampler=self._make_sampler(request),
-            stop=list(request.stop or []),
+            stop=chat_stop_strings(self._tokenizer, request.stop),
             loop=loop,
             chunks=asyncio.Queue(),
         )
