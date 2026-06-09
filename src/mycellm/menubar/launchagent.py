@@ -21,9 +21,17 @@ def plist_path(directory: Path | None = None) -> Path:
 
 
 def _menubar_command(api: str) -> list[str]:
-    """Resolve the command that relaunches this menubar app at login."""
-    exe = shutil.which("mycellm") or str(Path(sys.executable).parent / "mycellm")
-    return [exe, "menubar", "--api", api]
+    """Resolve the command that relaunches this menubar app at login.
+
+    Prefer the `mycellm` next to the interpreter that's installing the
+    agent: machines with several mycellm installs (venv + homebrew + dev
+    checkouts) must relaunch the one that actually has the menubar extra,
+    not whichever happens to be first on PATH.
+    """
+    sibling = Path(sys.executable).parent / "mycellm"
+    if sibling.exists():
+        return [str(sibling), "menubar", "--api", api]
+    return [shutil.which("mycellm") or "mycellm", "menubar", "--api", api]
 
 
 def plist_content(api: str) -> dict:
