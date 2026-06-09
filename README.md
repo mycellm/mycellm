@@ -129,6 +129,7 @@ You (consumer) ──QUIC──▶ Bootstrap (relay) ──QUIC──▶ Seeder 
 - **Grammar-constrained output** via GBNF (`grammar` field on chat completions)
 - **Model management** — download from HuggingFace, load/unload, scope control, platform-aware recommender
 - **Thermal throttling** — auto-adjusts on mobile devices
+- **macOS menu bar monitor** — `pip install "mycellm[menubar]"` then `mycellm menubar`: the mushroom sits in your menu bar (green = healthy, cycling colors = inference in flight, gold = no models, gray = offline) with node stats, credits, and a link to the dashboard; hideable, optional launch-at-login
 
 ### Networking
 - **QUIC** transport with bidirectional streams (NWConnectionGroup on iOS, aioquic on Python)

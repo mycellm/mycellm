@@ -4,6 +4,20 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [Unreleased]
+
+### Added
+- **macOS menu bar monitor** (`mycellm menubar`, requires the `menubar`
+  extra: `pip install "mycellm[menubar]"`). The brand mushroom lives in the
+  menu bar and tells the node's story by color: Spore Green when healthy and
+  idle, cycling through the Protocol Palette (red → blue → gold → purple →
+  green) while inference is in flight, Ledger Gold when reachable with no
+  models loaded, gray when the node is offline. The dropdown shows status,
+  loaded models, peers, and credits, links to the local web dashboard
+  (management stays there), and offers Launch-at-Login (per-user
+  LaunchAgent) and Hide. The monitor is a separate process — hiding or
+  quitting it never affects the node.
+
 ## [0.4.2] — 2026-06-09
 
 ### Fixed

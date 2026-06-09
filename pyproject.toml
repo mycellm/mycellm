@@ -56,6 +56,10 @@ mlx = [
 postgres = [
     "asyncpg>=0.29",
 ]
+menubar = [
+    # macOS menu bar monitor (mycellm menubar)
+    "rumps>=0.4.0; sys_platform == 'darwin'",
+]
 dev = [
     "pytest",
     "pytest-asyncio",

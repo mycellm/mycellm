@@ -39,6 +39,7 @@ from mycellm.cli.secret import app as secret_app
 from mycellm.cli.serve import app as serve_app
 from mycellm.cli.chat import app as chat_app
 from mycellm.cli.status import app as status_app
+from mycellm.cli.menubar import app as menubar_app
 
 console = Console()
 
@@ -80,6 +81,7 @@ app.add_typer(init_app, name="init", help="Initialize mycellm — create identit
 app.add_typer(serve_app, name="serve", help="Start the mycellm node daemon")
 app.add_typer(chat_app, name="chat", help="Interactive chat REPL with streaming and /commands")
 app.add_typer(status_app, name="status", help="Show node status, peers, models, and credits")
+app.add_typer(menubar_app, name="menubar", help="macOS menu bar monitor (requires mycellm[menubar])")
 app.add_typer(account_app, name="account", help="Manage account master keys (create/show/export)")
 app.add_typer(device_app, name="device", help="Manage device certificates (create/list/revoke)")
 app.add_typer(secret_app, name="secret", help="Manage encrypted API keys (set/list/get/remove)")
