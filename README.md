@@ -126,6 +126,7 @@ You (consumer) ──QUIC──▶ Bootstrap (relay) ──QUIC──▶ Seeder 
 - **Multimodal (vision)** — vision-language models (Qwen2.5-VL, Gemma 3) via the MLX-VLM backend; `/v1/chat/completions` accepts OpenAI image content parts (`image_url`), and the public gateway routes image requests only to vision-capable nodes
 - **OpenAI tool/function calling** — `tools` and `tool_choice` pass through local backends, the OpenAI-compat relay, and QUIC peer routing
 - **Streaming** token generation via SSE
+- **Embeddings** — OpenAI-compatible `/v1/embeddings` backed by llama.cpp GGUF embedding models (load with `"embedding": true`) or relayed to an OpenAI-compatible upstream
 - **Grammar-constrained output** via GBNF (`grammar` field on chat completions)
 - **Model management** — download from HuggingFace, load/unload, scope control, platform-aware recommender
 - **Thermal throttling** — auto-adjusts on mobile devices
@@ -224,6 +225,7 @@ print(response.choices[0].message.content)
 | GET | `/health` | Health check |
 | GET | `/v1/models` | List available models |
 | POST | `/v1/chat/completions` | Chat (streaming + non-streaming) |
+| POST | `/v1/embeddings` | Embeddings (string or list of strings) |
 | GET | `/v1/node/status` | Node status |
 | GET | `/v1/node/peers` | Connected peers |
 | POST | `/v1/node/models/load` | Load a model |

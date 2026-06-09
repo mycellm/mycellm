@@ -4,6 +4,23 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [Unreleased]
+
+### Added
+- **OpenAI-compatible embeddings** (`POST /v1/embeddings`). Accepts `input`
+  as a string or list of strings and returns the standard
+  `{object: "list", data: [{object: "embedding", index, embedding}], model,
+  usage}` shape. Served by the llama.cpp backend via `create_embedding` —
+  the model must be loaded with the new `"embedding": true` load option
+  (llama.cpp only produces embeddings when the context is created with the
+  flag; without it the API returns a 400 telling you to reload with it) —
+  and by the OpenAI-compat backend, which relays to the upstream
+  `/embeddings` endpoint. `InferenceManager.embed()` queues on the same
+  per-model Lock/Semaphore as generation. Backends without embedding support
+  (MLX text/batched/VLM) raise the new typed `EmbeddingsNotSupportedError`,
+  which the API maps to a 400 with an actionable message; token-array
+  `input` is rejected with a 400.
+
 ## [0.4.1] — 2026-06-08
 
 ### Fixed
