@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -63,6 +63,10 @@ class MLXBackend(InferenceBackend):
         self._models: dict[str, tuple[object, object]] = {}
         # name -> model_path (for capabilities/debugging)
         self._paths: dict[str, str] = {}
+        # Single persistent MLX worker — see MLXVLMBackend.__init__: a thread
+        # that touched MLX aborts the process when it exits (~CompilerCache in
+        # TLS cleanup), so all MLX work runs on one long-lived thread.
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
 
     async def load_model(self, model_path: str, **kwargs) -> None:
         _require_apple_silicon()
@@ -92,7 +96,8 @@ class MLXBackend(InferenceBackend):
             return mlx_load(target)
 
         try:
-            model, tokenizer = await asyncio.to_thread(_do_load)
+            loop = asyncio.get_running_loop()
+            model, tokenizer = await loop.run_in_executor(self._pool, _do_load)
         except Exception as e:
             err = str(e)
             if "Model type" in err and "not supported" in err:
@@ -183,7 +188,8 @@ class MLXBackend(InferenceBackend):
                 verbose=False,
             )
 
-        text = await asyncio.to_thread(_do_generate)
+        loop = asyncio.get_running_loop()
+        text = await loop.run_in_executor(self._pool, _do_generate)
 
         prompt_tokens = len(tokenizer.encode(prompt)) if hasattr(tokenizer, "encode") else 0
         completion_tokens = len(tokenizer.encode(text)) if hasattr(tokenizer, "encode") else 0
@@ -234,8 +240,8 @@ class MLXBackend(InferenceBackend):
             finally:
                 loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
 
-        thread = threading.Thread(target=_run_stream, daemon=True)
-        thread.start()
+        # Persistent MLX worker, not a per-request thread (see __init__).
+        self._pool.submit(_run_stream)
 
         while True:
             item = await chunk_queue.get()

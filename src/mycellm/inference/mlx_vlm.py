@@ -45,7 +45,7 @@ import binascii
 import json
 import logging
 import platform
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -188,6 +188,13 @@ class MLXVLMBackend(InferenceBackend):
         # name -> (model, processor, config)
         self._models: dict[str, tuple[object, object, dict]] = {}
         self._paths: dict[str, str] = {}
+        # All MLX work (load + generate + stream) runs on ONE persistent worker
+        # thread. MLX keeps a thread-local CompilerCache whose destructor runs at
+        # pthread exit; tearing down a thread that touched MLX aborts the whole
+        # process (SIGTRAP in ~CompilerCache during TLS cleanup). A single
+        # long-lived thread never exits during operation, so it never fires —
+        # this is what stopped the ~hourly crash loop on the VLM node.
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-vlm")
 
     # ---- lifecycle -----------------------------------------------------
 
@@ -219,7 +226,8 @@ class MLXVLMBackend(InferenceBackend):
             return model, processor, config
 
         try:
-            model, processor, config = await asyncio.to_thread(_do_load)
+            loop = asyncio.get_running_loop()
+            model, processor, config = await loop.run_in_executor(self._pool, _do_load)
         except Exception as e:
             err = str(e)
             if "Model type" in err and "not supported" in err:
@@ -301,7 +309,8 @@ class MLXVLMBackend(InferenceBackend):
                 **self._gen_kwargs(request),
             )
 
-        out = await asyncio.to_thread(_do_generate)
+        loop = asyncio.get_running_loop()
+        out = await loop.run_in_executor(self._pool, _do_generate)
         text = getattr(out, "text", None)
         if text is None:
             text = out if isinstance(out, str) else str(out)
@@ -348,8 +357,10 @@ class MLXVLMBackend(InferenceBackend):
             finally:
                 loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
 
-        thread = threading.Thread(target=_run_stream, daemon=True)
-        thread.start()
+        # Run on the persistent MLX worker, not a fresh per-request thread — a
+        # thread exiting after each stream is what aborted the process (see
+        # __init__). submit() reuses the single long-lived worker.
+        self._pool.submit(_run_stream)
 
         while True:
             item = await chunk_queue.get()
