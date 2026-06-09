@@ -1,3 +1,3 @@
 """Mycellm — Distributed LLM inference across heterogeneous hardware."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"

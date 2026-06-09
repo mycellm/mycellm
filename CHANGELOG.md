@@ -4,6 +4,20 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [0.4.1] — 2026-06-08
+
+### Fixed
+- **MLX node crash loop** — `abort()` in
+  `mlx::core::detail::CompilerCache::~CompilerCache()`. MLX keeps a
+  thread-local compiler cache whose destructor runs at pthread exit; the MLX
+  and MLX-VLM backends spawned a fresh thread per streamed request (and used
+  the default `to_thread` pool), so every streamed inference eventually tore
+  down an MLX-touching thread and aborted the whole process (a ~hourly crash
+  loop on the vision node under load). All MLX work (load, generate, stream)
+  now runs on a single persistent `ThreadPoolExecutor(max_workers=1)` per
+  backend, so no MLX thread is ever destroyed during operation. MLX requests
+  serialize on that worker (correct for single-stream MLX/Metal).
+
 ## [0.4.0] — 2026-06-07
 
 ### Added
