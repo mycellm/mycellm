@@ -18,6 +18,11 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
   brand SVGs is now checked in (`scripts/render_menubar_icons.py`).
 
 ### Fixed
+- **Menu bar monitor no longer shows a "Python" icon in the Dock.** The
+  monitor runs the framework `Python.app` binary, which macOS treats as a
+  regular app; it now declares itself an accessory
+  (`NSApplicationActivationPolicyAccessory`) so it lives only in the menu
+  bar, like other status-item apps.
 - **Menu bar dropdown showed `v?` instead of the node version** —
   `/v1/node/status` never included `version`, so the uptime line couldn't
   know it. The node now reports `version` in status, and the menu bar also

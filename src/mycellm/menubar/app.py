@@ -212,4 +212,12 @@ class MenubarApp(rumps.App):
 
 
 def run(api: str = "http://localhost:8420") -> None:
+    # Accessory policy = menu bar extra only. Without this the process is a
+    # regular app (the venv runs the framework Python.app bundle), so macOS
+    # puts a "Python" tile in the Dock for as long as the monitor runs.
+    from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+
+    NSApplication.sharedApplication().setActivationPolicy_(
+        NSApplicationActivationPolicyAccessory
+    )
     MenubarApp(api).run()
