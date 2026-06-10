@@ -49,6 +49,9 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
 from mycellm.inference.base import (
+    EmbeddingRequest,
+    EmbeddingResult,
+    EmbeddingsNotSupportedError,
     InferenceBackend,
     InferenceChunk,
     InferenceRequest,
@@ -446,6 +449,13 @@ class BatchedMLXBackend(InferenceBackend):
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             finish_reason=finish,
+        )
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        raise EmbeddingsNotSupportedError(
+            "Embeddings are not supported on the MLX (batched) backend. Use a "
+            'llama.cpp GGUF embedding model (loaded with "embedding": true) or '
+            "an OpenAI-compatible remote."
         )
 
     # ---- introspection -------------------------------------------------

@@ -107,6 +107,15 @@ class EmbeddingResult:
     total_tokens: int = 0
 
 
+class EmbeddingsNotSupportedError(NotImplementedError):
+    """Raised when a backend (or the loaded model) can't produce embeddings.
+
+    Subclasses NotImplementedError so existing callers that catch the generic
+    error keep working; the API layer maps this to a 400 response with the
+    message intact (it's written to be user-actionable).
+    """
+
+
 class InferenceBackend(ABC):
     """Abstract interface for inference backends."""
 
@@ -136,4 +145,6 @@ class InferenceBackend(ABC):
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
         """Generate embeddings. Override in backends that support it."""
-        raise NotImplementedError("This backend doesn't support embeddings")
+        raise EmbeddingsNotSupportedError(
+            f"Embeddings are not supported on the {type(self).__name__} backend"
+        )

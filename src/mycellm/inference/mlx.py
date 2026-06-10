@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from mycellm.inference.base import (
+    EmbeddingRequest,
+    EmbeddingResult,
+    EmbeddingsNotSupportedError,
     InferenceBackend,
     InferenceChunk,
     InferenceRequest,
@@ -298,6 +301,13 @@ class MLXBackend(InferenceBackend):
 
             if text or finish:
                 yield InferenceChunk(text=text, finish_reason=finish)
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        raise EmbeddingsNotSupportedError(
+            "Embeddings are not supported on the MLX backend. Use a llama.cpp "
+            'GGUF embedding model (loaded with "embedding": true) or an '
+            "OpenAI-compatible remote."
+        )
 
     def get_loaded_models(self) -> list[str]:
         return list(self._models.keys())

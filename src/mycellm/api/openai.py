@@ -1313,40 +1313,72 @@ async def list_models(request: Request):
     return {"object": "list", "data": models}
 
 
+class EmbeddingsRequest(BaseModel):
+    model: str = ""
+    # A string or a list of strings. OpenAI also allows token arrays
+    # (list[int] / list[list[int]]) — those are rejected with a 400 because
+    # local backends tokenize text themselves.
+    input: str | list = ""
+
+
 @router.post("/embeddings")
-async def create_embeddings(request: Request):
+async def create_embeddings(request: Request, body: EmbeddingsRequest):
     """OpenAI-compatible embeddings endpoint."""
     from fastapi.responses import JSONResponse
+    from mycellm.inference.base import EmbeddingRequest, EmbeddingsNotSupportedError
 
     node = request.app.state.node
-    body = await request.json()
-    model = body.get("model", "")
-    input_text = body.get("input", "")
 
-    model_name = node.inference.resolve_model_name(model)
+    def _error(status: int, message: str, err_type: str, code: str) -> JSONResponse:
+        return JSONResponse(
+            status_code=status,
+            content={"error": {"message": message, "type": err_type, "code": code}},
+        )
+
+    texts = body.input if isinstance(body.input, list) else [body.input]
+    if not texts:
+        return _error(
+            400, "'input' must be a non-empty string or list of strings.",
+            "invalid_request_error", "invalid_input",
+        )
+    if not all(isinstance(t, str) for t in texts):
+        return _error(
+            400,
+            "Token array input is not supported — send 'input' as a string or list of strings.",
+            "invalid_request_error", "invalid_input",
+        )
+
+    requested_model = body.model if body.model != "auto" else ""
+    model_name = node.inference.resolve_model_name(requested_model)
     if not model_name:
-        return JSONResponse(status_code=400, content={"error": {"message": "No model available for embeddings"}})
-
-    backend = node.inference.get_backend(model_name)
-    if not backend:
-        return JSONResponse(status_code=400, content={"error": {"message": f"Model '{model_name}' not found"}})
+        detail = (
+            f"Model '{body.model}' not found. No loaded model serves embeddings."
+            if requested_model else "No models loaded."
+        )
+        return _error(400, detail, "invalid_request_error", "model_not_found")
 
     try:
-        from mycellm.inference.base import EmbeddingRequest
-        req = EmbeddingRequest(input=input_text, model=model_name)
-        result = await backend.embed(req)
-
-        data = []
-        for i, emb in enumerate(result.embeddings):
-            data.append({"object": "embedding", "index": i, "embedding": emb})
-
-        return {
-            "object": "list",
-            "data": data,
-            "model": model_name,
-            "usage": {"prompt_tokens": result.total_tokens, "total_tokens": result.total_tokens},
-        }
-    except NotImplementedError:
-        return JSONResponse(status_code=400, content={"error": {"message": f"Model '{model_name}' doesn't support embeddings"}})
+        result = await node.inference.embed(EmbeddingRequest(input=texts, model=model_name))
+    except EmbeddingsNotSupportedError as e:
+        return _error(400, str(e), "invalid_request_error", "embeddings_not_supported")
+    except RuntimeError as e:
+        if "busy" in str(e).lower() or "timed out" in str(e).lower():
+            return _error(503, str(e), "model_busy", "model_busy")
+        return _error(500, str(e), "server_error", "inference_error")
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": {"message": str(e)}})
+        logger.error(f"Embeddings failed for {model_name}: {e}")
+        return _error(500, str(e), "server_error", "inference_error")
+
+    data = [
+        {"object": "embedding", "index": i, "embedding": emb}
+        for i, emb in enumerate(result.embeddings)
+    ]
+    return {
+        "object": "list",
+        "data": data,
+        "model": model_name,
+        "usage": {
+            "prompt_tokens": result.total_tokens,
+            "total_tokens": result.total_tokens,
+        },
+    }

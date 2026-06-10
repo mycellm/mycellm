@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from mycellm.inference.base import (
+    EmbeddingRequest,
+    EmbeddingResult,
     InferenceBackend,
     InferenceChunk,
     InferenceRequest,
@@ -458,6 +460,30 @@ class InferenceManager:
             self._active_count -= 1
             self._release_model(model_name)
             self._unregister_request_group(request, cancel_event)
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        """Run embeddings with per-model locking and global concurrency control.
+
+        Resolves the model the same way generate() does and queues on the same
+        per-model Lock/Semaphore — embeddings share the backend's context with
+        generation, so they must not run a forward pass concurrently with it.
+        Backends that can't embed raise EmbeddingsNotSupportedError (the API
+        layer maps it to a 400).
+        """
+        model_name = self.resolve_model_name(request.model)
+        if not model_name:
+            raise RuntimeError("No models loaded")
+
+        request.model = model_name
+        backend = self._backends[model_name]
+
+        await self._acquire_model(model_name)
+        self._active_count += 1
+        try:
+            return await backend.embed(request)
+        finally:
+            self._active_count -= 1
+            self._release_model(model_name)
 
     async def generate_stream(
         self, request: InferenceRequest

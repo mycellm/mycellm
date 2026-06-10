@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from mycellm.inference.base import (
+    EmbeddingRequest,
+    EmbeddingResult,
+    EmbeddingsNotSupportedError,
     InferenceBackend,
     InferenceChunk,
     InferenceRequest,
@@ -129,6 +132,9 @@ class LlamaCppBackend(InferenceBackend):
 
     def __init__(self):
         self._models: dict[str, object] = {}  # name -> Llama instance
+        # Models loaded with embedding=True — llama.cpp only produces
+        # embeddings when the context was created with that flag.
+        self._embedding_models: set[str] = set()
 
     async def load_model(self, model_path: str, **kwargs) -> None:
         """Load a GGUF model (runs in thread to avoid blocking)."""
@@ -161,6 +167,12 @@ class LlamaCppBackend(InferenceBackend):
         # Flash attention (Metal/CUDA optimized attention kernel)
         if flash_attn:
             extra_kwargs["flash_attn"] = True
+
+        # Embeddings — llama.cpp only produces embeddings when the context
+        # was created with embedding=True (load option: "embedding": true).
+        embedding = kwargs.get("embedding", False)
+        if embedding:
+            extra_kwargs["embedding"] = True
 
         # Asymmetric KV cache quantization — keys need higher precision than values
         # Default: K=q8_0 (higher precision), V=q4_0 (lower OK) — 59% less KV memory
@@ -227,10 +239,16 @@ class LlamaCppBackend(InferenceBackend):
             raise
 
         self._models[model_name] = llm
-        logger.info(f"Model {model_name} loaded (flash_attn={flash_attn}, kv_quant={kv_quant})")
+        if embedding:
+            self._embedding_models.add(model_name)
+        logger.info(
+            f"Model {model_name} loaded "
+            f"(flash_attn={flash_attn}, kv_quant={kv_quant}, embedding={embedding})"
+        )
 
     async def unload_model(self, model_name: str) -> None:
         model = self._models.pop(model_name, None)
+        self._embedding_models.discard(model_name)
         if model:
             del model
             logger.info(f"Model {model_name} unloaded")
@@ -361,19 +379,29 @@ class LlamaCppBackend(InferenceBackend):
             tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls)]
             yield InferenceChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls_list)
 
-    async def embed(self, request):
-        from mycellm.inference.base import EmbeddingResult
-        model_name = request.model
-        model = self._models.get(model_name)
-        if not model:
-            model = next(iter(self._models.values()), None)
-        if not model:
-            raise RuntimeError("No model loaded for embeddings")
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        """Generate embeddings via llama.cpp's create_embedding.
 
+        Requires the model to have been loaded with embedding=True (llama.cpp
+        only fills the embedding tensor when the context was created with the
+        flag). The sync call runs in a thread like generation; the
+        InferenceManager's per-model Lock serializes access to the C context.
+        """
+        model_name = request.model or next(iter(self._models), "")
+        if not model_name or model_name not in self._models:
+            raise RuntimeError(f"Model '{model_name}' not loaded")
+        if model_name not in self._embedding_models:
+            raise EmbeddingsNotSupportedError(
+                f"Model '{model_name}' was not loaded for embeddings. Reload it with "
+                'the "embedding": true load option to enable embeddings.'
+            )
+
+        llm = self._models[model_name]
         inputs = request.input if isinstance(request.input, list) else [request.input]
-        result = await asyncio.to_thread(model.create_embedding, inputs)
+        result = await asyncio.to_thread(llm.create_embedding, inputs)
 
-        embeddings = [d["embedding"] for d in result["data"]]
+        data = sorted(result.get("data", []), key=lambda d: d.get("index", 0))
+        embeddings = [d["embedding"] for d in data]
         total_tokens = result.get("usage", {}).get("total_tokens", 0)
         return EmbeddingResult(embeddings=embeddings, total_tokens=total_tokens)
 

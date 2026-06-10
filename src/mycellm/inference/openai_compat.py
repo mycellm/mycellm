@@ -25,6 +25,9 @@ from typing import AsyncIterator
 import httpx
 
 from mycellm.inference.base import (
+    EmbeddingRequest,
+    EmbeddingResult,
+    EmbeddingsNotSupportedError,
     InferenceBackend,
     InferenceChunk,
     InferenceRequest,
@@ -193,6 +196,33 @@ class OpenAICompatibleBackend(InferenceBackend):
         if accumulated_tool_calls:
             tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls)]
             yield InferenceChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls_list)
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        """Relay an embeddings request to the upstream /embeddings endpoint."""
+        model_name = request.model or next(iter(self._models), "")
+        if not model_name or model_name not in self._models:
+            raise RuntimeError(f"Remote model '{model_name}' not configured")
+
+        remote = self._models[model_name]
+        body = {"model": remote.api_model, "input": request.input}
+        resp = await remote.client.post("/embeddings", json=body)
+        if resp.status_code in (400, 404, 422):
+            # Upstream rejected the request — most commonly the configured
+            # api_model is a chat model that doesn't serve embeddings.
+            raise EmbeddingsNotSupportedError(
+                f"Upstream provider rejected embeddings for '{model_name}' "
+                f"(HTTP {resp.status_code}). Is '{remote.api_model}' an embedding model?"
+            )
+        resp.raise_for_status()
+
+        data = resp.json()
+        items = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
+        embeddings = [item["embedding"] for item in items]
+        usage = data.get("usage", {}) or {}
+        return EmbeddingResult(
+            embeddings=embeddings,
+            total_tokens=usage.get("total_tokens", usage.get("prompt_tokens", 0)),
+        )
 
     def get_loaded_models(self) -> list[str]:
         return list(self._models.keys())
