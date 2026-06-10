@@ -4,7 +4,7 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
-## [Unreleased]
+## [0.5.1] — 2026-06-10
 
 ### Added
 - **Menu bar: monochrome icon option** ("Monochrome Icon" in the dropdown,
