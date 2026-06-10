@@ -27,12 +27,67 @@ class NodeSnapshot:
     version: str = ""
     role: str = ""
     mode: str = ""
+    peer_id: str = ""
+    uptime_seconds: float = 0.0
+    gpu: str = ""
+    vram_gb: float = 0.0
+    backend: str = ""
     models: list[str] = field(default_factory=list)
+    model_details: list[dict] = field(default_factory=list)
     active: int = 0
+    max_concurrent: int = 0
     tps: float = 0.0
     peers: int = 0
     balance: float | None = None
     earned: float | None = None
+
+
+class History:
+    """Ring buffer of (tps, active) samples for the dropdown time graph."""
+
+    def __init__(self, maxlen: int = 120) -> None:
+        self.maxlen = maxlen
+        self._samples: list[tuple[float, int]] = []
+
+    def append(self, snap: NodeSnapshot) -> None:
+        self._samples.append((snap.tps if snap.reachable else 0.0,
+                              snap.active if snap.reachable else 0))
+        if len(self._samples) > self.maxlen:
+            self._samples = self._samples[-self.maxlen :]
+
+    @property
+    def tps(self) -> list[float]:
+        return [s[0] for s in self._samples]
+
+    @property
+    def active(self) -> list[int]:
+        return [s[1] for s in self._samples]
+
+    def __len__(self) -> int:
+        return len(self._samples)
+
+
+def scale_series(
+    values: list[float], width: float, height: float, pad: float = 2.0,
+    vmax: float | None = None,
+) -> list[tuple[float, float]]:
+    """Normalize a series to (x, y) points in a width×height box.
+
+    Origin is bottom-left (AppKit unflipped coordinates). A flat or empty
+    series maps to the baseline. Pass `vmax` to share a scale across series.
+    """
+    if not values:
+        return []
+    top = vmax if vmax is not None else max(values)
+    if top <= 0:
+        top = 1.0
+    span_x = width - 2 * pad
+    span_y = height - 2 * pad
+    dx = span_x / max(len(values) - 1, 1)
+    return [
+        (pad + i * dx, pad + (min(v, top) / top) * span_y)
+        for i, v in enumerate(values)
+    ]
 
 
 def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
@@ -43,14 +98,22 @@ def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
     except (urllib.error.URLError, OSError, ValueError, KeyError):
         return NodeSnapshot(reachable=False)
 
+    hardware = status.get("hardware", {})
     snap = NodeSnapshot(
         reachable=True,
         node_name=str(status.get("node_name", "")),
         version=str(status.get("version", "")),
         role=str(status.get("role", "")),
         mode=str(status.get("mode", "")),
+        peer_id=str(status.get("peer_id", "")),
+        uptime_seconds=float(status.get("uptime_seconds", 0.0)),
+        gpu=str(hardware.get("gpu", "")),
+        vram_gb=float(hardware.get("vram_gb", 0.0)),
+        backend=str(hardware.get("backend", "")),
         models=[m.get("name", "?") for m in status.get("models", [])],
+        model_details=list(status.get("models", [])),
         active=int(status.get("inference", {}).get("active", 0)),
+        max_concurrent=int(status.get("inference", {}).get("max_concurrent", 0)),
         tps=float(status.get("tps", 0.0)),
         peers=len(status.get("peers", [])),
     )
@@ -118,3 +181,57 @@ def credits_line(snap: NodeSnapshot) -> str:
     if snap.balance is None:
         return "Credits: —"
     return f"Credits: {snap.balance:,.2f} (earned {snap.earned:,.2f})"
+
+
+def peer_id_line(snap: NodeSnapshot, revealed: bool = False) -> str:
+    if not snap.peer_id:
+        return "Peer ID: —"
+    if revealed:
+        return f"Peer ID: {snap.peer_id}  (click to copy)"
+    return f"Peer ID: {snap.peer_id[:8]}…{snap.peer_id[-4:]}  (click to reveal)"
+
+
+def uptime_line(snap: NodeSnapshot) -> str:
+    if not snap.reachable:
+        return "—"
+    secs = int(snap.uptime_seconds)
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    up = f"{days}d {hours:02d}:{minutes:02d}" if days else f"{hours:02d}:{minutes:02d}"
+    version = f"v{snap.version}" if snap.version else "v?"
+    return f"{version} · up {up} · {snap.mode or 'solo'}"
+
+
+def hardware_line(snap: NodeSnapshot) -> str:
+    if not snap.gpu:
+        return "Hardware: —"
+    parts = [snap.gpu]
+    if snap.vram_gb:
+        parts.append(f"{snap.vram_gb:g}GB")
+    if snap.backend:
+        parts.append(snap.backend)
+    return "Hardware: " + " · ".join(parts)
+
+
+def model_detail_lines(snap: NodeSnapshot) -> list[str]:
+    lines = []
+    for m in snap.model_details:
+        bits = [m.get("name", "?")]
+        if m.get("quant"):
+            bits.append(str(m["quant"]))
+        if m.get("ctx_len"):
+            bits.append(f"ctx {m['ctx_len']}")
+        if m.get("backend"):
+            bits.append(str(m["backend"]))
+        lines.append("  " + " · ".join(bits))
+    return lines
+
+
+def graph_caption(history: History, snap: NodeSnapshot) -> str:
+    if not len(history):
+        return "tok/s: gathering…"
+    peak = max(history.tps)
+    window_min = len(history) * 5 // 60  # poll cadence is 5s
+    now = f"{snap.tps:.1f}" if snap.reachable else "—"
+    return f"tok/s now {now} · peak {peak:.1f} · {max(window_min, 1)} min"

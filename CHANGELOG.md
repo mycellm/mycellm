@@ -13,10 +13,13 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
   idle, cycling through the Protocol Palette (red → blue → gold → purple →
   green) while inference is in flight, Ledger Gold when reachable with no
   models loaded, gray when the node is offline. The dropdown shows status,
-  loaded models, peers, and credits, links to the local web dashboard
-  (management stays there), and offers Launch-at-Login (per-user
-  LaunchAgent) and Hide. The monitor is a separate process — hiding or
-  quitting it never affects the node.
+  a 10-minute time graph (tok/s line over active-inference bars, drawn
+  natively via AppKit), loaded models with quant/ctx/backend details, peers,
+  credits, peer ID (click to reveal, click again to copy), version/uptime/
+  mode, and hardware; links to the local web dashboard (management stays
+  there); and offers Launch-at-Login (per-user LaunchAgent) and Hide. The
+  monitor is a separate process — hiding or quitting it never affects the
+  node.
 
 ## [0.4.2] — 2026-06-09
 

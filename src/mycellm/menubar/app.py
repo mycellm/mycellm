@@ -5,6 +5,10 @@ Icon language (brand "Protocol States"):
 - palette cycle — inference in flight (red → blue → gold → purple → green)
 - Ledger Gold   — reachable but nothing loaded
 - gray          — node offline
+
+Dropdown: status, a 10-minute tok/s + activity time graph, model details,
+peer ID (click to reveal, click again to copy), version/uptime/hardware.
+Management stays in the local web dashboard.
 """
 
 from __future__ import annotations
@@ -12,17 +16,25 @@ from __future__ import annotations
 import webbrowser
 
 import rumps
+from AppKit import NSPasteboard, NSPasteboardTypeString
 
 from . import launchagent
+from .graph import render_graph
 from .state import (
+    History,
     NodeSnapshot,
     credits_line,
     fetch_snapshot,
+    graph_caption,
+    hardware_line,
     icon_path,
     icon_variant,
+    model_detail_lines,
     models_line,
+    peer_id_line,
     peers_line,
     status_line,
+    uptime_line,
 )
 
 POLL_SECONDS = 5
@@ -36,13 +48,23 @@ class MenubarApp(rumps.App):
             "mycellm", icon=icon_path("gray"), template=False, quit_button=None
         )
         self._snap = NodeSnapshot()
+        self._history = History()
         self._tick = 0
         self._variant = "gray"
+        self._peer_revealed = False
+        self._peer_flash = False
 
         self._status_item = rumps.MenuItem(status_line(self._snap))
+        self._graph_item = rumps.MenuItem("")
+        self._caption_item = rumps.MenuItem(graph_caption(self._history, self._snap))
         self._models_item = rumps.MenuItem(models_line(self._snap))
         self._peers_item = rumps.MenuItem(peers_line(self._snap))
         self._credits_item = rumps.MenuItem(credits_line(self._snap))
+        self._peer_id_item = rumps.MenuItem(
+            peer_id_line(self._snap), callback=self._peer_id_clicked
+        )
+        self._uptime_item = rumps.MenuItem(uptime_line(self._snap))
+        self._hardware_item = rumps.MenuItem(hardware_line(self._snap))
         self._login_item = rumps.MenuItem(
             "Launch at Login", callback=self._toggle_login
         )
@@ -50,9 +72,17 @@ class MenubarApp(rumps.App):
 
         self.menu = [
             self._status_item,
+            None,
+            self._graph_item,
+            self._caption_item,
+            None,
             self._models_item,
             self._peers_item,
             self._credits_item,
+            None,
+            self._peer_id_item,
+            self._uptime_item,
+            self._hardware_item,
             None,
             rumps.MenuItem("Open Dashboard…", callback=self._open_dashboard),
             None,
@@ -69,11 +99,32 @@ class MenubarApp(rumps.App):
 
     def _poll(self, _timer) -> None:
         self._snap = fetch_snapshot(self.api)
+        self._history.append(self._snap)
+
         self._status_item.title = status_line(self._snap)
+        self._caption_item.title = graph_caption(self._history, self._snap)
         self._models_item.title = models_line(self._snap)
+        self._refresh_model_submenu()
         self._peers_item.title = peers_line(self._snap)
         self._credits_item.title = credits_line(self._snap)
+        self._uptime_item.title = uptime_line(self._snap)
+        self._hardware_item.title = hardware_line(self._snap)
+        self._graph_item._menuitem.setImage_(render_graph(self._history))
+
+        if self._peer_flash:
+            self._peer_flash = False
+        else:
+            self._peer_id_item.title = peer_id_line(self._snap, self._peer_revealed)
         self._apply_icon()
+
+    def _refresh_model_submenu(self) -> None:
+        lines = model_detail_lines(self._snap)
+        # Rebuild the submenu only when content changed (avoids flicker).
+        current = [item.title for item in self._models_item.values()]
+        if current != lines:
+            self._models_item.clear()
+            for line in lines:
+                self._models_item.add(rumps.MenuItem(line))
 
     def _animate(self, _timer) -> None:
         if self._snap.active > 0:
@@ -87,6 +138,20 @@ class MenubarApp(rumps.App):
             self.icon = icon_path(variant)
 
     # ---- actions --------------------------------------------------------
+
+    def _peer_id_clicked(self, item) -> None:
+        if not self._snap.peer_id:
+            return
+        if not self._peer_revealed:
+            self._peer_revealed = True
+            item.title = peer_id_line(self._snap, revealed=True)
+            return
+        pasteboard = NSPasteboard.generalPasteboard()
+        pasteboard.clearContents()
+        pasteboard.setString_forType_(self._snap.peer_id, NSPasteboardTypeString)
+        self._peer_revealed = False
+        self._peer_flash = True  # keep the confirmation up until next poll
+        item.title = "Peer ID: copied ✓"
 
     def _open_dashboard(self, _item) -> None:
         webbrowser.open(self.api)
