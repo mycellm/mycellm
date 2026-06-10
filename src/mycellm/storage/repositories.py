@@ -24,6 +24,43 @@ class LedgerRepository:
     Drop-in replacement for LocalLedger — same async method signatures.
     """
 
+    def __init__(self) -> None:
+        # peer_id -> (monotonic timestamp, account dict) for hot polling paths
+        self._account_cache: dict[str, tuple[float, dict | None]] = {}
+
+    async def get_account_cached(self, peer_id: str, ttl: float = 30.0) -> dict | None:
+        """Read-through cached `get_account` for hot polling paths.
+
+        /v1/node/status is polled every few seconds (menu bar, dashboard);
+        hitting the DB on every poll both wastes connections and exposes
+        each poll to the asyncio-cancellation hazard (a client timeout
+        cancelling mid-greenlet orphans the connection checkout — seen
+        live as pool exhaustion). The refresh is shielded so a cancelled
+        poll can't kill the DB call mid-flight, and a refresh failure
+        serves the last snapshot instead of erroring the status endpoint.
+        """
+        import asyncio
+
+        cached = self._account_cache.get(peer_id)
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < ttl:
+            return cached[1]
+        try:
+            account = await asyncio.shield(
+                asyncio.ensure_future(self.get_account(peer_id))
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if cached is not None:
+                return cached[1]
+            raise
+        self._account_cache[peer_id] = (now, account)
+        return account
+
+    def _invalidate_cache(self, peer_id: str) -> None:
+        self._account_cache.pop(peer_id, None)
+
     async def ensure_account(self, peer_id: str, initial_balance: float = 0.0) -> None:
         """Create an account if it doesn't exist."""
         now = time.time()
@@ -75,6 +112,7 @@ class LedgerRepository:
                 timestamp=now,
             ))
             await session.commit()
+        self._invalidate_cache(peer_id)
         return tx_id
 
     async def debit(
@@ -112,6 +150,7 @@ class LedgerRepository:
                 timestamp=now,
             ))
             await session.commit()
+        self._invalidate_cache(peer_id)
         return tx_id
 
     async def history(self, peer_id: str, limit: int = 50) -> list[dict]:

@@ -333,3 +333,67 @@ def test_node_registry_entry_to_dict():
     assert d["peer_id"] == "abc123"
     assert d["status"] == "approved"
     assert d["capabilities"]["gpu"] == "RTX 4090"
+
+
+# --- Pool resilience (0.5.2): NullPool for SQLite + cached account reads ---
+# Regression context: a node wedged after ~3h of 5s status polls — each
+# poll hit the DB for credits, and client-timeout cancellations orphaned
+# pooled connections until "QueuePool limit of size 5 overflow 10 reached"
+# killed every DB-touching endpoint.
+
+def test_sqlite_engine_uses_nullpool(tmp_path):
+    from sqlalchemy.pool import NullPool
+    from mycellm.storage.engine import create_engine_from_url
+
+    engine = create_engine_from_url(f"sqlite+aiosqlite:///{tmp_path}/x.db")
+    assert isinstance(engine.pool, NullPool)
+
+
+async def test_get_account_cached_serves_from_cache(db):
+    ledger = LedgerRepository()
+    await ledger.ensure_account("peer1", 10.0)
+    first = await ledger.get_account_cached("peer1")
+    assert first["balance"] == 10.0
+
+    # Mutate the DB behind the cache's back (separate repo instance, so no
+    # invalidation) — a cached read within TTL must serve the snapshot.
+    await LedgerRepository().credit("peer1", 5.0, "test")
+    assert (await ledger.get_account_cached("peer1"))["balance"] == 10.0
+    # ttl=0 forces a refresh
+    assert (await ledger.get_account_cached("peer1", ttl=0))["balance"] == 15.0
+
+
+async def test_credit_and_debit_invalidate_cache(db):
+    ledger = LedgerRepository()
+    await ledger.ensure_account("peer1", 10.0)
+    assert (await ledger.get_account_cached("peer1"))["balance"] == 10.0
+
+    await ledger.credit("peer1", 5.0, "test")
+    assert (await ledger.get_account_cached("peer1"))["balance"] == 15.0
+
+    await ledger.debit("peer1", 3.0, "test")
+    assert (await ledger.get_account_cached("peer1"))["balance"] == 12.0
+
+
+async def test_cached_refresh_failure_serves_stale(db, monkeypatch):
+    ledger = LedgerRepository()
+    await ledger.ensure_account("peer1", 10.0)
+    assert (await ledger.get_account_cached("peer1"))["balance"] == 10.0
+
+    async def boom(peer_id):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(ledger, "get_account", boom)
+    # Stale-but-served beats a 500 on the status endpoint
+    assert (await ledger.get_account_cached("peer1", ttl=0))["balance"] == 10.0
+
+
+async def test_cached_miss_with_failure_raises(db, monkeypatch):
+    ledger = LedgerRepository()
+
+    async def boom(peer_id):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(ledger, "get_account", boom)
+    with pytest.raises(RuntimeError):
+        await ledger.get_account_cached("nobody")

@@ -4,6 +4,23 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [Unreleased]
+
+### Fixed
+- **SQLAlchemy pool exhaustion wedging the node API** (seen live: after
+  ~3h of menu bar status polls a node hit "QueuePool limit of size 5
+  overflow 10 reached" on every DB-touching endpoint while background
+  tasks kept running, so it looked alive but served nothing). Two-part
+  fix: **(1)** SQLite engines now use `NullPool` — a connection per
+  checkout, nothing to exhaust; SQLite connections are a cheap file open,
+  and the pool was vulnerable to orphaned checkouts when a client timeout
+  cancelled a request mid-greenlet. **(2)** `/v1/node/status` credits are
+  served from a 30s read-through cache (`get_account_cached`) instead of
+  hitting the ledger on every poll; the refresh is shielded from caller
+  cancellation, refresh failures serve the last snapshot, and
+  credit/debit invalidate the cache so balances stay fresh after
+  settlements.
+
 ## [0.5.1] — 2026-06-10
 
 ### Added

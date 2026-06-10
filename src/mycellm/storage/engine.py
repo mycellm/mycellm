@@ -6,6 +6,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from mycellm.storage.models import Base
 
@@ -37,11 +38,18 @@ def create_engine_from_url(url: str) -> AsyncEngine:
 
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
+        # NullPool: a fresh connection per checkout, nothing to exhaust.
+        # SQLite connections are a cheap file open, and the default
+        # AsyncAdaptedQueuePool (size 5 + overflow 10) can be drained for
+        # good by orphaned checkouts — e.g. an asyncio cancellation landing
+        # mid-greenlet when a status poller times out client-side. Seen
+        # live: 3h of menubar polls wedged a node with "QueuePool limit
+        # reached" on every DB-touching endpoint.
         engine = create_async_engine(
             url,
             connect_args=connect_args,
             echo=False,
-            pool_pre_ping=True,
+            poolclass=NullPool,
         )
     else:
         # PostgreSQL or other async dialects

@@ -2133,10 +2133,14 @@ class MycellmNode:
         }
 
     async def get_credits(self) -> dict:
-        """Get credit info from ledger."""
+        """Get credit info from ledger.
+
+        Served from a short TTL cache — this sits on the /v1/node/status
+        hot path, which the menu bar and dashboard poll every few seconds.
+        """
         if not self.ledger:
             return {"balance": 0.0, "earned": 0.0, "spent": 0.0}
-        account = await self.ledger.get_account(self.peer_id)
+        account = await self.ledger.get_account_cached(self.peer_id)
         if account:
             return {
                 "balance": account["balance"],
