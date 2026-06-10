@@ -4,6 +4,20 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [Unreleased]
+
+### Fixed
+- **Pre-load RAM check now compares against *available* memory on macOS**
+  (was `hw.memsize` — total physical RAM — so a 30GB load on a 64GB box with
+  50GB in use passed the check silently). Available memory comes from
+  `vm_stat` (free + inactive + purgeable pages), parsed as text to stay
+  independent of Mach host_statistics struct layouts. The estimate is also
+  KV-aware now: weights ×1.1 plus a KV-cache term for the requested
+  `ctx_len` — exact fp16 K+V from `config.json` attention geometry for MLX
+  dirs, a size-proportional heuristic for GGUF. Still warning-only
+  ("Loading anyway"); the warning just stops lying. Inspired by reviewing
+  oMLX 0.4.3's Memory Guard fixes (jundot/omlx#1763).
+
 ## [0.5.0] — 2026-06-10
 
 ### Added

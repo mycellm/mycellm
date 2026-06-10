@@ -66,6 +66,76 @@ def _get_rss_bytes() -> int:
     return 0
 
 
+def _parse_vm_stat(output: str) -> int:
+    """Available RAM from macOS `vm_stat` output: free+inactive+purgeable.
+
+    macOS has no MemAvailable equivalent; free + inactive + purgeable pages
+    is the standard approximation (inactive/purgeable are reclaimed under
+    pressure). Parsing the text output also sidesteps Mach host_statistics
+    struct layouts, which shift between macOS releases.
+    """
+    import re
+
+    page_size = 16384
+    match = re.search(r"page size of (\d+) bytes", output)
+    if match:
+        page_size = int(match.group(1))
+    pages = 0
+    for key in ("Pages free", "Pages inactive", "Pages purgeable"):
+        match = re.search(rf"^{key}:\s+(\d+)\.", output, re.MULTILINE)
+        if match:
+            pages += int(match.group(1))
+    return pages * page_size
+
+
+def _available_ram_bytes() -> int:
+    """Best-effort *available* (not total) system RAM in bytes; 0 if unknown."""
+    try:
+        import platform
+        if platform.system() == "Linux":
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+        elif platform.system() == "Darwin":
+            import subprocess
+            r = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=3)
+            if r.returncode == 0:
+                return _parse_vm_stat(r.stdout)
+    except Exception:
+        pass
+    return 0
+
+
+def _estimate_kv_bytes(model_path: str, ctx_len: int, file_size: int) -> int:
+    """Rough peak KV-cache size for the requested context length.
+
+    For MLX model dirs, computes fp16 K+V from config.json attention
+    geometry (2 tensors × layers × kv_heads × head_dim × 2 bytes per
+    token). Otherwise falls back to a size-proportional heuristic
+    (~100KB/token for a 4.5GB model). Preflight accuracy matters in both
+    directions: too high refuses loads that would fit, too low OOMs
+    mid-prefill (cf. jundot/omlx#1763).
+    """
+    import json
+
+    try:
+        cfg_path = Path(model_path) / "config.json"
+        if cfg_path.is_file():
+            cfg = json.loads(cfg_path.read_text())
+            layers = int(cfg.get("num_hidden_layers") or 0)
+            heads = int(cfg.get("num_attention_heads") or 0)
+            kv_heads = int(cfg.get("num_key_value_heads") or heads)
+            head_dim = int(cfg.get("head_dim") or 0)
+            if not head_dim and heads:
+                head_dim = int(cfg.get("hidden_size") or 0) // heads
+            if layers and kv_heads and head_dim:
+                return 2 * layers * kv_heads * head_dim * 2 * ctx_len
+    except Exception:
+        pass
+    return (file_size // 45_000) * ctx_len
+
+
 class InferenceManager:
     """Manages loaded models, concurrency limits, and backend routing.
 
@@ -169,33 +239,33 @@ class InferenceManager:
             self._load_status[model_name]["phase"] = "creating backend"
             backend = self._create_backend(runtime_backend_type)
 
-            # Memory check for any local backend (llama.cpp or mlx)
+            # Memory check for any local backend (llama.cpp or mlx).
+            # Compares an estimate (weights + KV cache at the requested
+            # context) against *available* RAM on both platforms — the old
+            # macOS path used hw.memsize (total physical RAM), which passed
+            # a 30GB load on a 64GB box with 50GB already in use.
             if backend_type in LOCAL_BACKENDS and model_path:
                 file_size = _model_size_on_disk(model_path)
                 if file_size > 0:
-                    est_ram_needed = file_size * 1.2  # model + KV cache overhead
                     try:
-                        import platform as _platform
-                        avail_ram = 0
-                        if _platform.system() == "Linux":
-                            with open("/proc/meminfo") as f:
-                                for line in f:
-                                    if line.startswith("MemAvailable:"):
-                                        avail_ram = int(line.split()[1]) * 1024
-                                        break
-                        elif _platform.system() == "Darwin":
-                            import subprocess
-                            r = subprocess.run(
-                                ["sysctl", "-n", "hw.memsize"],
-                                capture_output=True, text=True, timeout=3,
-                            )
-                            if r.returncode == 0:
-                                avail_ram = int(r.stdout.strip())
+                        from mycellm.config import get_settings as _gs_mem
+                        ctx_len = int(
+                            kwargs.get("ctx_len")
+                            or kwargs.get("n_ctx")
+                            or _gs_mem().default_ctx_len
+                        )
+                        kv_bytes = _estimate_kv_bytes(model_path, ctx_len, file_size)
+                        est_ram_needed = int(file_size * 1.1) + kv_bytes
+                        avail_ram = _available_ram_bytes()
 
                         if avail_ram > 0 and est_ram_needed > avail_ram * 0.85:
                             logger.warning(
-                                f"Model {model_name} ({file_size/1024**3:.1f}GB) may exceed available RAM "
-                                f"({avail_ram/1024**3:.1f}GB). Loading anyway — watch for OOM."
+                                f"Model {model_name} may exceed available RAM: "
+                                f"~{est_ram_needed/1024**3:.1f}GB needed "
+                                f"(weights {file_size/1024**3:.1f}GB + KV "
+                                f"~{kv_bytes/1024**3:.1f}GB at ctx {ctx_len}) vs "
+                                f"{avail_ram/1024**3:.1f}GB available. "
+                                "Loading anyway — watch for OOM."
                             )
                             self._load_status[model_name]["phase"] = f"loading {file_size/1024**3:.1f}GB (RAM warning)"
                     except Exception:
