@@ -120,11 +120,18 @@ class MenubarApp(rumps.App):
     def _refresh_model_submenu(self) -> None:
         lines = model_detail_lines(self._snap)
         # Rebuild the submenu only when content changed (avoids flicker).
-        current = [item.title for item in self._models_item.values()]
-        if current != lines:
-            self._models_item.clear()
+        # clear() crashes on an item that never had children (rumps lazily
+        # creates the backing NSMenu on first add), so only clear non-empty.
+        try:
+            current = [item.title for item in self._models_item.values()]
+            if current == lines:
+                return
+            if current:
+                self._models_item.clear()
             for line in lines:
                 self._models_item.add(rumps.MenuItem(line))
+        except Exception as exc:  # noqa: BLE001 — cosmetic submenu must not kill the app
+            print(f"model submenu refresh failed: {exc}", flush=True)
 
     def _animate(self, _timer) -> None:
         if self._snap.active > 0:
