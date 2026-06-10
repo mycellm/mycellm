@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mycellm/mycellm/main/docs/site/docs/assets/mycellm-logo.svg" width="80" alt="mycellm">
+  <img src="https://raw.githubusercontent.com/mycellm/mycellm/main/docs/assets/mycellm-logo.svg" width="80" alt="mycellm">
 </p>
 
 <h1 align="center">mycellm_</h1>
