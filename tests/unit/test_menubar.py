@@ -11,6 +11,7 @@ from unittest import mock
 import pytest
 
 from mycellm.menubar import launchagent
+from mycellm.menubar import state
 from mycellm.menubar.state import (
     ACTIVE_CYCLE,
     ICON_DIR,
@@ -20,11 +21,14 @@ from mycellm.menubar.state import (
     fetch_snapshot,
     graph_caption,
     hardware_line,
+    icon_is_template,
     icon_path,
     icon_variant,
+    load_prefs,
     model_detail_lines,
     models_line,
     peer_id_line,
+    save_prefs,
     scale_series,
     status_line,
     uptime_line,
@@ -32,6 +36,7 @@ from mycellm.menubar.state import (
 
 STATUS_PAYLOAD = {
     "node_name": "aurora",
+    "version": "0.5.1.dev0",
     "peer_id": "4524bdbb147bfd8b2aadf1669cea6048",
     "uptime_seconds": 93784.0,
     "role": "seeder",
@@ -84,10 +89,75 @@ class TestIconVariant:
 
     def test_every_variant_has_an_icon_file(self):
         variants = set(ACTIVE_CYCLE) | {"gray", "gold", "green"}
+        variants |= {"mono", "mono-soft", "mono-dim"}
         for variant in variants:
             path = Path(icon_path(variant))
             assert path.is_file(), f"missing icon for {variant}"
             assert path.parent == ICON_DIR
+
+
+class TestMonoIconVariant:
+    def test_offline_is_dim(self):
+        assert icon_variant(NodeSnapshot(reachable=False), mono=True) == "mono-dim"
+
+    def test_healthy_idle_is_full(self):
+        snap = NodeSnapshot(reachable=True, models=["m"], active=0)
+        assert icon_variant(snap, mono=True) == "mono"
+
+    def test_no_models_is_soft(self):
+        snap = NodeSnapshot(reachable=True, models=[], active=0)
+        assert icon_variant(snap, mono=True) == "mono-soft"
+
+    def test_active_inference_pulses(self):
+        snap = NodeSnapshot(reachable=True, models=["m"], active=2)
+        seen = [icon_variant(snap, tick, mono=True) for tick in range(4)]
+        assert seen == ["mono", "mono-soft", "mono", "mono-soft"]
+
+    def test_template_flag(self):
+        for variant in ("mono", "mono-soft", "mono-dim"):
+            assert icon_is_template(variant)
+        for variant in (*ACTIVE_CYCLE, "gray", "gold", "green"):
+            assert not icon_is_template(variant)
+
+    def test_mono_icons_are_black_with_alpha_only(self):
+        # Template images must carry shape purely in the alpha channel;
+        # macOS ignores color and tints them to match the menu bar.
+        Image = pytest.importorskip("PIL.Image")
+
+        for variant in ("mono", "mono-soft", "mono-dim"):
+            im = Image.open(icon_path(variant)).convert("RGBA")
+            colors = {
+                color[:3]
+                for _, color in im.getcolors(maxcolors=65536)
+                if color[3] > 0
+            }
+            assert colors == {(0, 0, 0)}, f"{variant} has non-black ink"
+
+    def test_mono_variants_differ_by_opacity(self):
+        Image = pytest.importorskip("PIL.Image")
+
+        def peak(variant):
+            im = Image.open(icon_path(variant)).convert("RGBA")
+            return im.getchannel("A").getextrema()[1]
+
+        assert peak("mono") > peak("mono-soft") > peak("mono-dim")
+
+
+class TestPrefs:
+    def test_round_trip(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(state, "PREFS_PATH", tmp_path / "menubar.json")
+        save_prefs({"monochrome": True})
+        assert load_prefs() == {"monochrome": True}
+
+    def test_missing_file_yields_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(state, "PREFS_PATH", tmp_path / "nope.json")
+        assert load_prefs() == {}
+
+    def test_corrupt_file_yields_defaults(self, tmp_path, monkeypatch):
+        path = tmp_path / "menubar.json"
+        path.write_text("{not json")
+        monkeypatch.setattr(state, "PREFS_PATH", path)
+        assert load_prefs() == {}
 
 
 class TestFetchSnapshot:
@@ -115,6 +185,65 @@ class TestFetchSnapshot:
         assert snap.reachable
         assert snap.balance is None
         assert credits_line(snap) == "Credits: —"
+
+
+class TestVersionFallback:
+    """Nodes before 0.5.1 don't put `version` in /v1/node/status."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_caches(self):
+        state._version_cache.clear()
+        state._version_attempts.clear()
+
+    def test_status_version_wins_no_fallback_call(self):
+        payloads = {"/v1/node/status": STATUS_PAYLOAD}
+        fake = mock.Mock(side_effect=_urlopen_returning(payloads))
+        with mock.patch("urllib.request.urlopen", fake):
+            snap = fetch_snapshot("http://localhost:8420")
+        assert snap.version == "0.5.1.dev0"
+        assert not any(
+            "/v1/node/version" in c.args[0] for c in fake.call_args_list
+        )
+
+    def test_old_node_falls_back_to_version_endpoint(self):
+        old_status = {k: v for k, v in STATUS_PAYLOAD.items() if k != "version"}
+        payloads = {
+            "/v1/node/status": old_status,
+            "/v1/node/version": {"current": "0.5.0", "latest": "0.5.0"},
+        }
+        with mock.patch("urllib.request.urlopen", _urlopen_returning(payloads)):
+            snap = fetch_snapshot("http://localhost:8420")
+        assert snap.version == "0.5.0"
+        assert uptime_line(snap).startswith("v0.5.0")
+
+    def test_fallback_is_cached_across_polls(self):
+        old_status = {k: v for k, v in STATUS_PAYLOAD.items() if k != "version"}
+        payloads = {
+            "/v1/node/status": old_status,
+            "/v1/node/version": {"current": "0.5.0"},
+        }
+        fake = mock.Mock(side_effect=_urlopen_returning(payloads))
+        with mock.patch("urllib.request.urlopen", fake):
+            fetch_snapshot("http://localhost:8420")
+            fetch_snapshot("http://localhost:8420")
+        version_calls = [
+            c for c in fake.call_args_list if "/v1/node/version" in c.args[0]
+        ]
+        assert len(version_calls) == 1
+
+    def test_fallback_attempts_are_capped(self):
+        old_status = {k: v for k, v in STATUS_PAYLOAD.items() if k != "version"}
+        payloads = {"/v1/node/status": old_status}  # version endpoint 404s
+        fake = mock.Mock(side_effect=_urlopen_returning(payloads))
+        with mock.patch("urllib.request.urlopen", fake):
+            for _ in range(6):
+                snap = fetch_snapshot("http://localhost:8420")
+        assert snap.version == ""
+        assert uptime_line(snap).split(" · ")[0] == "v?"
+        version_calls = [
+            c for c in fake.call_args_list if "/v1/node/version" in c.args[0]
+        ]
+        assert len(version_calls) == 3
 
 
 class TestMenuLines:

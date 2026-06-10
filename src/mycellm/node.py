@@ -1966,6 +1966,8 @@ class MycellmNode:
 
     def get_status(self) -> dict:
         """Return current node status for the API."""
+        from mycellm import __version__
+
         peers = []
         for entry in self.registry.connected_peers():
             peers.append({
@@ -1979,6 +1981,7 @@ class MycellmNode:
 
         return {
             "node_name": self._settings.node_name,
+            "version": __version__,
             "peer_id": self.peer_id,
             "uptime_seconds": self.uptime,
             "role": self.capabilities.role,

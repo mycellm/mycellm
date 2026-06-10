@@ -6,7 +6,23 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+### Added
+- **Menu bar: monochrome icon option** ("Monochrome Icon" in the dropdown,
+  persisted to `~/.config/mycellm/menubar.json`). A black-and-alpha
+  template rendering of the 8-bit mushroom that macOS tints to match the
+  menu bar (light and dark mode), for people who like their icons uniform.
+  Cap spots are punched fully transparent; the stem sits at ~59% alpha.
+  Node state is told by opacity instead of color: full when healthy, soft
+  when reachable with nothing loaded, a full/soft pulse during inference,
+  dim when offline. The renderer that builds all menu bar icons from the
+  brand SVGs is now checked in (`scripts/render_menubar_icons.py`).
+
 ### Fixed
+- **Menu bar dropdown showed `v?` instead of the node version** —
+  `/v1/node/status` never included `version`, so the uptime line couldn't
+  know it. The node now reports `version` in status, and the menu bar also
+  falls back to `/v1/node/version` (cached, attempts capped) so it shows
+  the right version against pre-0.5.1 nodes too.
 - **Pre-load RAM check now compares against *available* memory on macOS**
   (was `hw.memsize` — total physical RAM — so a 30GB load on a 64GB box with
   50GB in use passed the check silently). Available memory comes from

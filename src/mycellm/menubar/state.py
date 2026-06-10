@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ICON_DIR = Path(__file__).parent / "icons"
+PREFS_PATH = Path.home() / ".config" / "mycellm" / "menubar.json"
 
 # Protocol Palette cycle shown while inference is in flight. Order tells a
 # story per the brand guide: compute (red) -> routing (blue) -> credits
@@ -90,6 +91,44 @@ def scale_series(
     ]
 
 
+def load_prefs() -> dict:
+    """Read menubar preferences; missing or corrupt file yields defaults."""
+    try:
+        return json.loads(PREFS_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_prefs(prefs: dict) -> None:
+    try:
+        PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PREFS_PATH.write_text(json.dumps(prefs, indent=2))
+    except OSError:
+        pass  # prefs are cosmetic; never let persistence kill the app
+
+
+# Nodes before 0.5.1 don't include "version" in /v1/node/status; fall back
+# to /v1/node/version once per node (it does a PyPI update check that can
+# take ~5s, so cache the answer and cap the attempts).
+_version_cache: dict[str, str] = {}
+_version_attempts: dict[str, int] = {}
+
+
+def _fallback_version(base: str) -> str:
+    if base in _version_cache:
+        return _version_cache[base]
+    if _version_attempts.get(base, 0) >= 3:
+        return ""
+    _version_attempts[base] = _version_attempts.get(base, 0) + 1
+    try:
+        version = str(_get_json(f"{base}/v1/node/version", timeout=6.0).get("current", ""))
+    except (urllib.error.URLError, OSError, ValueError):
+        return ""
+    if version:
+        _version_cache[base] = version
+    return version
+
+
 def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
     """Poll the local node; an unreachable node yields reachable=False."""
     base = base_url.rstrip("/")
@@ -102,7 +141,7 @@ def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
     snap = NodeSnapshot(
         reachable=True,
         node_name=str(status.get("node_name", "")),
-        version=str(status.get("version", "")),
+        version=str(status.get("version", "")) or _fallback_version(base),
         role=str(status.get("role", "")),
         mode=str(status.get("mode", "")),
         peer_id=str(status.get("peer_id", "")),
@@ -131,14 +170,27 @@ def _get_json(url: str, timeout: float) -> dict:
         return json.loads(resp.read().decode())
 
 
-def icon_variant(snap: NodeSnapshot, tick: int = 0) -> str:
-    """Map node state to a mushroom color.
+def icon_variant(snap: NodeSnapshot, tick: int = 0, mono: bool = False) -> str:
+    """Map node state to a mushroom variant.
 
+    Color mode:
     - gray: node unreachable
     - gold: reachable but no models loaded (needs attention)
     - palette cycle: inference in flight (tick advances the cycle)
     - green: healthy and idle
+
+    Monochrome (template) mode tells the same story with alpha instead of
+    color: dim when offline, soft when reachable-but-empty, a full/soft
+    pulse while inference is in flight, full when healthy.
     """
+    if mono:
+        if not snap.reachable:
+            return "mono-dim"
+        if snap.active > 0:
+            return "mono" if tick % 2 == 0 else "mono-soft"
+        if not snap.models:
+            return "mono-soft"
+        return "mono"
     if not snap.reachable:
         return "gray"
     if snap.active > 0:
@@ -146,6 +198,11 @@ def icon_variant(snap: NodeSnapshot, tick: int = 0) -> str:
     if not snap.models:
         return "gold"
     return "green"
+
+
+def icon_is_template(variant: str) -> bool:
+    """Template (mono) icons are tinted by macOS for light/dark menu bars."""
+    return variant.startswith("mono")
 
 
 def icon_path(variant: str) -> str:

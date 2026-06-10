@@ -6,6 +6,11 @@ Icon language (brand "Protocol States"):
 - Ledger Gold   — reachable but nothing loaded
 - gray          — node offline
 
+Monochrome Icon (toggle in the menu, persisted to ~/.config/mycellm/
+menubar.json) swaps in a black-and-alpha template mushroom that macOS
+tints to match the menu bar; state is carried by opacity instead of color
+(full = healthy, soft = empty/pulse, dim = offline).
+
 Dropdown: status, a 10-minute tok/s + activity time graph, model details,
 peer ID (click to reveal, click again to copy), version/uptime/hardware.
 Management stays in the local web dashboard.
@@ -27,12 +32,15 @@ from .state import (
     fetch_snapshot,
     graph_caption,
     hardware_line,
+    icon_is_template,
     icon_path,
     icon_variant,
+    load_prefs,
     model_detail_lines,
     models_line,
     peer_id_line,
     peers_line,
+    save_prefs,
     status_line,
     uptime_line,
 )
@@ -44,13 +52,19 @@ ANIMATE_SECONDS = 0.6
 class MenubarApp(rumps.App):
     def __init__(self, api: str) -> None:
         self.api = api.rstrip("/")
+        self._prefs = load_prefs()
+        self._mono = bool(self._prefs.get("monochrome", False))
+        first = "mono-dim" if self._mono else "gray"
         super().__init__(
-            "mycellm", icon=icon_path("gray"), template=False, quit_button=None
+            "mycellm",
+            icon=icon_path(first),
+            template=icon_is_template(first),
+            quit_button=None,
         )
         self._snap = NodeSnapshot()
         self._history = History()
         self._tick = 0
-        self._variant = "gray"
+        self._variant = first
         self._peer_revealed = False
         self._peer_flash = False
 
@@ -69,6 +83,10 @@ class MenubarApp(rumps.App):
             "Launch at Login", callback=self._toggle_login
         )
         self._login_item.state = 1 if launchagent.is_installed() else 0
+        self._mono_item = rumps.MenuItem(
+            "Monochrome Icon", callback=self._toggle_mono
+        )
+        self._mono_item.state = 1 if self._mono else 0
 
         self.menu = [
             self._status_item,
@@ -87,6 +105,7 @@ class MenubarApp(rumps.App):
             rumps.MenuItem("Open Dashboard…", callback=self._open_dashboard),
             None,
             self._login_item,
+            self._mono_item,
             rumps.MenuItem("Hide Icon (until next launch)", callback=self._hide),
             rumps.MenuItem("Quit mycellm Monitor", callback=self._quit),
         ]
@@ -139,9 +158,12 @@ class MenubarApp(rumps.App):
             self._apply_icon()
 
     def _apply_icon(self) -> None:
-        variant = icon_variant(self._snap, self._tick)
+        variant = icon_variant(self._snap, self._tick, mono=self._mono)
         if variant != self._variant:
             self._variant = variant
+            # rumps applies self.template when the icon is set, so keep it
+            # in sync first (template icons are tinted by macOS).
+            self._template = icon_is_template(variant)
             self.icon = icon_path(variant)
 
     # ---- actions --------------------------------------------------------
@@ -162,6 +184,14 @@ class MenubarApp(rumps.App):
 
     def _open_dashboard(self, _item) -> None:
         webbrowser.open(self.api)
+
+    def _toggle_mono(self, item) -> None:
+        self._mono = not self._mono
+        item.state = 1 if self._mono else 0
+        self._prefs["monochrome"] = self._mono
+        save_prefs(self._prefs)
+        self._variant = ""  # force re-apply even if the name matches
+        self._apply_icon()
 
     def _toggle_login(self, item) -> None:
         if launchagent.is_installed():
