@@ -14,8 +14,16 @@ from mycellm.inference.manager import (
     InferenceManager,
     _bump_attempt,
     _clear_attempt,
+    _preflight_local_model,
     _read_attempts,
 )
+
+
+def test_preflight_returns_zeros_for_missing_path(tmp_path):
+    # Empty path and a non-existent path both short-circuit to zeros without
+    # touching vm_stat / config.json (so the off-loop call is cheap & safe).
+    assert _preflight_local_model("", 4096) == (0, 0, 0)
+    assert _preflight_local_model(str(tmp_path / "nope"), 4096) == (0, 0, 0)
 
 
 def test_attempt_helpers_roundtrip(tmp_path):

@@ -181,6 +181,27 @@ def _clear_attempt(data_dir: Path, name: str) -> None:
         _write_attempts(data_dir, attempts)
 
 
+def _preflight_local_model(model_path: str, ctx_len: int) -> tuple[int, int, int]:
+    """Disk + RAM preflight for a local-backend load.
+
+    Pure blocking I/O — a directory walk for the on-disk size, a config.json read
+    for the KV estimate, and a ``vm_stat`` subprocess for available RAM. Collected
+    here so the caller can run the whole thing in one ``asyncio.to_thread`` and
+    keep it off the event loop (a load must never stall request serving).
+
+    Returns ``(file_size, kv_bytes, avail_ram)`` in bytes; zeros when unknown.
+    """
+    file_size = _model_size_on_disk(model_path) if model_path else 0
+    if file_size <= 0:
+        return 0, 0, 0
+    try:
+        kv_bytes = _estimate_kv_bytes(model_path, ctx_len, file_size)
+    except Exception:
+        kv_bytes = 0
+    avail_ram = _available_ram_bytes()
+    return file_size, kv_bytes, avail_ram
+
+
 class InferenceManager:
     """Manages loaded models, concurrency limits, and backend routing.
 
@@ -291,45 +312,48 @@ class InferenceManager:
             # context) against *available* RAM on both platforms — the old
             # macOS path used hw.memsize (total physical RAM), which passed
             # a 30GB load on a 64GB box with 50GB already in use.
+            #
+            # The preflight (dir walk + config.json read + `vm_stat` subprocess)
+            # runs OFF the event loop via to_thread so loading a model never
+            # stalls request serving. `file_size` is computed once here and
+            # reused for the RAM warning, status phases, and loaded_bytes.
+            file_size = 0
             if backend_type in LOCAL_BACKENDS and model_path:
-                file_size = _model_size_on_disk(model_path)
-                if file_size > 0:
-                    try:
-                        from mycellm.config import get_settings as _gs_mem
-                        ctx_len = int(
-                            kwargs.get("ctx_len")
-                            or kwargs.get("n_ctx")
-                            or _gs_mem().default_ctx_len
+                from mycellm.config import get_settings as _gs_mem
+                ctx_len = int(
+                    kwargs.get("ctx_len")
+                    or kwargs.get("n_ctx")
+                    or _gs_mem().default_ctx_len
+                )
+                try:
+                    file_size, kv_bytes, avail_ram = await asyncio.to_thread(
+                        _preflight_local_model, model_path, ctx_len
+                    )
+                    est_ram_needed = int(file_size * 1.1) + kv_bytes
+                    if file_size > 0 and avail_ram > 0 and est_ram_needed > avail_ram * 0.85:
+                        logger.warning(
+                            f"Model {model_name} may exceed available RAM: "
+                            f"~{est_ram_needed/1024**3:.1f}GB needed "
+                            f"(weights {file_size/1024**3:.1f}GB + KV "
+                            f"~{kv_bytes/1024**3:.1f}GB at ctx {ctx_len}) vs "
+                            f"{avail_ram/1024**3:.1f}GB available. "
+                            "Loading anyway — watch for OOM."
                         )
-                        kv_bytes = _estimate_kv_bytes(model_path, ctx_len, file_size)
-                        est_ram_needed = int(file_size * 1.1) + kv_bytes
-                        avail_ram = _available_ram_bytes()
-
-                        if avail_ram > 0 and est_ram_needed > avail_ram * 0.85:
-                            logger.warning(
-                                f"Model {model_name} may exceed available RAM: "
-                                f"~{est_ram_needed/1024**3:.1f}GB needed "
-                                f"(weights {file_size/1024**3:.1f}GB + KV "
-                                f"~{kv_bytes/1024**3:.1f}GB at ctx {ctx_len}) vs "
-                                f"{avail_ram/1024**3:.1f}GB available. "
-                                "Loading anyway — watch for OOM."
-                            )
-                            self._load_status[model_name]["phase"] = f"loading {file_size/1024**3:.1f}GB (RAM warning)"
-                    except Exception:
-                        pass
+                        self._load_status[model_name]["phase"] = f"loading {file_size/1024**3:.1f}GB (RAM warning)"
+                except Exception:
+                    pass
 
             if backend_type in LOCAL_BACKENDS:
                 self._load_status[model_name]["phase"] = "loading model into memory"
-                if model_path:
-                    size_gb = _model_size_on_disk(model_path) / (1024**3)
-                    if size_gb > 0:
-                        self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
-                        self._load_status[model_name]["size_gb"] = round(size_gb, 2)
+                size_gb = file_size / (1024**3)
+                if size_gb > 0:
+                    self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
+                    self._load_status[model_name]["size_gb"] = round(size_gb, 2)
 
                 # Progress tracking — uses llama.cpp callback if available,
                 # falls back to RSS-based estimation for older versions / MLX
                 load_start = _time.time()
-                file_bytes = _model_size_on_disk(model_path) if model_path else 0
+                file_bytes = file_size
                 _has_native_progress = False
 
                 def _progress_cb(progress: float):
@@ -423,7 +447,7 @@ class InferenceManager:
                 quant=kwargs.get("quant", ""),
                 ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", _default_ctx)),
                 backend=backend_type,
-                loaded_bytes=_model_size_on_disk(model_path) if model_path else 0,
+                loaded_bytes=file_size,
             )
 
             elapsed = _time.time() - self._load_status[model_name]["started_at"]
