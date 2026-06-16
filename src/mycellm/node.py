@@ -168,6 +168,13 @@ class MycellmNode:
         # API server ref for shutdown
         self._api_server = None
 
+        # Resilience — heartbeat watchdog + network self-heal (created in run())
+        self._watchdog = None
+        self._heartbeat_task = None
+        self._selfheal_task = None
+        self._force_announce: asyncio.Event | None = None
+        self._addr_sig: tuple | None = None
+
     @property
     def uptime(self) -> float:
         if self._start_time == 0:
@@ -1318,7 +1325,11 @@ class MycellmNode:
 
     async def _restore_models_bg(self) -> None:
         """Restore saved models + connect relays in background. Never blocks API/transport."""
-        # 1. Restore persisted models (can take minutes for large GGUF files)
+        # 1. Restore persisted models (can take minutes for large GGUF files).
+        # Model loading can hold the GIL / block the loop; tell the watchdog not
+        # to read that as a wedge for a generous window.
+        if self._watchdog is not None:
+            self._watchdog.defer(600.0)
         try:
             restored = await self.inference.restore_models(self._settings.data_dir)
             if restored:
@@ -1420,11 +1431,32 @@ class MycellmNode:
 
         self._running = True
         self._start_time = time.time()
+        self._force_announce = asyncio.Event()
 
         # Handle signals
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.ensure_future(self.shutdown()))
+
+        # Arm the heartbeat watchdog (out-of-loop OS thread that os._exit()s on a
+        # wedged loop or fd exhaustion, so launchd/systemd/docker restart us) and
+        # start the loop-side heartbeat that proves the loop is alive.
+        try:
+            from mycellm.resilience import HeartbeatWatchdog
+
+            log_path = str(Path(self._settings.data_dir) / "watchdog.log")
+            self._watchdog = HeartbeatWatchdog(
+                enabled=self._settings.watchdog_enabled,
+                stall_seconds=self._settings.watchdog_stall_seconds,
+                fd_pct=self._settings.watchdog_fd_pct,
+                check_interval=self._settings.watchdog_check_interval,
+                log_path=log_path,
+            )
+            self._watchdog.start()
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        except Exception as e:
+            logger.debug(f"Watchdog not started: {e}")
+            self._watchdog = None
 
         # Init subsystems (DB engine, ledger, repositories)
         await self._init_accounting()
@@ -1477,6 +1509,10 @@ class MycellmNode:
 
         # Start model prewarm (keeps weights in RAM on memory-constrained devices)
         self._prewarm_task = asyncio.create_task(self._model_prewarm_loop())
+
+        # Start network self-heal (re-announce/reconnect on address change or fall-off)
+        if self._settings.selfheal_enabled:
+            self._selfheal_task = asyncio.create_task(self._network_selfheal_loop())
 
         # Initialize Prometheus metrics
         try:
@@ -1587,11 +1623,12 @@ class MycellmNode:
         # Initial announce
         await _do_announce()
 
-        # Re-announce loop — never exits, never crashes
+        # Re-announce loop — never exits, never crashes. Wakes early when the
+        # self-heal loop fires _force_announce (e.g. our address just changed).
         interval = 15
         while self._running:
             try:
-                await asyncio.sleep(interval)
+                await self._wait_or_forced(interval)
                 ok = await _do_announce()
                 interval = 60 if ok else min(interval + 10, 60)
             except asyncio.CancelledError:
@@ -1599,6 +1636,140 @@ class MycellmNode:
             except Exception as e:
                 logger.warning(f"{styled_tag('NODE')} Announce loop error: {e}")
                 interval = 30
+
+    async def _wait_or_forced(self, timeout: float) -> None:
+        """Sleep up to ``timeout`` seconds, or wake immediately if a forced
+        re-announce was requested (and consume the request)."""
+        ev = self._force_announce
+        if ev is None:
+            await asyncio.sleep(timeout)
+            return
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return
+        finally:
+            ev.clear()
+
+    async def _heartbeat_loop(self) -> None:
+        """Prove the event loop is alive to the out-of-loop watchdog thread.
+
+        If the loop wedges, this stops running, the watchdog's heartbeat goes
+        stale, and it restarts the process. Runs ~3x more often than the
+        watchdog's check interval so a single missed tick is not a false alarm.
+        """
+        wd = self._watchdog
+        if wd is None:
+            return
+        period = max(1.0, float(self._settings.watchdog_check_interval) / 3.0)
+        while self._running:
+            try:
+                wd.beat()
+                await asyncio.sleep(period)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                await asyncio.sleep(period)
+
+    def _network_signature(self) -> tuple:
+        """A cheap fingerprint of where this node sits on the network. Changes
+        when the machine moves networks / gets a new DHCP lease / NAT rebinds."""
+        local_ip = ""
+        try:
+            from mycellm.nat.discovery import _get_local_ip
+
+            local_ip = _get_local_ip()
+        except Exception:
+            pass
+        ext_ip = ext_port = ""
+        nat = getattr(self, "nat_discovery", None)
+        if nat is not None and getattr(nat, "info", None) is not None:
+            ext_ip = getattr(nat.info, "public_ip", "") or getattr(nat.info, "external_ip", "") or ""
+            ext_port = getattr(nat.info, "public_port", "") or ""
+        return (local_ip, ext_ip, ext_port)
+
+    def _ensure_membership_bootstraps(self) -> None:
+        """Make sure every configured network's bootstrap(s) are managed peers.
+
+        Joined-network bootstraps (federation memberships) are otherwise never
+        dialed — only the settings bootstrap list is. PeerManager.add_peer is
+        idempotent and its reconnect loop handles the actual (re)connection."""
+        fed = self.federation
+        if fed is None:
+            return
+        addrs: list[str] = []
+        try:
+            if getattr(fed, "identity", None) and fed.identity:
+                addrs.extend(fed.identity.bootstrap_addrs or [])
+            for m in fed.memberships:
+                addrs.extend(getattr(m, "bootstrap_addrs", []) or [])
+        except Exception:
+            return
+        managed = self.peer_manager.managed_peers
+        for addr in addrs:
+            host, _, port_str = addr.rpartition(":")
+            if not host or not port_str.isdigit():
+                continue
+            port = 8421 if int(port_str) == 8420 else int(port_str)
+            # Skip our own advertised bootstrap address.
+            if host in ("127.0.0.1", self._quic_host) and port == self.quic_port:
+                continue
+            if f"{host}:{port}" in managed:
+                continue
+            try:
+                self.peer_manager.add_peer(host, port)
+                logger.info(f"{styled_tag('NET')} Self-heal: managing network bootstrap {host}:{port}")
+            except Exception:
+                pass
+
+    async def _network_selfheal_loop(self) -> None:
+        """Keep the node attached to its configured networks.
+
+        Detects a local/public address change and immediately re-announces
+        (re-probe NAT, force the HTTP announce, refresh addresses) instead of
+        waiting out the normal 15-60s announce cycle, and ensures every network's
+        bootstrap is being dialed. Idempotent and best-effort; never crashes.
+        """
+        interval = max(10.0, float(self._settings.selfheal_interval))
+        # Settle before first check so NAT discovery has a chance to populate.
+        await asyncio.sleep(min(interval, 15.0))
+        self._addr_sig = self._network_signature()
+        while self._running:
+            try:
+                await asyncio.sleep(interval)
+                sig = self._network_signature()
+                if self._addr_sig is not None and sig != self._addr_sig:
+                    logger.warning(
+                        f"{styled_tag('NET')} Address change {self._addr_sig} → {sig}; "
+                        "re-announcing and reconnecting"
+                    )
+                    self.activity.record(
+                        EventType.ADDRESS_CHANGED, old=str(self._addr_sig), new=str(sig)
+                    )
+                    # Invalidate the 5-min local-address cache so re-announce uses
+                    # the new address.
+                    self._cached_addresses_at = 0.0
+                    # Re-probe NAT to refresh the public mapping.
+                    nat = getattr(self, "nat_discovery", None)
+                    if nat is not None:
+                        asyncio.ensure_future(self._safe_nat_reprobe(nat))
+                    # Force an immediate re-announce.
+                    if self._force_announce is not None:
+                        self._force_announce.set()
+                self._addr_sig = sig
+                # Keep all configured networks' bootstraps connected.
+                self._ensure_membership_bootstraps()
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.debug(f"{styled_tag('NET')} Self-heal loop error: {e}")
+
+    async def _safe_nat_reprobe(self, nat) -> None:
+        try:
+            await nat.probe_once()
+            self.activity.record(EventType.NETWORK_SELFHEAL, action="nat_reprobe")
+        except Exception as e:
+            logger.debug(f"{styled_tag('NET')} NAT re-probe failed: {e}")
 
     async def _registry_ttl_sweep_loop(self) -> None:
         """Evict node_registry entries that haven't been seen in a long time.
@@ -1798,6 +1969,13 @@ class MycellmNode:
         # Cancel peer exchange broadcast
         if self._peer_exchange_task and not self._peer_exchange_task.done():
             self._peer_exchange_task.cancel()
+
+        # Stop resilience loops + watchdog (so it doesn't fire mid-shutdown)
+        for _t in (self._heartbeat_task, self._selfheal_task):
+            if _t and not _t.done():
+                _t.cancel()
+        if self._watchdog is not None:
+            self._watchdog.stop()
 
         # Save peer cache
         self._save_peer_cache()

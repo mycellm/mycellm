@@ -270,10 +270,25 @@ async def dial_peer(
         timeout=connection_timeout,
     )
 
-    protocol.connect(server_addr)
+    # Once the datagram endpoint exists it owns a bound UDP socket (an ephemeral
+    # *:port). If anything below raises — handshake timeout, cancellation, a dead
+    # or NAT'd peer — the caller never receives `protocol` and so can never close
+    # it, orphaning that UDP fd. Guard the rest and tear the transport down on any
+    # failure (incl. CancelledError) so the socket is always released. Without
+    # this, a seeder's reconnect loop leaks one UDP fd per failed dial until the
+    # process hits its open-files limit and the event loop can no longer accept.
+    try:
+        protocol.connect(server_addr)
 
-    if message_handler:
-        protocol.set_message_handler(message_handler)
+        if message_handler:
+            protocol.set_message_handler(message_handler)
 
-    await asyncio.wait_for(protocol._handshake_complete.wait(), timeout=connection_timeout)
-    return protocol
+        await asyncio.wait_for(protocol._handshake_complete.wait(), timeout=connection_timeout)
+        return protocol
+    except BaseException:
+        try:
+            protocol.close()
+        except Exception:
+            pass
+        transport.close()
+        raise

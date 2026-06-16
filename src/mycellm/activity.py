@@ -32,6 +32,9 @@ class EventType(str, Enum):
     CONNECTION_HEALTH = "connection_health"
     NODE_STARTED = "node_started"
     NODE_ERROR = "node_error"
+    ADDRESS_CHANGED = "address_changed"
+    NETWORK_SELFHEAL = "network_selfheal"
+    MODEL_QUARANTINED = "model_quarantined"
 
 
 @dataclass

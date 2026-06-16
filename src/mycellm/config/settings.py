@@ -189,6 +189,30 @@ class MycellmSettings(BaseSettings):
     # When set, allows a fleet admin to manage this node through the bootstrap
     fleet_admin_key: str = ""  # MYCELLM_FLEET_ADMIN_KEY env var
 
+    # ---- Resilience ----------------------------------------------------------
+    # In-app heartbeat watchdog. A wedged event loop (fd exhaustion, a blocked
+    # synchronous call, a GIL-holding load that never returns) leaves the process
+    # alive but deaf — launchd/systemd/docker only restart on *exit*, so a hang is
+    # invisible to them. The watchdog runs in a dedicated OS thread and, on a
+    # stalled loop or fd-ceiling breach, calls os._exit(non-zero) to convert the
+    # hang into an exit the supervisor already restarts. See resilience.py.
+    watchdog_enabled: bool = True            # MYCELLM_WATCHDOG_ENABLED
+    watchdog_stall_seconds: float = 90.0     # loop-heartbeat staleness before abort
+    watchdog_fd_pct: float = 0.85            # abort when open fds exceed this fraction of RLIMIT_NOFILE
+    watchdog_check_interval: float = 5.0     # how often the watchdog thread checks
+
+    # Network self-heal — detect a local/public address change (machine moved
+    # networks, DHCP lease change, NAT rebind) and immediately re-announce +
+    # re-probe NAT + reconnect, instead of waiting out the normal announce cycle.
+    # Also keeps the node attached to every configured network's bootstrap.
+    selfheal_enabled: bool = True            # MYCELLM_SELFHEAL_ENABLED
+    selfheal_interval: float = 30.0          # how often to check address/membership
+
+    # Model crash-loop guard — quarantine (disable in model_configs.json) a model
+    # that fails to load this many times across restarts (OOM kill, repeated load
+    # failure) so boot-restore stops reloading it into a crash loop.
+    model_max_restore_attempts: int = 3      # MYCELLM_MODEL_MAX_RESTORE_ATTEMPTS
+
     @property
     def keys_dir(self) -> Path:
         return self.data_dir / "keys"

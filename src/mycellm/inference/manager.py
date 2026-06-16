@@ -136,6 +136,51 @@ def _estimate_kv_bytes(model_path: str, ctx_len: int, file_size: int) -> int:
     return (file_size // 45_000) * ctx_len
 
 
+# --- model crash-loop guard ---------------------------------------------------
+# A model that OOM-kills the process (or otherwise fails) during boot-restore
+# would be retried on every restart → an unbreakable crash loop. We persist a
+# per-model attempt counter that is bumped *before* each restore attempt (so it
+# survives a hard kill) and cleared on success. Once a model exceeds the
+# configured ceiling it is quarantined (enabled=false) so restore skips it.
+
+def _attempts_path(data_dir: Path) -> Path:
+    return Path(data_dir) / "model_load_attempts.json"
+
+
+def _read_attempts(data_dir: Path) -> dict[str, int]:
+    import json
+
+    try:
+        return json.loads(_attempts_path(data_dir).read_text())
+    except Exception:
+        return {}
+
+
+def _write_attempts(data_dir: Path, attempts: dict[str, int]) -> None:
+    import json
+
+    try:
+        path = _attempts_path(data_dir)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(attempts))
+        tmp.rename(path)
+    except Exception:
+        pass
+
+
+def _bump_attempt(data_dir: Path, name: str) -> int:
+    attempts = _read_attempts(data_dir)
+    attempts[name] = attempts.get(name, 0) + 1
+    _write_attempts(data_dir, attempts)
+    return attempts[name]
+
+
+def _clear_attempt(data_dir: Path, name: str) -> None:
+    attempts = _read_attempts(data_dir)
+    if attempts.pop(name, None) is not None:
+        _write_attempts(data_dir, attempts)
+
+
 class InferenceManager:
     """Manages loaded models, concurrency limits, and backend routing.
 
@@ -159,6 +204,8 @@ class InferenceManager:
         self._queue_depth: dict[str, int] = {}
         # Persistent configs — survives unload so models can be re-loaded
         self._saved_configs: dict[str, dict] = {}  # name -> config dict
+        # Models disabled by the crash-loop guard this process lifetime
+        self._quarantined: set[str] = set()
         # Load status tracking
         self._load_status: dict[str, dict] = {}  # model_name -> {status, phase, error, ...}
         # Model paths (for llama.cpp models)
@@ -386,7 +433,12 @@ class InferenceManager:
             # Auto-save config
             try:
                 from mycellm.config import get_settings
-                await self.save_model_configs(get_settings().data_dir)
+                _data_dir = get_settings().data_dir
+                await self.save_model_configs(_data_dir)
+                # A successful load clears the crash-loop attempt counter (covers
+                # both boot-restore and manual re-loads of a fixed/quarantined model).
+                _clear_attempt(_data_dir, model_name)
+                self._quarantined.discard(model_name)
             except Exception:
                 pass
 
@@ -634,13 +686,38 @@ class InferenceManager:
 
         # Only auto-load enabled configs
         from mycellm.config import get_settings as _gs
-        _default_ctx = _gs().default_ctx_len
+        _settings = _gs()
+        _default_ctx = _settings.default_ctx_len
+        max_attempts = int(getattr(_settings, "model_max_restore_attempts", 3) or 0)
         restored = 0
         for config in configs:
             name = config.get("name", "")
             if not config.get("enabled", True):
                 logger.debug(f"Skipping disabled model '{name}'")
                 continue
+
+            # Crash-loop guard. The attempt counter is bumped *before* each load
+            # (so an OOM that hard-kills the process still counts) and cleared on
+            # success inside load_model(). Once a model exceeds the ceiling it is
+            # quarantined (enabled=false) so restore stops reloading it.
+            if max_attempts > 0:
+                if _read_attempts(data_dir).get(name, 0) >= max_attempts:
+                    logger.error(
+                        f"Quarantining model '{name}' after >={max_attempts} failed "
+                        f"load attempts — disabling so it stops crash-looping. "
+                        f"Re-enable by loading it again once the cause is fixed."
+                    )
+                    config["enabled"] = False
+                    self._saved_configs[name] = config
+                    try:
+                        await self.save_model_configs(data_dir)
+                    except Exception:
+                        pass
+                    _clear_attempt(data_dir, name)
+                    self._quarantined.add(name)
+                    continue
+                _bump_attempt(data_dir, name)
+
             backend_type = config.get("backend", "llama.cpp")
             try:
                 if backend_type in ("openai", "openai-compatible"):
