@@ -1325,11 +1325,13 @@ class MycellmNode:
 
     async def _restore_models_bg(self) -> None:
         """Restore saved models + connect relays in background. Never blocks API/transport."""
-        # 1. Restore persisted models (can take minutes for large GGUF files).
-        # Model loading can hold the GIL / block the loop; tell the watchdog not
-        # to read that as a wedge for a generous window.
+        # 1. Restore persisted models. Loads now run off the event loop (weights
+        # via to_thread, preflight via to_thread) so the loop stays responsive —
+        # measured p95 ~4ms with only a brief GIL blip during native weight
+        # construction. Keep a modest defer to cover a large model's GIL stretch
+        # without masking a genuine restore-time wedge for too long.
         if self._watchdog is not None:
-            self._watchdog.defer(600.0)
+            self._watchdog.defer(180.0)
         try:
             restored = await self.inference.restore_models(self._settings.data_dir)
             if restored:
