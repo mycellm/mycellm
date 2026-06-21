@@ -6,7 +6,45 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-06-21
+
+### Added
+- **Heartbeat watchdog + crash-loop guard + network self-heal.** A node
+  that wedges (event loop stalled, or file descriptors near the rlimit)
+  now turns the wedge into a non-zero process exit (`os._exit(70)`) so the
+  existing supervisor restart policy (launchd KeepAlive / systemd
+  `Restart=on-failure` / docker `restart:`) actually relaunches it — a
+  wedge never *exited* before, so the policy never fired and the node
+  looked alive while serving nothing. The watchdog runs on an OS thread
+  (so it ticks even while the loop is blocked), with `defer()` to suppress
+  the stall check around slow model loads. A per-model crash-loop guard
+  bumps a persisted attempt counter before each load and quarantines a
+  model that fails to load `model_max_restore_attempts` (3) times, so
+  boot-restore stops reloading an OOM-ing model. A network self-heal loop
+  detects local/public address changes and forces an immediate
+  re-announce + NAT re-probe, and dials every joined federation network's
+  bootstrap. All thresholds are env-overridable (`MYCELLM_*`). The systemd
+  template now sets `StartLimitIntervalSec=0` so the restart limiter does
+  not defeat self-heal.
+
 ### Fixed
+- **UDP file-descriptor leak that wedged the node API (root cause).**
+  `transport/quic.py::dial_peer` created a datagram endpoint and then
+  awaited the QUIC handshake; on handshake timeout/cancel it raised
+  *without closing the transport*, and the caller never received the
+  protocol handle to close it either. A seeder's reconnect loop leaked one
+  UDP socket per failed dial until `EMFILE`, after which the event loop
+  could no longer accept connections — the process stayed listening but
+  answered nothing ("looks alive, serves nothing"). Fixed by closing the
+  protocol + transport on any failure path before re-raising.
+- **Resilient auto-routing + accurate live node counts.** Auto model
+  resolution now degrades gracefully across fleet-announced nodes and
+  reports accurate live node counts (route failover covered by new tests).
+- **Model-load preflight no longer blocks the event loop.** The RAM
+  preflight (`vm_stat` subprocess + on-disk size walks) moved off the loop
+  into a single `asyncio.to_thread`; localhost `/v1/node/status` probes
+  during a real model reload now run at ~2 ms median / 4 ms p95 (was up to
+  seconds), and the restore watchdog defer dropped 600s → 180s.
 - **SQLAlchemy pool exhaustion wedging the node API** (seen live: after
   ~3h of menu bar status polls a node hit "QueuePool limit of size 5
   overflow 10 reached" on every DB-touching endpoint while background
