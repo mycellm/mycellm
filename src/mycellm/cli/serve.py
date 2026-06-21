@@ -237,9 +237,15 @@ def _install_systemd(mycellm_bin, host, port, quic_port, dht_port, device, no_dh
     if bootstrap:
         env_lines = f"Environment=MYCELLM_BOOTSTRAP_PEERS={bootstrap}"
 
+    # StartLimitIntervalSec=0 disables systemd's default restart rate limiter
+    # (5 restarts / 10s → permanent failed state). The in-app heartbeat watchdog
+    # may exit(70) to recover from a wedge, and we want systemd to keep
+    # restarting indefinitely (mirrors Docker `restart: unless-stopped`).
+    # RestartSec=10 still throttles the loop so a hard crash-loop isn't a spin.
     unit = f"""[Unit]
 Description=mycellm distributed LLM inference node
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart={args}

@@ -136,6 +136,72 @@ def _estimate_kv_bytes(model_path: str, ctx_len: int, file_size: int) -> int:
     return (file_size // 45_000) * ctx_len
 
 
+# --- model crash-loop guard ---------------------------------------------------
+# A model that OOM-kills the process (or otherwise fails) during boot-restore
+# would be retried on every restart → an unbreakable crash loop. We persist a
+# per-model attempt counter that is bumped *before* each restore attempt (so it
+# survives a hard kill) and cleared on success. Once a model exceeds the
+# configured ceiling it is quarantined (enabled=false) so restore skips it.
+
+def _attempts_path(data_dir: Path) -> Path:
+    return Path(data_dir) / "model_load_attempts.json"
+
+
+def _read_attempts(data_dir: Path) -> dict[str, int]:
+    import json
+
+    try:
+        return json.loads(_attempts_path(data_dir).read_text())
+    except Exception:
+        return {}
+
+
+def _write_attempts(data_dir: Path, attempts: dict[str, int]) -> None:
+    import json
+
+    try:
+        path = _attempts_path(data_dir)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(attempts))
+        tmp.rename(path)
+    except Exception:
+        pass
+
+
+def _bump_attempt(data_dir: Path, name: str) -> int:
+    attempts = _read_attempts(data_dir)
+    attempts[name] = attempts.get(name, 0) + 1
+    _write_attempts(data_dir, attempts)
+    return attempts[name]
+
+
+def _clear_attempt(data_dir: Path, name: str) -> None:
+    attempts = _read_attempts(data_dir)
+    if attempts.pop(name, None) is not None:
+        _write_attempts(data_dir, attempts)
+
+
+def _preflight_local_model(model_path: str, ctx_len: int) -> tuple[int, int, int]:
+    """Disk + RAM preflight for a local-backend load.
+
+    Pure blocking I/O — a directory walk for the on-disk size, a config.json read
+    for the KV estimate, and a ``vm_stat`` subprocess for available RAM. Collected
+    here so the caller can run the whole thing in one ``asyncio.to_thread`` and
+    keep it off the event loop (a load must never stall request serving).
+
+    Returns ``(file_size, kv_bytes, avail_ram)`` in bytes; zeros when unknown.
+    """
+    file_size = _model_size_on_disk(model_path) if model_path else 0
+    if file_size <= 0:
+        return 0, 0, 0
+    try:
+        kv_bytes = _estimate_kv_bytes(model_path, ctx_len, file_size)
+    except Exception:
+        kv_bytes = 0
+    avail_ram = _available_ram_bytes()
+    return file_size, kv_bytes, avail_ram
+
+
 class InferenceManager:
     """Manages loaded models, concurrency limits, and backend routing.
 
@@ -159,6 +225,8 @@ class InferenceManager:
         self._queue_depth: dict[str, int] = {}
         # Persistent configs — survives unload so models can be re-loaded
         self._saved_configs: dict[str, dict] = {}  # name -> config dict
+        # Models disabled by the crash-loop guard this process lifetime
+        self._quarantined: set[str] = set()
         # Load status tracking
         self._load_status: dict[str, dict] = {}  # model_name -> {status, phase, error, ...}
         # Model paths (for llama.cpp models)
@@ -244,45 +312,48 @@ class InferenceManager:
             # context) against *available* RAM on both platforms — the old
             # macOS path used hw.memsize (total physical RAM), which passed
             # a 30GB load on a 64GB box with 50GB already in use.
+            #
+            # The preflight (dir walk + config.json read + `vm_stat` subprocess)
+            # runs OFF the event loop via to_thread so loading a model never
+            # stalls request serving. `file_size` is computed once here and
+            # reused for the RAM warning, status phases, and loaded_bytes.
+            file_size = 0
             if backend_type in LOCAL_BACKENDS and model_path:
-                file_size = _model_size_on_disk(model_path)
-                if file_size > 0:
-                    try:
-                        from mycellm.config import get_settings as _gs_mem
-                        ctx_len = int(
-                            kwargs.get("ctx_len")
-                            or kwargs.get("n_ctx")
-                            or _gs_mem().default_ctx_len
+                from mycellm.config import get_settings as _gs_mem
+                ctx_len = int(
+                    kwargs.get("ctx_len")
+                    or kwargs.get("n_ctx")
+                    or _gs_mem().default_ctx_len
+                )
+                try:
+                    file_size, kv_bytes, avail_ram = await asyncio.to_thread(
+                        _preflight_local_model, model_path, ctx_len
+                    )
+                    est_ram_needed = int(file_size * 1.1) + kv_bytes
+                    if file_size > 0 and avail_ram > 0 and est_ram_needed > avail_ram * 0.85:
+                        logger.warning(
+                            f"Model {model_name} may exceed available RAM: "
+                            f"~{est_ram_needed/1024**3:.1f}GB needed "
+                            f"(weights {file_size/1024**3:.1f}GB + KV "
+                            f"~{kv_bytes/1024**3:.1f}GB at ctx {ctx_len}) vs "
+                            f"{avail_ram/1024**3:.1f}GB available. "
+                            "Loading anyway — watch for OOM."
                         )
-                        kv_bytes = _estimate_kv_bytes(model_path, ctx_len, file_size)
-                        est_ram_needed = int(file_size * 1.1) + kv_bytes
-                        avail_ram = _available_ram_bytes()
-
-                        if avail_ram > 0 and est_ram_needed > avail_ram * 0.85:
-                            logger.warning(
-                                f"Model {model_name} may exceed available RAM: "
-                                f"~{est_ram_needed/1024**3:.1f}GB needed "
-                                f"(weights {file_size/1024**3:.1f}GB + KV "
-                                f"~{kv_bytes/1024**3:.1f}GB at ctx {ctx_len}) vs "
-                                f"{avail_ram/1024**3:.1f}GB available. "
-                                "Loading anyway — watch for OOM."
-                            )
-                            self._load_status[model_name]["phase"] = f"loading {file_size/1024**3:.1f}GB (RAM warning)"
-                    except Exception:
-                        pass
+                        self._load_status[model_name]["phase"] = f"loading {file_size/1024**3:.1f}GB (RAM warning)"
+                except Exception:
+                    pass
 
             if backend_type in LOCAL_BACKENDS:
                 self._load_status[model_name]["phase"] = "loading model into memory"
-                if model_path:
-                    size_gb = _model_size_on_disk(model_path) / (1024**3)
-                    if size_gb > 0:
-                        self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
-                        self._load_status[model_name]["size_gb"] = round(size_gb, 2)
+                size_gb = file_size / (1024**3)
+                if size_gb > 0:
+                    self._load_status[model_name]["phase"] = f"loading {size_gb:.1f}GB into memory"
+                    self._load_status[model_name]["size_gb"] = round(size_gb, 2)
 
                 # Progress tracking — uses llama.cpp callback if available,
                 # falls back to RSS-based estimation for older versions / MLX
                 load_start = _time.time()
-                file_bytes = _model_size_on_disk(model_path) if model_path else 0
+                file_bytes = file_size
                 _has_native_progress = False
 
                 def _progress_cb(progress: float):
@@ -376,7 +447,7 @@ class InferenceManager:
                 quant=kwargs.get("quant", ""),
                 ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", _default_ctx)),
                 backend=backend_type,
-                loaded_bytes=_model_size_on_disk(model_path) if model_path else 0,
+                loaded_bytes=file_size,
             )
 
             elapsed = _time.time() - self._load_status[model_name]["started_at"]
@@ -386,7 +457,12 @@ class InferenceManager:
             # Auto-save config
             try:
                 from mycellm.config import get_settings
-                await self.save_model_configs(get_settings().data_dir)
+                _data_dir = get_settings().data_dir
+                await self.save_model_configs(_data_dir)
+                # A successful load clears the crash-loop attempt counter (covers
+                # both boot-restore and manual re-loads of a fixed/quarantined model).
+                _clear_attempt(_data_dir, model_name)
+                self._quarantined.discard(model_name)
             except Exception:
                 pass
 
@@ -634,13 +710,38 @@ class InferenceManager:
 
         # Only auto-load enabled configs
         from mycellm.config import get_settings as _gs
-        _default_ctx = _gs().default_ctx_len
+        _settings = _gs()
+        _default_ctx = _settings.default_ctx_len
+        max_attempts = int(getattr(_settings, "model_max_restore_attempts", 3) or 0)
         restored = 0
         for config in configs:
             name = config.get("name", "")
             if not config.get("enabled", True):
                 logger.debug(f"Skipping disabled model '{name}'")
                 continue
+
+            # Crash-loop guard. The attempt counter is bumped *before* each load
+            # (so an OOM that hard-kills the process still counts) and cleared on
+            # success inside load_model(). Once a model exceeds the ceiling it is
+            # quarantined (enabled=false) so restore stops reloading it.
+            if max_attempts > 0:
+                if _read_attempts(data_dir).get(name, 0) >= max_attempts:
+                    logger.error(
+                        f"Quarantining model '{name}' after >={max_attempts} failed "
+                        f"load attempts — disabling so it stops crash-looping. "
+                        f"Re-enable by loading it again once the cause is fixed."
+                    )
+                    config["enabled"] = False
+                    self._saved_configs[name] = config
+                    try:
+                        await self.save_model_configs(data_dir)
+                    except Exception:
+                        pass
+                    _clear_attempt(data_dir, name)
+                    self._quarantined.add(name)
+                    continue
+                _bump_attempt(data_dir, name)
+
             backend_type = config.get("backend", "llama.cpp")
             try:
                 if backend_type in ("openai", "openai-compatible"):
