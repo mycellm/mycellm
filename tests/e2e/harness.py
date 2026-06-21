@@ -28,6 +28,9 @@ class NodeInstance:
     dht_port: int
     process: Optional[subprocess.Popen] = None
     log_file: Optional[str] = None
+    log_fh: Optional[object] = None
+    # Times an external supervisor (harness.supervise) has respawned this node.
+    supervisor_restarts: int = 0
 
     @property
     def api_url(self) -> str:
@@ -102,9 +105,18 @@ class E2EHarness:
                 peers.append(f"localhost:{other.quic_port}")
         env["MYCELLM_BOOTSTRAP_PEERS"] = ",".join(peers)
 
+        # Append (not truncate) so a node.log survives a kill+restart and we can
+        # read the pre-crash tail when debugging a recovery failure. Close any
+        # handle left over from a prior run on this node so we don't leak fds.
+        if node.log_fh is not None:
+            try:
+                node.log_fh.close()
+            except Exception:
+                pass
         log_path = node.data_dir / "node.log"
-        log_fh = open(log_path, "w")
+        log_fh = open(log_path, "a")
         node.log_file = str(log_path)
+        node.log_fh = log_fh
 
         node.process = subprocess.Popen(
             [sys.executable, "-m", "mycellm.cli.main", "serve",
@@ -155,10 +167,87 @@ class E2EHarness:
                 node.process.kill()
                 node.process.wait()
 
+    def kill_node(self, node: NodeInstance, sig: int = signal.SIGKILL) -> None:
+        """Hard-kill a node, simulating a crash / OOM-kill / watchdog os._exit.
+
+        Unlike ``stop_node`` (graceful SIGTERM, clean exit 0), this gives the
+        node no chance to shut down — which is exactly what an external
+        supervisor sees when the in-app HeartbeatWatchdog calls ``os._exit(70)``
+        on a wedged loop, when the kernel OOM-kills the process, or on a hard
+        crash. Used to drive the recovery path.
+        """
+        if node.process and node.process.poll() is None:
+            node.process.send_signal(sig)
+            try:
+                node.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                node.process.kill()
+                node.process.wait()
+
+    def wait_exit(self, node: NodeInstance, timeout: float = 10.0) -> Optional[int]:
+        """Block until the node process exits; return its exit code (None on timeout).
+
+        A negative code is the negated signal number (e.g. -9 for SIGKILL).
+        """
+        if not node.process:
+            return None
+        try:
+            return node.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+
+    def restart_node(self, node: NodeInstance) -> None:
+        """Relaunch a (dead or live) node on the same ports + data dir.
+
+        The data dir is reused, so identity (peer_id), config and the SQLite
+        credit ledger persist across the restart. This is what an external
+        supervisor (launchd KeepAlive / systemd Restart= / docker restart:)
+        does after the process dies.
+        """
+        if node.process and node.process.poll() is None:
+            self.stop_node(node)
+        self.start_node(node)
+
+    async def supervise(
+        self, node: NodeInstance, *, poll: float = 0.2, max_restarts: int = 10
+    ) -> asyncio.Task:
+        """Spawn a background task that mimics an external process supervisor.
+
+        It watches ``node`` and respawns it (same ports + data dir) whenever the
+        process exits *abnormally* (non-zero / killed by signal), up to
+        ``max_restarts``. A clean exit (code 0, e.g. graceful SIGTERM) stops
+        supervision without a respawn — so ``teardown`` won't fight it. Each
+        respawn increments ``node.supervisor_restarts``.
+
+        Cancel the returned task to stop supervising. Always cancel it before
+        ``teardown`` / ``stop_node`` if you don't want a graceful stop to race
+        the watcher.
+        """
+
+        async def _watch() -> None:
+            while True:
+                proc = node.process
+                if proc is not None and proc.poll() is not None:
+                    code = proc.returncode
+                    if code == 0:
+                        return  # clean exit — nothing to recover
+                    if node.supervisor_restarts >= max_restarts:
+                        return  # crash-loop ceiling — give up, like a supervisor
+                    node.supervisor_restarts += 1
+                    self.start_node(node)
+                await asyncio.sleep(poll)
+
+        return asyncio.create_task(_watch())
+
     def teardown(self) -> None:
         """Stop all nodes and clean up."""
         for node in self.nodes:
             self.stop_node(node)
+            if node.log_fh is not None:
+                try:
+                    node.log_fh.close()
+                except Exception:
+                    pass
         if self._tmpdir and os.path.exists(self._tmpdir):
             shutil.rmtree(self._tmpdir, ignore_errors=True)
         self.nodes.clear()
