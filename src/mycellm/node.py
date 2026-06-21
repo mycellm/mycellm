@@ -2004,126 +2004,158 @@ class MycellmNode:
         await asyncio.sleep(0.5)
         raise SystemExit(0)
 
+    def _candidate_models(self, model: str) -> list[str]:
+        """Ordered, de-duplicated list of model names to try for a request.
+
+        For a concrete model -> just that name. For ""/"auto" -> every model
+        the ModelResolver can currently reach, best-first. Returning the whole
+        ranked list (not just resolved[0]) is what lets routing fail over
+        across *models*: if the top pick's only seeder is down, the request
+        falls through to the next-best model instead of failing the whole
+        request. The resolver already excludes peers without a live connection,
+        so dead/zombie seeders never appear here.
+        """
+        if model not in ("", "auto") or not self.model_resolver:
+            return [model]
+        resolved = self.model_resolver.resolve(
+            "", self.inference.loaded_models,
+            fleet_registry=self.node_registry,
+        )
+        seen: set[str] = set()
+        names: list[str] = []
+        for r in resolved:
+            if r.model_name not in seen:
+                seen.add(r.model_name)
+                names.append(r.model_name)
+        return names
+
     async def route_inference(self, model: str, messages: list[dict], **kwargs):
         """Route inference — local if model loaded, otherwise to peer.
 
-        Uses ModelResolver for empty model requests to find the best candidate.
-        Supports failover across multiple QUIC peers.
+        Uses ModelResolver for empty/"auto" requests. Fails over both across
+        QUIC peers serving a model AND across candidate models (so a downed
+        seeder degrades to the next-best model rather than failing the call).
 
         kwargs forwarded to InferenceRequest / peer message:
           temperature, max_tokens, reasoning_exclude
         """
-        # Resolve empty/"auto" model via ModelResolver
-        effective_model = model
-        if model in ("", "auto") and self.model_resolver:
-            resolved = self.model_resolver.resolve(
-                "", self.inference.loaded_models,
-                fleet_registry=self.node_registry,
-            )
-            if resolved:
-                effective_model = resolved[0].model_name
-
-        model_name = self.inference.resolve_model_name(effective_model)
         reasoning_exclude = kwargs.get("reasoning_exclude")
-
-        # Try local inference first
-        if model_name:
-            from mycellm.inference.base import InferenceRequest
-            req = InferenceRequest(
-                messages=messages,
-                model=model_name,
-                temperature=kwargs.get("temperature", 0.7),
-                max_tokens=kwargs.get("max_tokens", 2048),
-                reasoning_exclude=reasoning_exclude if reasoning_exclude is not None else False,
-            )
-            return await self.inference.generate(req)
-
-        # Try routing to a peer (with failover)
-        from mycellm.transport.messages import inference_request
-        targets = self.chain_builder.route(effective_model)
-        if not targets:
+        candidates = self._candidate_models(model)
+        if not candidates:
             return None
 
-        for target in targets:
-            if target.entry.connection is None:
-                continue
+        from mycellm.inference.base import InferenceRequest
+        from mycellm.transport.messages import inference_request
 
-            req_msg = inference_request(
-                self.peer_id, effective_model, messages,
-                temperature=kwargs.get("temperature", 0.7),
-                max_tokens=kwargs.get("max_tokens", 2048),
-                reasoning_exclude=reasoning_exclude,
-            )
+        for effective_model in candidates:
+            model_name = self.inference.resolve_model_name(effective_model)
 
-            try:
-                resp = await target.entry.connection.request(req_msg)
-
-                if resp.type == MessageType.ERROR:
-                    target.entry.failure_count += 1
+            # Local inference for this candidate, if loaded here.
+            if model_name:
+                try:
+                    req = InferenceRequest(
+                        messages=messages,
+                        model=model_name,
+                        temperature=kwargs.get("temperature", 0.7),
+                        max_tokens=kwargs.get("max_tokens", 2048),
+                        reasoning_exclude=reasoning_exclude if reasoning_exclude is not None else False,
+                    )
+                    return await self.inference.generate(req)
+                except Exception as e:
+                    logger.debug(f"Local inference for '{model_name}' failed: {e}; trying next candidate")
                     continue
 
-                # Success — reduce failure count
-                target.entry.failure_count = max(0, target.entry.failure_count - 1)
+            # Peer routing with per-peer failover for this candidate model.
+            targets = self.chain_builder.route(effective_model)
+            for target in targets:
+                if target.entry.connection is None:
+                    continue
 
-                # Debit consumer
-                if self.ledger:
-                    tokens = resp.payload.get("completion_tokens", 0)
-                    from mycellm.accounting.pricing import compute_cost
-                    cost = compute_cost(max(tokens, 1))
-                    await self.ledger.debit(self.peer_id, cost, "inference_consumed",
-                                            counterparty_id=target.peer_id)
+                req_msg = inference_request(
+                    self.peer_id, effective_model, messages,
+                    temperature=kwargs.get("temperature", 0.7),
+                    max_tokens=kwargs.get("max_tokens", 2048),
+                    reasoning_exclude=reasoning_exclude,
+                )
 
-                return resp.payload
-            except Exception as e:
-                target.entry.failure_count += 1
-                logger.debug(f"Peer {target.peer_id[:16]} routing failed: {e}")
-                continue
+                try:
+                    resp = await target.entry.connection.request(req_msg)
+
+                    if resp.type == MessageType.ERROR:
+                        target.entry.failure_count += 1
+                        continue
+
+                    # Success — reduce failure count
+                    target.entry.failure_count = max(0, target.entry.failure_count - 1)
+
+                    # Debit consumer
+                    if self.ledger:
+                        tokens = resp.payload.get("completion_tokens", 0)
+                        from mycellm.accounting.pricing import compute_cost
+                        cost = compute_cost(max(tokens, 1))
+                        await self.ledger.debit(self.peer_id, cost, "inference_consumed",
+                                                counterparty_id=target.peer_id)
+
+                    return resp.payload
+                except Exception as e:
+                    target.entry.failure_count += 1
+                    logger.debug(f"Peer {target.peer_id[:16]} routing failed: {e}")
+                    continue
+            # No peer served this candidate model — fall through to the next.
 
         return None
 
     async def route_inference_stream(self, model: str, messages: list[dict], **kwargs):
-        """Route streaming inference to a peer. Yields text chunks."""
-        effective_model = model
-        if model in ("", "auto") and self.model_resolver:
-            resolved = self.model_resolver.resolve(
-                "", self.inference.loaded_models,
-                fleet_registry=self.node_registry,
-            )
-            if resolved:
-                effective_model = resolved[0].model_name
+        """Route streaming inference to a peer. Yields text chunks.
 
+        Fails over across peers and across candidate models, like
+        ``route_inference``. Fail-over is only safe *before* any chunk has been
+        handed to the caller — once a peer has streamed real output we are
+        committed to it (re-routing would duplicate tokens), so a mid-stream
+        error ends the stream rather than restarting on another model.
+        """
         from mycellm.transport.messages import inference_request
-        targets = self.chain_builder.route(effective_model)
-        if not targets:
-            return
+        candidates = self._candidate_models(model)
 
-        for target in targets:
-            if target.entry.connection is None:
-                continue
+        for effective_model in candidates:
+            targets = self.chain_builder.route(effective_model)
 
-            req_msg = inference_request(
-                self.peer_id, effective_model, messages,
-                temperature=kwargs.get("temperature", 0.7),
-                max_tokens=kwargs.get("max_tokens", 2048),
-                stream=True,
-                tools=kwargs.get("tools"),
-                tool_choice=kwargs.get("tool_choice"),
-                reasoning_exclude=kwargs.get("reasoning_exclude"),
-            )
+            for target in targets:
+                if target.entry.connection is None:
+                    continue
 
-            try:
-                async for resp in target.entry.connection.request_stream(req_msg):
-                    text = resp.payload.get("text", "")
-                    finish_reason = resp.payload.get("finish_reason")
-                    tool_calls = resp.payload.get("tool_calls")
-                    if text or tool_calls:
-                        yield {"text": text, "finish_reason": finish_reason, "tool_calls": tool_calls, "peer_id": target.peer_id}
-                target.entry.failure_count = max(0, target.entry.failure_count - 1)
-                return
-            except Exception as e:
-                target.entry.failure_count += 1
-                logger.debug(f"Peer {target.peer_id[:16]} stream routing failed: {e}")
-                continue
+                req_msg = inference_request(
+                    self.peer_id, effective_model, messages,
+                    temperature=kwargs.get("temperature", 0.7),
+                    max_tokens=kwargs.get("max_tokens", 2048),
+                    stream=True,
+                    tools=kwargs.get("tools"),
+                    tool_choice=kwargs.get("tool_choice"),
+                    reasoning_exclude=kwargs.get("reasoning_exclude"),
+                )
+
+                produced = False
+                try:
+                    async for resp in target.entry.connection.request_stream(req_msg):
+                        text = resp.payload.get("text", "")
+                        finish_reason = resp.payload.get("finish_reason")
+                        tool_calls = resp.payload.get("tool_calls")
+                        if text or tool_calls:
+                            produced = True
+                            yield {"text": text, "finish_reason": finish_reason, "tool_calls": tool_calls, "peer_id": target.peer_id}
+                    target.entry.failure_count = max(0, target.entry.failure_count - 1)
+                    return
+                except Exception as e:
+                    target.entry.failure_count += 1
+                    logger.debug(f"Peer {target.peer_id[:16]} stream routing failed: {e}")
+                    if produced:
+                        # Already streamed real tokens downstream — cannot
+                        # transparently re-route without duplicating output.
+                        return
+                    continue
+            # No peer streamed this candidate model — try the next-best model.
+
+        return
 
     def get_operational_mode(self) -> str:
         """Auto-detect operational mode from node state."""

@@ -23,8 +23,23 @@ def _make_node():
     return node
 
 
-def _make_peer_entry(peer_id, addresses=None, models=None, state=PeerState.ROUTABLE):
-    """Create a PeerEntry for testing."""
+class _LiveConn:
+    """Open-connection stand-in: is_live() only checks protocol._is_closed."""
+
+    class _Proto:
+        _is_closed = False
+
+    def __init__(self):
+        self.protocol = self._Proto()
+
+
+def _make_peer_entry(peer_id, addresses=None, models=None, state=PeerState.ROUTABLE,
+                     live=True):
+    """Create a PeerEntry for testing.
+
+    By default the peer has a live connection (the production invariant for a
+    ROUTABLE peer); pass live=False to model a session-less / zombie entry.
+    """
     caps = Capabilities(
         models=[MagicMock(name=m, param_count_b=7.0) for m in (models or [])],
         role="seeder",
@@ -35,6 +50,8 @@ def _make_peer_entry(peer_id, addresses=None, models=None, state=PeerState.ROUTA
         state=state,
         addresses=addresses or [],
     )
+    if live:
+        entry.connection = _LiveConn()
     return entry
 
 
