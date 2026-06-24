@@ -60,3 +60,34 @@ async def test_dial_peer_retains_transport_on_success():
     assert result is protocol
     transport.close.assert_not_called()
     protocol.close.assert_not_called()
+    # The dialed protocol must own its socket so its eventual close() releases it.
+    assert protocol._owned_transport is transport
+
+
+@pytest.mark.asyncio
+async def test_close_releases_owned_transport_for_dialed_protocol():
+    """A client-dialed protocol's close() must release its dedicated UDP socket.
+
+    aioquic's protocol does not close its datagram transport on close(); without
+    releasing _owned_transport, every dialed connection leaks one *:port UDP fd
+    when the caller closes it (handshake reject / reconnect teardown).
+    """
+    proto = quic.MycellmQuicProtocol(MagicMock(name="quic_connection"))
+    owned = MagicMock(name="owned_transport")
+    proto._owned_transport = owned
+    proto._is_closed = True  # skip the _quic.close()/transmit() path
+
+    proto.close()
+
+    owned.close.assert_called_once()
+    assert proto._owned_transport is None
+
+
+@pytest.mark.asyncio
+async def test_close_does_not_touch_shared_server_transport():
+    """A server-accepted protocol shares the one server socket and must NOT close it."""
+    proto = quic.MycellmQuicProtocol(MagicMock(name="quic_connection"))
+    proto._is_closed = True
+    assert proto._owned_transport is None  # never set for server side
+
+    proto.close()  # must be a no-op w.r.t. the (shared) transport — no crash
