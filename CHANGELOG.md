@@ -6,6 +6,24 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-06-24
+
+### Fixed
+- **Residual UDP file-descriptor leak that wedged nodes.** The 0.5.2 fix
+  closed the dialed datagram endpoint on `dial_peer`'s *failure* path, but
+  `MycellmQuicProtocol.close()` never closed the underlying UDP socket on
+  the *success/teardown* path — it closed the QUIC connection and sent
+  `CONNECTION_CLOSE`, but aioquic does not release the datagram transport
+  for you. So every client-dialed connection leaked one ephemeral `*:port`
+  UDP fd whenever the caller closed it (handshake rejects, reconnect
+  teardown, peer churn) — seen live as ~1 leaked UDP fd/min climbing to
+  thousands (aurora) / 20k+ (hokulea), eventually `EMFILE` so the event
+  loop can no longer accept and the API goes deaf while the process still
+  looks "running". Now `dial_peer` tags the dialed protocol with
+  `_owned_transport` and `close()` releases it. Server-accepted protocols
+  share the single server socket and never set `_owned_transport`, so the
+  server socket is untouched.
+
 ## [0.5.2] — 2026-06-21
 
 ### Added
