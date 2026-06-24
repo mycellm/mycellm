@@ -36,6 +36,10 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
         self._peer_addr: tuple[str, int] | None = None
         self._response_futures: dict[str, asyncio.Future] = {}
         self._is_closed = False
+        # Set by dial_peer for client-dialed connections, which each own a
+        # dedicated ephemeral UDP socket. close() releases it. Server-accepted
+        # protocols share the single server socket and leave this None.
+        self._owned_transport: asyncio.BaseTransport | None = None
 
     def set_message_handler(
         self, handler: Callable[[MessageEnvelope, int], Awaitable[None]]
@@ -174,6 +178,20 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
             self._is_closed = True
             self._quic.close()
             self.transmit()
+        # Release the underlying UDP socket for client-dialed connections.
+        # aioquic's protocol does NOT close its datagram transport on close(),
+        # so without this every dialed connection leaks one ephemeral *:port
+        # UDP fd when the caller closes it (handshake reject, reconnect
+        # teardown, etc.) — the residual socket leak that wedges nodes. Only
+        # client dials set _owned_transport; server-accepted protocols share
+        # the one server socket and are untouched. transmit() above already
+        # flushed CONNECTION_CLOSE synchronously, so closing now is safe.
+        if self._owned_transport is not None:
+            try:
+                self._owned_transport.close()
+            except Exception:
+                pass
+            self._owned_transport = None
 
 
 async def create_quic_server(
@@ -269,6 +287,10 @@ async def dial_peer(
         ),
         timeout=connection_timeout,
     )
+    # This dialed protocol owns its dedicated UDP socket; tag it so
+    # protocol.close() releases the fd (the success/teardown path). The
+    # failure path below also closes transport explicitly.
+    protocol._owned_transport = transport
 
     # Once the datagram endpoint exists it owns a bound UDP socket (an ephemeral
     # *:port). If anything below raises — handshake timeout, cancellation, a dead
