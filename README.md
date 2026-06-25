@@ -13,6 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
   <a href="https://pypi.org/project/mycellm/"><img src="https://img.shields.io/pypi/v/mycellm.svg?color=green" alt="PyPI"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python"></a>
+  <a href="https://apps.apple.com/app/id6761091607"><img src="https://img.shields.io/badge/App_Store-mycellm-black?logo=apple" alt="Download on the App Store"></a>
   <a href="https://mycellm.ai"><img src="https://img.shields.io/badge/website-mycellm.ai-spore" alt="Website"></a>
 </p>
 
