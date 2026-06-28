@@ -10,7 +10,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger("mycellm.api")
 
@@ -134,6 +134,10 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     temperature: float = 0.7
     max_tokens: Optional[int] = None
+    # OpenAI renamed max_tokens -> max_completion_tokens for chat completions.
+    # Accept it as an alias so newer SDK clients keep working (folded into
+    # max_tokens by the validator below, so all downstream reads are unchanged).
+    max_completion_tokens: Optional[int] = None
     stream: bool = False
     top_p: float = 1.0
     stop: list[str] | str | None = None
@@ -151,6 +155,13 @@ class ChatCompletionRequest(BaseModel):
     # Omitted → server default (MYCELLM_HIDE_REASONING_BY_DEFAULT decides).
     reasoning: dict | None = None
     mycellm: MycellmRouting | None = None
+
+    @model_validator(mode="after")
+    def _fold_max_completion_tokens(self) -> "ChatCompletionRequest":
+        # max_tokens takes precedence if a client sends both.
+        if self.max_tokens is None and self.max_completion_tokens is not None:
+            self.max_tokens = self.max_completion_tokens
+        return self
 
 
 class ChatCompletionChoice(BaseModel):
