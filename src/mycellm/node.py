@@ -1756,7 +1756,13 @@ class MycellmNode:
     async def announce_capabilities(self) -> None:
         """Re-announce capabilities to all connected peers (e.g. after model load)."""
         from mycellm.transport.messages import peer_announce
-        addresses = self._discover_local_addresses()
+        # _discover_local_addresses() does blocking I/O (socket.getaddrinfo on the
+        # local .local mDNS hostname, plus a hostname subprocess). On the event loop
+        # a stalled macOS resolver freezes the whole loop for the OS resolver timeout
+        # (tens of seconds) — API dead, logs can't flush, SIGTERM can't run. Offload
+        # it so a hung resolver ties up a worker thread, not the loop. Result is
+        # cached 5 min, so this is cheap.
+        addresses = await asyncio.to_thread(self._discover_local_addresses)
 
         msg = peer_announce(
             self.peer_id,
