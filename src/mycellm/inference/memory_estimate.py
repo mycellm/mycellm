@@ -41,30 +41,63 @@ KV_DTYPE_BYTES = 2
 _GB = 1024 ** 3
 
 
-def _load_config(model_path: str) -> dict | None:
-    """Load a model's config.json from a local dir or the HF hub cache."""
+def _snapshot_dir(model_path: str) -> str | None:
+    """Resolve a model dir from a local path or an HF hub-cache repo id."""
     if not model_path:
         return None
-    # Local directory (mycellm prefers local snapshot dirs).
-    cand = model_path if model_path.endswith(".json") else os.path.join(model_path, "config.json")
-    if os.path.exists(cand):
-        try:
-            return json.load(open(cand))
-        except Exception:
-            return None
-    # Looks like an HF repo id — search the hub cache snapshots.
+    if os.path.isdir(model_path):
+        return model_path
+    # Looks like an HF repo id — find the newest cached snapshot.
     if "/" in model_path and not os.path.isabs(model_path):
         base = os.path.expanduser(
             "~/.cache/huggingface/hub/models--" + model_path.replace("/", "--") + "/snapshots"
         )
         for d in sorted(glob.glob(base + "/*"), reverse=True):
-            p = os.path.join(d, "config.json")
-            if os.path.exists(p):
-                try:
-                    return json.load(open(p))
-                except Exception:
-                    continue
+            if os.path.isdir(d):
+                return d
     return None
+
+
+def _load_config(model_path: str) -> dict | None:
+    """Load a model's config.json from a local dir or the HF hub cache."""
+    if not model_path:
+        return None
+    if model_path.endswith(".json") and os.path.exists(model_path):
+        try:
+            return json.load(open(model_path))
+        except Exception:
+            return None
+    d = _snapshot_dir(model_path)
+    if d:
+        p = os.path.join(d, "config.json")
+        if os.path.exists(p):
+            try:
+                return json.load(open(p))
+            except Exception:
+                return None
+    return None
+
+
+def resolve_weights_bytes(model_path: str) -> int:
+    """On-disk weight bytes, resolving local paths AND HF-cache repo ids.
+
+    (manager._model_size_on_disk only handles local paths and returns 0 for a
+    repo id — which under-counts the preflight peak.)
+    """
+    if not model_path:
+        return 0
+    if os.path.isfile(model_path):  # single-file (e.g. .gguf)
+        try:
+            return os.path.getsize(model_path)
+        except OSError:
+            return 0
+    d = _snapshot_dir(model_path)
+    if not d:
+        return 0
+    try:
+        return sum(os.path.getsize(f) for f in glob.glob(os.path.join(d, "*.safetensors")))
+    except OSError:
+        return 0
 
 
 def read_model_dims(model_path: str) -> dict | None:
@@ -162,6 +195,11 @@ def estimate(
     if ceiling <= 0:
         return None  # unknown ceiling — let caller fall back
 
+    # Resolve weights from disk if the caller couldn't (e.g. passed an HF repo
+    # id, which manager._model_size_on_disk can't size).
+    if int(weights_bytes) <= 0:
+        weights_bytes = resolve_weights_bytes(model_path)
+
     slots = max(1, int(batch_slots))
     per_tok = kv_bytes_per_token(dims)
     kv = per_tok * max(0, int(ctx_len)) * slots
@@ -196,13 +234,7 @@ if __name__ == "__main__":  # node validation / manual probe
     mp = sys.argv[1]
     ctx = int(sys.argv[2]) if len(sys.argv) > 2 else 32768
     slots = int(sys.argv[3]) if len(sys.argv) > 3 else 1
-    wb = 0
-    try:
-        from mycellm.inference.manager import _model_size_on_disk
-        wb = _model_size_on_disk(mp)
-    except Exception:
-        pass
-    e = estimate(mp, ctx, slots, weights_bytes=wb)
+    e = estimate(mp, ctx, slots, weights_bytes=resolve_weights_bytes(mp))
     if not e:
         print("no estimate (config/ceiling unavailable)")
         sys.exit(1)

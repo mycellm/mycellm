@@ -78,6 +78,7 @@ def _run_kv_preflight(model_name, model_path, kwargs, settings, runtime_backend_
     if not est:
         return False  # config or ceiling unavailable → legacy fallback
 
+    weights = est["weights_bytes"]  # estimate() resolves it if we couldn't (repo id)
     gb = 1024 ** 3
     detail = (
         f"{model_name}: peak~{est['peak_bytes']/gb:.1f}GB "
