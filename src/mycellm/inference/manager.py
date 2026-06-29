@@ -47,6 +47,68 @@ def _model_size_on_disk(model_path: str) -> int:
     return 0
 
 
+class _PreflightReject(RuntimeError):
+    """Raised when KV-aware preflight rejects a load (action='reject')."""
+
+
+def _run_kv_preflight(model_name, model_path, kwargs, settings, runtime_backend_type) -> bool:
+    """KV-aware load preflight. Returns True if it handled the memory check.
+
+    Estimates weights + KV(ctx x batch) + overhead against the Metal working-set
+    ceiling. Depending on settings.preflight_action:
+      - warn:   log if it won't fit, load anyway (legacy behaviour, better data)
+      - clamp:  reduce kwargs['ctx_len'] to the largest ctx that fits (>= min)
+      - reject: raise _PreflightReject
+
+    Returns False to fall back to the legacy size check (dims/ceiling unknown).
+    """
+    from mycellm.inference import memory_estimate as me
+
+    ctx_len = int(kwargs.get("ctx_len", kwargs.get("n_ctx", settings.default_ctx_len)))
+    # KV is allocated per concurrent sequence; self-batching backends hold up to
+    # max_concurrent_inferences live slots, others serialize to one.
+    slots = settings.max_concurrent_inferences if runtime_backend_type in SELF_BATCHING_BACKENDS else 1
+    weights = _model_size_on_disk(model_path)
+    est = me.estimate(
+        model_path, ctx_len, slots,
+        weights_bytes=weights,
+        overhead_bytes=int(settings.preflight_overhead_gb * (1024 ** 3)),
+        safety_fraction=settings.preflight_safety_fraction,
+    )
+    if not est:
+        return False  # config or ceiling unavailable → legacy fallback
+
+    gb = 1024 ** 3
+    detail = (
+        f"{model_name}: peak~{est['peak_bytes']/gb:.1f}GB "
+        f"(weights {weights/gb:.1f} + KV {est['kv_bytes']/gb:.1f}@ctx{ctx_len}x{slots} "
+        f"+ overhead {settings.preflight_overhead_gb:.1f}) vs budget {est['budget_bytes']/gb:.1f}GB "
+        f"(ceiling {est['ceiling_bytes']/gb:.1f})"
+    )
+    if est["fits"]:
+        logger.info(f"KV preflight OK — {detail}; max_ctx@{slots}={est['max_ctx_len']}")
+        return True
+
+    action = (settings.preflight_action or "warn").lower()
+    if action == "reject":
+        raise _PreflightReject(
+            f"Model would not fit: {detail}. Max ctx_len at {slots} slot(s) is "
+            f"{est['max_ctx_len']}. Lower ctx_len/concurrency or raise iogpu.wired_limit_mb."
+        )
+    if action == "clamp":
+        safe = max(int(settings.preflight_min_ctx_len), int(est["max_ctx_len"]))
+        if safe < ctx_len:
+            kwargs["ctx_len"] = safe
+            kwargs.pop("n_ctx", None)
+            logger.warning(f"KV preflight CLAMP — {detail}; ctx_len {ctx_len} → {safe}")
+        else:
+            logger.warning(f"KV preflight — {detail}; min_ctx {safe} still over budget, loading anyway")
+        return True
+    # warn (default)
+    logger.warning(f"KV preflight WARN — {detail}; max safe ctx@{slots}={est['max_ctx_len']}. Loading anyway — watch for OOM.")
+    return True
+
+
 def _get_rss_bytes() -> int:
     """Get current process RSS in bytes. Cross-platform."""
     try:
@@ -169,7 +231,23 @@ class InferenceManager:
 
             # Memory check for any local backend (llama.cpp or mlx)
             if backend_type in LOCAL_BACKENDS and model_path:
-                file_size = _model_size_on_disk(model_path)
+                # KV-aware preflight (v2, flag-gated). Returns True if it handled
+                # the check (incl. clamping kwargs["ctx_len"] or raising on
+                # reject); falls through to the legacy size check otherwise.
+                _v2_handled = False
+                try:
+                    from mycellm.config import get_settings as _gs_pf
+                    _pf_s = _gs_pf()
+                    if _pf_s.preflight_kv_aware and runtime_backend_type and str(runtime_backend_type).startswith("mlx"):
+                        _v2_handled = _run_kv_preflight(
+                            model_name, model_path, kwargs, _pf_s, runtime_backend_type
+                        )
+                except _PreflightReject:
+                    raise
+                except Exception:
+                    _v2_handled = False
+
+                file_size = 0 if _v2_handled else _model_size_on_disk(model_path)
                 if file_size > 0:
                     est_ram_needed = file_size * 1.2  # model + KV cache overhead
                     try:
