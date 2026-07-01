@@ -6,6 +6,45 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-01
+
+### Added
+- **Multi-network membership (P0).** A node can now belong to multiple
+  networks at once and routing respects network isolation end-to-end:
+  `NodeHello` carries the node's `network_ids`, the peer registry stores
+  them, and `peers_for_model` only offers peers that share at least one
+  network with the requester. Peers with no declared networks are treated
+  as public/legacy and stay eligible, so single-network deployments and
+  un-upgraded peers keep working unchanged.
+- **Per-network model scoping.** `ModelCapability` gains `scope`
+  (`home` | `networks` | `public`) and `visible_networks`, so a model can
+  be advertised to the home network only, to an explicit list of networks,
+  or to everyone (`models_visible_to_network`).
+- **`max_completion_tokens`** accepted on `/v1/chat/completions` as an
+  alias for `max_tokens` (OpenAI compatibility; newer SDKs send only the
+  new name).
+
+### Changed
+- **KV-aware load preflight (v2) is now the default** on MLX backends
+  (`preflight_kv_aware=true`, `preflight_action=clamp`). Estimates
+  weights + KV(ctx × slots) + overhead against the Metal working-set
+  ceiling and clamps `ctx_len` to the largest context that fits (never
+  below `preflight_min_ctx_len`) instead of loading into a likely OOM.
+  Validated against measured MLX memory on fleet nodes (flag-enabled in
+  production since 2026-06-28); the legacy available-RAM check remains as
+  the fallback and as the sole check for non-MLX backends. Set
+  `MYCELLM_PREFLIGHT_KV_AWARE=false` to opt out.
+
+### Fixed
+- **Local address discovery no longer blocks the event loop.**
+  `_discover_local_addresses` (getaddrinfo) runs via `to_thread`; on hosts
+  with slow/misconfigured DNS it could stall the node for seconds at
+  startup and on network self-heal.
+- **Preflight weight sizing for HF repo-ids.** `memory_estimate` resolves
+  weights from the local directory *or* the HuggingFace cache — previously
+  a repo-id model path reported `weights 0.0GB` and under-counted the peak
+  estimate.
+
 ## [0.5.3] — 2026-06-24
 
 ### Fixed
