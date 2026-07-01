@@ -101,9 +101,11 @@ class MycellmSettings(BaseSettings):
     # --- KV-aware load preflight (Apple Silicon / MLX). When enabled, model-load
     # preflight estimates weights + KV(ctx x batch) against the Metal working-set
     # ceiling instead of the legacy on-disk-vs-total-RAM check. Validated against
-    # measured MLX memory. See inference/memory_estimate.py.
-    preflight_kv_aware: bool = False        # MYCELLM_PREFLIGHT_KV_AWARE
-    preflight_action: str = "warn"          # warn | clamp | reject (MYCELLM_PREFLIGHT_ACTION)
+    # measured MLX memory. See inference/memory_estimate.py. Default on since
+    # 0.6.0 (clamp), matching what the fleet ran flag-enabled since 2026-06-28;
+    # set MYCELLM_PREFLIGHT_KV_AWARE=false to fall back to the legacy check.
+    preflight_kv_aware: bool = True         # MYCELLM_PREFLIGHT_KV_AWARE
+    preflight_action: str = "clamp"         # warn | clamp | reject (MYCELLM_PREFLIGHT_ACTION)
     preflight_safety_fraction: float = 0.90  # usable fraction of the Metal ceiling
     preflight_overhead_gb: float = 1.0       # reserve for prefill transient + MLX pool/heap
     preflight_min_ctx_len: int = 2048        # never clamp below this
