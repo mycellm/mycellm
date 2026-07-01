@@ -194,7 +194,9 @@ async def fleet_relay_command(request: Request):
     )
 
     try:
-        response = await conn.protocol.send_and_wait(msg, timeout=30.0)
+        response = await conn.protocol.send_and_wait(
+            msg, timeout=30.0, bidirectional=True
+        )
         return {
             "success": response.payload.get("success", False),
             "data": response.payload.get("data", {}),

@@ -131,20 +131,35 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
         if self._message_handler:
             asyncio.ensure_future(self._message_handler(msg, stream_id))
 
-    async def send_message(self, msg: MessageEnvelope) -> int:
-        """Send a message on a new unidirectional stream (fire-and-forget).
-
-        Returns the stream ID used.
+    async def send_message(
+        self, msg: MessageEnvelope, bidirectional: bool = False
+    ) -> int:
+        """Send a message on a new stream. Unidirectional (fire-and-forget) by
+        default; pass bidirectional=True for request/response so peers that only
+        deliver peer-initiated *bidirectional* streams (iOS Network.framework's
+        NWMultiplexGroup) actually receive it. Returns the stream ID used.
         """
         await self._handshake_complete.wait()
-        stream_id = self._quic.get_next_available_stream_id(is_unidirectional=True)
+        stream_id = self._quic.get_next_available_stream_id(
+            is_unidirectional=not bidirectional
+        )
         data = msg.to_cbor()
         self._quic.send_stream_data(stream_id, data, end_stream=True)
         self.transmit()
         return stream_id
 
+    def close_stream(self, stream_id: int) -> None:
+        """Free a bidirectional request stream's receive side after the reply
+        (which arrives by id on a separate stream), so half-open streams don't
+        accumulate and exhaust the peer's MAX_STREAMS limit."""
+        try:
+            self._quic.stop_stream(stream_id, 0)
+            self.transmit()
+        except Exception:
+            pass
+
     async def send_and_wait(
-        self, msg: MessageEnvelope, timeout: float = 30.0
+        self, msg: MessageEnvelope, timeout: float = 30.0, bidirectional: bool = False
     ) -> MessageEnvelope:
         """Send a message and wait for a response with matching ID.
 
@@ -154,11 +169,14 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[MessageEnvelope] = loop.create_future()
         self._response_futures[msg.id] = fut
+        stream_id = None
         try:
-            await self.send_message(msg)
+            stream_id = await self.send_message(msg, bidirectional=bidirectional)
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self._response_futures.pop(msg.id, None)
+            if bidirectional and stream_id is not None:
+                self.close_stream(stream_id)
 
     async def reply_on_stream(self, stream_id: int, msg: MessageEnvelope) -> None:
         """Send a reply. Uses framed format on bidirectional streams (iOS),

@@ -6,6 +6,15 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+### Fixed
+- **Fleet commands reach iOS nodes.** The fleet-command relay sends on a
+  *bidirectional* QUIC stream (`send_and_wait(..., bidirectional=True)`);
+  iOS Network.framework's NWMultiplexGroup only surfaces peer-initiated
+  bidirectional streams, so unidirectional sends were never delivered.
+  The request stream's receive side is closed after the reply so half-open
+  streams don't accumulate against MAX_STREAMS. (Previously deployed as a
+  hot-patch on the private coordinator; now upstream.)
+
 ## [0.6.0] — 2026-07-01
 
 ### Added
