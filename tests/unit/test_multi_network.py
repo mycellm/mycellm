@@ -168,3 +168,32 @@ def test_capabilities_network_ids_omitted_when_empty():
     caps = Capabilities()
     d = caps.to_dict()
     assert "network_ids" not in d
+
+
+def test_registry_register_sets_network_ids():
+    reg = PeerRegistry()
+    caps = Capabilities(models=[ModelCapability(name="m1")])
+    reg.register("p", capabilities=caps, network_ids=["net-x", "net-y"])
+    assert reg.get("p").network_ids == ["net-x", "net-y"]
+
+
+def test_registry_peers_for_model_network_filter():
+    reg = PeerRegistry()
+    caps = Capabilities(models=[ModelCapability(name="m1")])
+    reg.register("peerA", capabilities=caps, network_ids=["net-a"])
+    reg.get("peerA").state = PeerState.ROUTABLE
+    reg.register("peerB", capabilities=caps, network_ids=["net-b"])
+    reg.get("peerB").state = PeerState.ROUTABLE
+    reg.register("peerLegacy", capabilities=caps)  # no declared networks
+    reg.get("peerLegacy").state = PeerState.ROUTABLE
+
+    # No filter → all routable peers.
+    assert len(reg.peers_for_model("m1")) == 3
+
+    # Requester on net-a → peerA + legacy (no-network peers stay eligible), not peerB.
+    ids = {p.peer_id for p in reg.peers_for_model("m1", network_ids=["net-a"])}
+    assert ids == {"peerA", "peerLegacy"}, ids
+
+    # Requester on a disjoint network → only the legacy (network-less) peer.
+    ids = {p.peer_id for p in reg.peers_for_model("m1", network_ids=["net-c"])}
+    assert ids == {"peerLegacy"}, ids
