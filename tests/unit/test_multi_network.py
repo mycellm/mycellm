@@ -1,5 +1,6 @@
 """Tests for multi-network membership and model scoping."""
 
+import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -168,3 +169,40 @@ def test_capabilities_network_ids_omitted_when_empty():
     caps = Capabilities()
     d = caps.to_dict()
     assert "network_ids" not in d
+
+
+def test_registry_register_sets_network_ids():
+    reg = PeerRegistry()
+    caps = Capabilities(models=[ModelCapability(name="m1")])
+    reg.register("p", capabilities=caps, network_ids=["net-x", "net-y"])
+    assert reg.get("p").network_ids == ["net-x", "net-y"]
+
+
+def _live_connection():
+    # is_live() only inspects connection.protocol._is_closed
+    return types.SimpleNamespace(protocol=types.SimpleNamespace(_is_closed=False))
+
+
+def test_registry_peers_for_model_network_filter():
+    reg = PeerRegistry()
+    caps = Capabilities(models=[ModelCapability(name="m1")])
+    reg.register("peerA", capabilities=caps, network_ids=["net-a"])
+    reg.get("peerA").state = PeerState.ROUTABLE
+    reg.get("peerA").connection = _live_connection()
+    reg.register("peerB", capabilities=caps, network_ids=["net-b"])
+    reg.get("peerB").state = PeerState.ROUTABLE
+    reg.get("peerB").connection = _live_connection()
+    reg.register("peerLegacy", capabilities=caps)  # no declared networks
+    reg.get("peerLegacy").state = PeerState.ROUTABLE
+    reg.get("peerLegacy").connection = _live_connection()
+
+    # No filter → all routable peers.
+    assert len(reg.peers_for_model("m1")) == 3
+
+    # Requester on net-a → peerA + legacy (no-network peers stay eligible), not peerB.
+    ids = {p.peer_id for p in reg.peers_for_model("m1", network_ids=["net-a"])}
+    assert ids == {"peerA", "peerLegacy"}, ids
+
+    # Requester on a disjoint network → only the legacy (network-less) peer.
+    ids = {p.peer_id for p in reg.peers_for_model("m1", network_ids=["net-c"])}
+    assert ids == {"peerLegacy"}, ids

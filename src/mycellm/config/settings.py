@@ -98,6 +98,15 @@ class MycellmSettings(BaseSettings):
     model_dir: Optional[Path] = None
     max_concurrent_inferences: int = 2
     default_ctx_len: int = 32768  # Default context window for loaded models (MYCELLM_DEFAULT_CTX_LEN)
+    # --- KV-aware load preflight (Apple Silicon / MLX). When enabled, model-load
+    # preflight estimates weights + KV(ctx x batch) against the Metal working-set
+    # ceiling instead of the legacy on-disk-vs-total-RAM check. Validated against
+    # measured MLX memory. See inference/memory_estimate.py.
+    preflight_kv_aware: bool = False        # MYCELLM_PREFLIGHT_KV_AWARE
+    preflight_action: str = "warn"          # warn | clamp | reject (MYCELLM_PREFLIGHT_ACTION)
+    preflight_safety_fraction: float = 0.90  # usable fraction of the Metal ceiling
+    preflight_overhead_gb: float = 1.0       # reserve for prefill transient + MLX pool/heap
+    preflight_min_ctx_len: int = 2048        # never clamp below this
     # When true, /v1/chat/completions requests with no explicit `reasoning` block
     # default to {"exclude": true} — strip <think>...</think> from responses and
     # ask the chat template to suppress thinking on Qwen3-family models. The

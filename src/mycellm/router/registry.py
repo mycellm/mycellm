@@ -69,8 +69,14 @@ class PeerRegistry:
         connection: PeerConnection | None = None,
         capabilities: Capabilities | None = None,
         addresses: list[str] | None = None,
+        network_ids: list[str] | None = None,
     ) -> PeerEntry:
-        """Register or update a peer."""
+        """Register or update a peer.
+
+        network_ids: the networks this peer declared membership in (from its
+        NodeHello). Used to keep inference/routing within a shared network —
+        a request on network A must not be served by a peer only on network B.
+        """
         entry = self._peers.get(peer_id)
         if entry is None:
             entry = PeerEntry(peer_id=peer_id)
@@ -88,6 +94,8 @@ class PeerRegistry:
                 self._model_index.setdefault(model.name, set()).add(peer_id)
         if addresses:
             entry.addresses = addresses
+        if network_ids is not None:
+            entry.network_ids = list(network_ids)
 
         entry.last_seen = time.time()
         return entry
@@ -99,8 +107,17 @@ class PeerRegistry:
     def get(self, peer_id: str) -> PeerEntry | None:
         return self._peers.get(peer_id)
 
-    def peers_for_model(self, model_name: str) -> list[PeerEntry]:
-        """Get all peers that can serve a given model."""
+    def peers_for_model(
+        self, model_name: str, network_ids: list[str] | None = None
+    ) -> list[PeerEntry]:
+        """Get all peers that can serve a given model.
+
+        network_ids: if given, only return peers that share at least one network
+        with the requester (network isolation). A peer with no declared networks
+        is treated as public/legacy and always eligible, so single-network
+        deployments and un-upgraded peers keep working.
+        """
+        want = set(network_ids) if network_ids else None
         peer_ids = self._model_index.get(model_name, set())
         entries = []
         for pid in peer_ids:
@@ -110,12 +127,15 @@ class PeerRegistry:
             # freshly-authenticated peer is also able to serve; conversely a
             # peer whose session has dropped (but whose entry is stuck ROUTABLE
             # via stale DHT announces) must NOT be offered for routing.
-            if entry and entry.state in (
+            if not entry or entry.state not in (
                 PeerState.AUTHENTICATED,
                 PeerState.ROUTABLE,
                 PeerState.SERVING,
-            ) and entry.is_live():
-                entries.append(entry)
+            ) or not entry.is_live():
+                continue
+            if want is not None and entry.network_ids and not (want & set(entry.network_ids)):
+                continue  # no shared network — not reachable from this requester
+            entries.append(entry)
         return entries
 
     def all_peers(self) -> list[PeerEntry]:

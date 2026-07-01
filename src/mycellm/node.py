@@ -372,6 +372,7 @@ class MycellmNode:
                     hello.peer_id,
                     connection=conn,
                     capabilities=hello.capabilities,
+                    network_ids=hello.network_ids,
                 )
 
                 # Capture peer's QUIC source address for peer exchange
@@ -380,7 +381,6 @@ class MycellmNode:
                     if protocol._peer_addr and not reg_entry.addresses:
                         host = protocol._peer_addr[0]
                         reg_entry.addresses = [f"{host}:8421"]
-                    reg_entry.network_ids = hello.network_ids
 
                 self.activity.record(
                     EventType.PEER_CONNECTED,
@@ -891,8 +891,11 @@ class MycellmNode:
         # Find target connection
         target_conn = self._peer_connections.get(target_peer)
         if not target_conn:
-            # Try routing through chain builder
-            targets = self.chain_builder.route(payload.get("model", ""))
+            # Route only to peers that share a network with the requester so a
+            # request on network A can't be served by a peer only on network B.
+            req_entry = self.registry.get(msg.from_peer)
+            req_networks = req_entry.network_ids if req_entry else None
+            targets = self.chain_builder.route(payload.get("model", ""), network_ids=req_networks)
             if targets:
                 target_conn = targets[0].entry.connection
                 target_peer = targets[0].peer_id
@@ -1929,7 +1932,13 @@ class MycellmNode:
     async def announce_capabilities(self) -> None:
         """Re-announce capabilities to all connected peers (e.g. after model load)."""
         from mycellm.transport.messages import peer_announce
-        addresses = self._discover_local_addresses()
+        # _discover_local_addresses() does blocking I/O (socket.getaddrinfo on the
+        # local .local mDNS hostname, plus a hostname subprocess). On the event loop
+        # a stalled macOS resolver freezes the whole loop for the OS resolver timeout
+        # (tens of seconds) — API dead, logs can't flush, SIGTERM can't run. Offload
+        # it so a hung resolver ties up a worker thread, not the loop. Result is
+        # cached 5 min, so this is cheap.
+        addresses = await asyncio.to_thread(self._discover_local_addresses)
 
         msg = peer_announce(
             self.peer_id,

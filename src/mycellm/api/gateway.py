@@ -300,7 +300,11 @@ async def public_chat(request: Request):
         return JSONResponse(status_code=503, content={"error": {"message": msg}})
 
     stream = body.get("stream", False)
-    max_tokens = min(body.get("max_tokens", _MAX_REQUEST_TOKENS), _MAX_REQUEST_TOKENS)
+    # Accept OpenAI's newer max_completion_tokens as an alias for max_tokens.
+    _req_max = body.get("max_tokens")
+    if _req_max is None:
+        _req_max = body.get("max_completion_tokens", _MAX_REQUEST_TOKENS)
+    max_tokens = min(_req_max, _MAX_REQUEST_TOKENS)
     temperature = body.get("temperature", 0.7)
     # Reasoning suppression: explicit body.reasoning.exclude wins, else fall
     # back to MYCELLM_HIDE_REASONING_BY_DEFAULT. Public bootstraps should set
