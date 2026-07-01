@@ -28,6 +28,12 @@ def build_node_hello(
         device_pubkey=device_key.public_bytes,
         cert=cert,
         capabilities=capabilities,
+        # Declare which networks we belong to so the peer can associate this
+        # connection with the right network(s). Advisory only — network_ids is
+        # transmitted in NodeHello but NOT covered by the signature, so a host
+        # must validate real membership of a private net via the join credential
+        # (see P1), not trust this claim.
+        network_ids=list(capabilities.network_ids),
     )
     hello.sign(device_key)
 
@@ -75,6 +81,8 @@ def build_hello_ack(
         device_pubkey=device_key.public_bytes,
         cert=cert,
         capabilities=capabilities,
+        # Declare our networks in the ack too (advisory; see build_node_hello).
+        network_ids=list(capabilities.network_ids),
     )
     hello.sign(device_key)
 
