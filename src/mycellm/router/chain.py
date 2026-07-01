@@ -26,13 +26,16 @@ class ChainBuilder:
         self._registry = registry
         self._health_checker = health_checker
 
-    def route(self, model: str) -> list[PeerTarget]:
+    def route(self, model: str, network_ids: list[str] | None = None) -> list[PeerTarget]:
         """Select peers for a model inference request.
+
+        network_ids: the requesting peer's networks — candidates are restricted
+        to peers that share a network (isolation). None = no restriction.
 
         Returns all viable candidates sorted by score (best first).
         Supports failover: if first fails, try next in list.
         """
-        candidates = self._registry.peers_for_model(model)
+        candidates = self._registry.peers_for_model(model, network_ids=network_ids)
         if not candidates:
             logger.debug(f"No peers available for model '{model}'")
             return []
