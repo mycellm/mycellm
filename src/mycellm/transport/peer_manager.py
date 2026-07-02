@@ -209,7 +209,11 @@ class PeerManager:
 
         try:
             hello_msg = build_node_hello(
-                self._node.device_key, self._node.device_cert, self._node.capabilities
+                self._node.device_key, self._node.device_cert, self._node.capabilities,
+                join_keys=(
+                    self._node.federation.membership_join_keys
+                    if self._node.federation else None
+                ),
             )
             ack = await protocol.send_and_wait(hello_msg, timeout=10.0)
 
@@ -254,7 +258,15 @@ class PeerManager:
                     entry = self._node.registry.get(peer_hello.peer_id)
                     if entry:
                         entry.record_address_success(peer.addr)
-                        entry.network_ids = peer_hello.network_ids
+                        # Same gate as the inbound path: a dialed peer's claim
+                        # to a network WE host must carry the join key.
+                        entry.network_ids = (
+                            self._node.federation.filter_claimed_network_ids(
+                                peer_hello.network_ids, peer_hello.join_keys
+                            )
+                            if self._node.federation
+                            else peer_hello.network_ids
+                        )
 
                     # Auto-join networks advertised by bootstrap peers.
                     # When connecting to a bootstrap, any network it belongs to

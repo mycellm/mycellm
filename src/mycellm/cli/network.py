@@ -135,6 +135,26 @@ def invite(
     console.print("  [dim]Redeem with: mycellm init --invite <token-or-url>[/dim]")
 
 
+@app.command("set-key")
+def set_key(
+    network: str = typer.Argument(..., help="Hosted network id (prefix)"),
+    key: str = typer.Argument(..., help="Join key members must present ('' to clear)"),
+):
+    """Set or clear the join key on a network this node hosts.
+
+    With a key set, peers must present it in their NodeHello to be accepted
+    into the network — claims without it are dropped. Restart the node to
+    apply; distribute the key to members out-of-band (or via invite).
+    """
+    _, _, fm = _load_federation()
+    network_id = _resolve_hosted(fm, network)
+    fm.set_join_key(network_id, key)
+    action = "cleared" if not key else "set"
+    console.print(f"[green]Join key {action}[/green] for {network_id[:16]} — restart the node to apply.")
+    if key:
+        console.print("  [dim]Existing members without the key will lose access on their next handshake.[/dim]")
+
+
 @app.command("drop")
 def drop(
     network: str = typer.Argument(..., help="Hosted network id (prefix) to stop hosting"),

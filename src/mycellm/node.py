@@ -353,8 +353,23 @@ class MycellmNode:
         if msg.type == MessageType.NODE_HELLO:
             try:
                 hello, _ = verify_hello_message(msg)
-                ack = build_hello_ack(self.device_key, self.device_cert, self.capabilities, request_id=msg.id)
+                ack = build_hello_ack(
+                    self.device_key, self.device_cert, self.capabilities,
+                    request_id=msg.id,
+                    join_keys=self.federation.membership_join_keys if self.federation else None,
+                )
                 await protocol.reply_on_stream(stream_id, ack)
+
+                # Enforce join keys: claims to networks we host with a
+                # join_key set must present it, or the claim is dropped
+                # (the peer stays connected for its other networks).
+                accepted_network_ids = (
+                    self.federation.filter_claimed_network_ids(
+                        hello.network_ids, hello.join_keys
+                    )
+                    if self.federation
+                    else hello.network_ids
+                )
 
                 conn = PeerConnection(
                     peer_id=hello.peer_id,
@@ -372,7 +387,7 @@ class MycellmNode:
                     hello.peer_id,
                     connection=conn,
                     capabilities=hello.capabilities,
-                    network_ids=hello.network_ids,
+                    network_ids=accepted_network_ids,
                 )
 
                 # Capture peer's QUIC source address for peer exchange
@@ -604,14 +619,17 @@ class MycellmNode:
         if not self.federation:
             return "untrusted"
 
-        # Get peer's network IDs from their authenticated connection
-        conn = self._peer_connections.get(peer_id)
-        if not conn or not conn.hello:
-            # Also check the registry
-            reg_entry = self.registry.get(peer_id)
-            peer_networks = set(getattr(reg_entry, 'network_ids', []) if reg_entry else [])
+        # Prefer the registry entry — its network_ids passed the join-key
+        # gate (filter_claimed_network_ids); the raw hello carries the peer's
+        # unverified claims and must not confer trust on protected networks.
+        reg_entry = self.registry.get(peer_id)
+        if reg_entry is not None:
+            peer_networks = set(getattr(reg_entry, 'network_ids', []))
         else:
-            peer_networks = set(getattr(conn.hello, 'network_ids', []))
+            conn = self._peer_connections.get(peer_id)
+            claimed = list(getattr(conn.hello, 'network_ids', [])) if conn and conn.hello else []
+            presented = dict(getattr(conn.hello, 'join_keys', {})) if conn and conn.hello else {}
+            peer_networks = set(self.federation.filter_claimed_network_ids(claimed, presented))
 
         if not peer_networks:
             return "untrusted"

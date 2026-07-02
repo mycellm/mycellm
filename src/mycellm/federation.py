@@ -75,9 +75,10 @@ class NetworkMembership:
     quota: dict = field(default_factory=dict)  # {"max_req_per_min": 20}
     joined_at: float = field(default_factory=time.time)
     invite_token_id: str = ""  # token used to join (for audit)
+    join_key: str = ""  # presented in NodeHello for networks that require one
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "network_id": self.network_id,
             "network_name": self.network_name,
             "role": self.role,
@@ -87,6 +88,9 @@ class NetworkMembership:
             "joined_at": self.joined_at,
             "invite_token_id": self.invite_token_id,
         }
+        if self.join_key:
+            d["join_key"] = self.join_key
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> NetworkMembership:
@@ -99,6 +103,7 @@ class NetworkMembership:
             quota=d.get("quota", {}),
             joined_at=d.get("joined_at", 0),
             invite_token_id=d.get("invite_token_id", ""),
+            join_key=d.get("join_key", ""),
         )
 
 
@@ -240,6 +245,48 @@ class FederationManager:
     def memberships(self) -> list[NetworkMembership]:
         return list(self._memberships.values())
 
+    @property
+    def membership_join_keys(self) -> dict[str, str]:
+        """Join keys to present in NodeHello, for memberships that have one."""
+        return {
+            m.network_id: m.join_key for m in self._memberships.values() if m.join_key
+        }
+
+    def filter_claimed_network_ids(
+        self, claimed: list[str], presented_keys: dict[str, str] | None = None
+    ) -> list[str]:
+        """Drop claimed network ids the peer is not authorized for.
+
+        For each network id a peer declares that THIS node hosts with a
+        `join_key` set, the peer must present the matching key (NodeHello
+        `join_keys`); otherwise that claim is dropped — the connection stays
+        up for its other networks, but the peer gets no routing or model
+        visibility on the protected one. Hosted networks without a join_key
+        (and networks this node doesn't host) pass through unchanged, so
+        clients that predate join keys keep working on unprotected networks.
+        """
+        import hmac
+
+        presented = presented_keys or {}
+        required: dict[str, str] = {}
+        if self._identity and self._identity.join_key:
+            required[self._identity.network_id] = self._identity.join_key
+        for h in self._hosted.values():
+            if h.join_key:
+                required[h.network_id] = h.join_key
+
+        accepted = []
+        for nid in claimed:
+            key = required.get(nid)
+            if key is not None and not hmac.compare_digest(presented.get(nid, ""), key):
+                logger.warning(
+                    f"Dropping unauthorized claim to protected network {nid[:12]}... "
+                    "(missing/wrong join key)"
+                )
+                continue
+            accepted.append(nid)
+        return accepted
+
     def join_network(
         self,
         network_id: str,
@@ -249,6 +296,7 @@ class FederationManager:
         models: list[str] | None = None,
         quota: dict | None = None,
         invite_token_id: str = "",
+        join_key: str = "",
     ) -> NetworkMembership:
         """Join an additional network."""
         self._memberships_dir.mkdir(parents=True, exist_ok=True)
@@ -261,6 +309,7 @@ class FederationManager:
             models=models or [],
             quota=quota or {},
             invite_token_id=invite_token_id,
+            join_key=join_key,
         )
         self._memberships[network_id] = membership
 
@@ -339,6 +388,19 @@ class FederationManager:
         self._save_hosted(identity)
         logger.info(f"Imported hosted network: {identity.network_name} ({identity.network_id[:12]}...)")
         return identity
+
+    def set_join_key(self, network_id: str, join_key: str) -> bool:
+        """Set (or clear, with "") the join key on a network this node hosts."""
+        if self._identity and network_id == self._identity.network_id:
+            self._identity.join_key = join_key
+            self._identity.save(self._data_dir / "federation" / "network.json")
+            return True
+        identity = self._hosted.get(network_id)
+        if not identity:
+            return False
+        identity.join_key = join_key
+        self._save_hosted(identity)
+        return True
 
     def drop_hosted_network(self, network_id: str) -> bool:
         """Stop hosting a network. Does not affect home network or memberships."""

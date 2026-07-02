@@ -19,6 +19,7 @@ def build_node_hello(
     device_key: DeviceKey,
     cert: DeviceCert,
     capabilities: Capabilities,
+    join_keys: dict[str, str] | None = None,
 ) -> MessageEnvelope:
     """Build a signed NodeHello message envelope."""
     peer_id = peer_id_from_public_key(device_key.public_key)
@@ -29,11 +30,12 @@ def build_node_hello(
         cert=cert,
         capabilities=capabilities,
         # Declare which networks we belong to so the peer can associate this
-        # connection with the right network(s). Advisory only — network_ids is
-        # transmitted in NodeHello but NOT covered by the signature, so a host
-        # must validate real membership of a private net via the join credential
-        # (see P1), not trust this claim.
+        # connection with the right network(s). network_ids is transmitted in
+        # NodeHello but NOT covered by the signature — a host validates claims
+        # to its protected networks against the presented join_keys
+        # (FederationManager.filter_claimed_network_ids) and drops the rest.
         network_ids=list(capabilities.network_ids),
+        join_keys=dict(join_keys or {}),
     )
     hello.sign(device_key)
 
@@ -72,6 +74,7 @@ def build_hello_ack(
     cert: DeviceCert,
     capabilities: Capabilities,
     request_id: str = "",
+    join_keys: dict[str, str] | None = None,
 ) -> MessageEnvelope:
     """Build a NodeHelloAck response (server sends its own hello back)."""
     peer_id = peer_id_from_public_key(device_key.public_key)
@@ -81,8 +84,10 @@ def build_hello_ack(
         device_pubkey=device_key.public_bytes,
         cert=cert,
         capabilities=capabilities,
-        # Declare our networks in the ack too (advisory; see build_node_hello).
+        # Declare our networks in the ack too (validated by the receiver the
+        # same way; see build_node_hello).
         network_ids=list(capabilities.network_ids),
+        join_keys=dict(join_keys or {}),
     )
     hello.sign(device_key)
 

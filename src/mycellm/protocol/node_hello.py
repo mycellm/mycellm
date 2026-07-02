@@ -33,6 +33,11 @@ class NodeHello:
     signature: bytes = b""  # Sig by device key over (nonce + timestamp + peer_id)
     observed_addr: str = ""
     network_ids: list[str] = field(default_factory=list)  # networks this node belongs to
+    # Join credentials presented for protected networks: network_id -> join key.
+    # Like network_ids, transmitted outside the signature (the QUIC+TLS channel
+    # is encrypted); the host verifies these against its hosted networks'
+    # join_key and drops unauthorized network claims.
+    join_keys: dict[str, str] = field(default_factory=dict)
 
     def signable_data(self) -> bytes:
         """Data that gets signed by device key."""
@@ -47,7 +52,7 @@ class NodeHello:
         self.signature = device_key.sign(self.signable_data())
 
     def to_cbor(self) -> bytes:
-        return cbor2.dumps({
+        d = {
             "peer_id": self.peer_id,
             "device_pubkey": self.device_pubkey,
             "cert": self.cert.to_cbor(),
@@ -57,7 +62,10 @@ class NodeHello:
             "signature": self.signature,
             "observed_addr": self.observed_addr,
             "network_ids": self.network_ids,
-        })
+        }
+        if self.join_keys:
+            d["join_keys"] = self.join_keys
+        return cbor2.dumps(d)
 
     @classmethod
     def from_cbor(cls, data: bytes) -> NodeHello:
@@ -72,6 +80,7 @@ class NodeHello:
             signature=obj["signature"],
             observed_addr=obj.get("observed_addr", ""),
             network_ids=obj.get("network_ids", []),
+            join_keys=obj.get("join_keys", {}) or {},
         )
 
 
