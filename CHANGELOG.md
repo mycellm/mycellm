@@ -6,6 +6,35 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-07-02
+
+### Added
+- **Multi-network hosting — the coordinator is now part of the node.** One
+  `mycellm serve` process can *host* private networks alongside its home
+  network and public participation, all on the standard QUIC port. Hosted
+  network identities live in `federation/hosted/`, are advertised in the
+  node's `NodeHello` automatically, and members are accepted exactly like
+  before (valid device cert + declared network id). This replaces the
+  separate private-coordinator process previously needed to run a private
+  fleet network.
+- **`mycellm network` CLI**: `list` (home + hosted + joined), `host <name>
+  [--public] [--join-key] [--import PATH]` (create a hosted network, or
+  import an existing `network.json` preserving its network_id — the
+  coordinator migration path), `invite [--network <id-prefix>] [--max-uses]
+  [--expires-hours]` (signed invite for any hosted network), and
+  `drop <id-prefix>`. The running node picks up changes on restart.
+- **`NetworkIdentity.join_key`** (reserved): a per-network join secret is
+  stored and distributed with the identity but not yet enforced at the
+  handshake — enforcement lands together with the iOS join-key UI.
+
+### Changed
+- **Home-scoped models are visible to networks the node hosts.** Members you
+  invite to a network you host can use your local models; the public network
+  and unrelated networks still cannot. Explicit `networks`/`public` scopes
+  are unchanged.
+- **Peer trust honors hosted networks**: a member of a network this node
+  hosts inherits that network's `trust_level`.
+
 ## [0.6.0] — 2026-07-01
 
 ### Added
