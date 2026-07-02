@@ -171,7 +171,30 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         ip = request.client.host if request.client else "unknown"
 
-        # Private-mode escalating lockout check
+        def _valid_key() -> bool:
+            import hmac
+            auth = request.headers.get("authorization", "")
+            candidates = (
+                auth[7:] if auth.startswith("Bearer ") else "",
+                request.headers.get("x-api-key") or "",
+                request.query_params.get("api_key") or "",
+            )
+            return any(
+                c and hmac.compare_digest(c, self.api_key) for c in candidates
+            )
+
+        # A valid key ALWAYS wins — checked before the lockout so a correctly
+        # authenticated caller can never be locked out by an unauthenticated
+        # process sharing its IP (e.g. a keyless localhost poller re-locking
+        # 127.0.0.1 made the node look wedged to its own authed watchdog and
+        # caused supervisor restart loops). Key comparison is exact-match, so
+        # this adds no brute-force surface beyond the per-attempt lockout below.
+        if _valid_key():
+            self._auth_state.pop(ip, None)
+            self._public_fails.pop(ip, None)
+            return await call_next(request)
+
+        # Private-mode escalating lockout check (unauthenticated callers only)
         if not self.public:
             state = self._auth_state.get(ip, {"failures": 0, "locked_until": 0})
             if state["locked_until"] > time.time():
@@ -183,21 +206,6 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         "message": f"Too many failed attempts. Try again in {remaining}s.",
                     },
                 )
-
-        def _valid_key() -> bool:
-            auth = request.headers.get("authorization", "")
-            if auth == f"Bearer {self.api_key}":
-                return True
-            if request.headers.get("x-api-key") == self.api_key:
-                return True
-            if request.query_params.get("api_key") == self.api_key:
-                return True
-            return False
-
-        if _valid_key():
-            self._auth_state.pop(ip, None)
-            self._public_fails.pop(ip, None)
-            return await call_next(request)
 
         # Failed auth path
         if self.public:

@@ -6,6 +6,15 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+### Fixed
+- **A valid API key can no longer be locked out.** The per-IP brute-force
+  lockout was checked *before* key validation, so an unauthenticated process
+  sharing the caller's IP (e.g. a keyless localhost poller) could lock
+  127.0.0.1 and make the node's own authenticated health checks 429 — the
+  external watchdog then restart-looped a perfectly healthy node. Key
+  validation now runs first (constant-time compare); the lockout applies to
+  unauthenticated callers only.
+
 ## [0.6.1] — 2026-07-02
 
 ### Added
