@@ -6,6 +6,22 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-07-02
+
+### Added
+- **Join keys are now enforced on hosted networks.** Set a key with
+  `mycellm network host <name> --join-key K` or
+  `mycellm network set-key <id-prefix> K` and peers must present it in
+  their `NodeHello` (new `join_keys` map) to be accepted into that network
+  — claims without the right key are dropped while the connection stays up
+  for the peer's other networks. This closes the hole where any
+  valid-cert peer could claim a private network id and gain its routing
+  and home-model visibility. Networks without a key, and clients that
+  predate join keys, behave exactly as before. Peer trust resolution now
+  also uses the gate-filtered network list rather than raw hello claims.
+  Members store their key on the membership (`join_key`) and present it
+  automatically when dialing.
+
 ### Fixed
 - **Menu bar monitor authenticates its polls.** With an API key set, the
   monitor's keyless status polls were rejected (401) and the node showed as

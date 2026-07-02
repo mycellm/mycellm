@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mycellm"
-version = "0.6.1"
+version = "0.6.2"
 description = "Distributed LLM inference across heterogeneous hardware"
 readme = "README.md"
 license = "Apache-2.0"
