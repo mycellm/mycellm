@@ -627,6 +627,14 @@ class MycellmNode:
                 if trust_order.get(level, 0) > trust_order.get(best_trust, 0):
                     best_trust = level
 
+        # Check networks we host (beyond home) — a member of a network this
+        # node is the authority for gets that network's trust level.
+        for hosted in self.federation.hosted_networks:
+            if hosted.network_id in peer_networks:
+                level = hosted.trust_level
+                if trust_order.get(level, 0) > trust_order.get(best_trust, 0):
+                    best_trust = level
+
         # Check joined networks
         for membership in self.federation.memberships:
             if membership.network_id in peer_networks:

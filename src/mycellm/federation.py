@@ -24,9 +24,13 @@ class NetworkIdentity:
     public: bool = False  # Whether this network allows anonymous joining
     trust_level: str = "untrusted"  # untrusted, trusted, full, local
     min_model_tier: str = ""  # Minimum model tier to participate (empty = any)
+    # Reserved: shared secret required to join this network. Stored and
+    # distributed with invites but NOT yet enforced at the NodeHello gate —
+    # enforcement lands with the iOS join-key UI (0.6.2).
+    join_key: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "network_id": self.network_id,
             "network_name": self.network_name,
             "bootstrap_addrs": self.bootstrap_addrs,
@@ -35,6 +39,9 @@ class NetworkIdentity:
             "trust_level": self.trust_level,
             "min_model_tier": self.min_model_tier,
         }
+        if self.join_key:
+            d["join_key"] = self.join_key
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> NetworkIdentity:
@@ -46,6 +53,7 @@ class NetworkIdentity:
             public=d.get("public", False),
             trust_level=d.get("trust_level", "untrusted"),
             min_model_tier=d.get("min_model_tier", ""),
+            join_key=d.get("join_key", ""),
         )
 
     def save(self, path: Path) -> None:
@@ -194,6 +202,8 @@ class FederationManager:
         self._tokens: dict[str, InviteToken] = {}
         self._memberships_dir = data_dir / "federation" / "memberships"
         self._memberships: dict[str, NetworkMembership] = {}  # network_id -> membership
+        self._hosted_dir = data_dir / "federation" / "hosted"
+        self._hosted: dict[str, NetworkIdentity] = {}  # network_id -> identity
 
     @property
     def network_id(self) -> str:
@@ -205,12 +215,26 @@ class FederationManager:
 
     @property
     def network_ids(self) -> list[str]:
-        """All network IDs this node belongs to (home + joined)."""
+        """All network IDs this node belongs to (home + hosted + joined)."""
         ids = []
         if self._identity:
             ids.append(self._identity.network_id)
+        ids.extend(self._hosted.keys())
         ids.extend(self._memberships.keys())
         return ids
+
+    @property
+    def host_network_ids(self) -> list[str]:
+        """Network IDs this node is the authority for (home + hosted)."""
+        ids = []
+        if self._identity:
+            ids.append(self._identity.network_id)
+        ids.extend(self._hosted.keys())
+        return ids
+
+    @property
+    def hosted_networks(self) -> list[NetworkIdentity]:
+        return list(self._hosted.values())
 
     @property
     def memberships(self) -> list[NetworkMembership]:
@@ -268,8 +292,69 @@ class FederationManager:
             return True
         if model_scope == "networks":
             return requesting_network in model_networks
-        # scope == "home" — visible only within home network
-        return requesting_network == self.network_id
+        # scope == "home" — visible within any network this node is the
+        # authority for (home + hosted): members you invited to a network you
+        # host can use your local models; the public network cannot.
+        return requesting_network in self.host_network_ids
+
+    def host_network(
+        self,
+        account_pubkey: bytes,
+        network_name: str,
+        public: bool = False,
+        join_key: str = "",
+        bootstrap_addrs: list[str] | None = None,
+    ) -> NetworkIdentity:
+        """Host an additional network from this node (beyond the home network).
+
+        The network_id is derived deterministically from the account pubkey
+        plus the network name, so the same account hosting the same name
+        always yields the same id (and never collides with the home network,
+        whose id is the bare pubkey hash).
+        """
+        network_id = hashlib.sha256(account_pubkey + network_name.encode()).hexdigest()
+        if network_id in self._hosted or network_id == self.network_id:
+            return self._hosted.get(network_id) or self._identity
+        identity = NetworkIdentity(
+            network_id=network_id,
+            network_name=network_name,
+            bootstrap_addrs=bootstrap_addrs or [],
+            public=public,
+            join_key=join_key,
+        )
+        self._save_hosted(identity)
+        logger.info(f"Hosting network: {network_name} ({network_id[:12]}...)")
+        return identity
+
+    def import_hosted_network(self, path: Path) -> NetworkIdentity:
+        """Import an existing network identity file and host it from this node.
+
+        Preserves the network_id, so members that already joined the network
+        (e.g. under a separate coordinator process) keep working — they only
+        need to re-point their bootstrap endpoint at this node.
+        """
+        identity = NetworkIdentity.load(path)
+        if identity.network_id == self.network_id:
+            raise ValueError("Refusing to import the home network as hosted")
+        self._save_hosted(identity)
+        logger.info(f"Imported hosted network: {identity.network_name} ({identity.network_id[:12]}...)")
+        return identity
+
+    def drop_hosted_network(self, network_id: str) -> bool:
+        """Stop hosting a network. Does not affect home network or memberships."""
+        identity = self._hosted.pop(network_id, None)
+        if not identity:
+            return False
+        path = self._hosted_dir / f"{network_id[:16]}.json"
+        if path.exists():
+            path.unlink()
+        logger.info(f"Stopped hosting network: {identity.network_name}")
+        return True
+
+    def _save_hosted(self, identity: NetworkIdentity) -> None:
+        self._hosted[identity.network_id] = identity
+        self._hosted_dir.mkdir(parents=True, exist_ok=True)
+        identity.save(self._hosted_dir / f"{identity.network_id[:16]}.json")
 
     def init_network(
         self,
@@ -305,6 +390,18 @@ class FederationManager:
             except Exception:
                 pass
 
+        # Load hosted networks
+        self._hosted_dir.mkdir(parents=True, exist_ok=True)
+        for f in self._hosted_dir.glob("*.json"):
+            try:
+                identity = NetworkIdentity.load(f)
+                self._hosted[identity.network_id] = identity
+            except Exception:
+                pass
+        if self._hosted:
+            names = ", ".join(h.network_name for h in self._hosted.values())
+            logger.info(f"Hosting {len(self._hosted)} additional network(s): {names}")
+
         # Load memberships
         self._memberships_dir.mkdir(parents=True, exist_ok=True)
         for f in self._memberships_dir.glob("*.json"):
@@ -324,10 +421,14 @@ class FederationManager:
         roles: list[str] | None = None,
         max_uses: int = 0,
         expires_hours: float = 0,
+        network_id: str = "",
     ) -> InviteToken:
-        """Create a signed invite token."""
+        """Create a signed invite token for the home network or a hosted one."""
+        target = network_id or self.network_id
+        if target not in self.host_network_ids:
+            raise ValueError(f"Not hosting network {target[:16]} — cannot invite to it")
         token = InviteToken(
-            network_id=self.network_id,
+            network_id=target,
             allowed_roles=roles or ["seeder"],
             max_uses=max_uses,
             expires_at=time.time() + expires_hours * 3600 if expires_hours > 0 else 0,
@@ -347,7 +448,7 @@ class FederationManager:
         except Exception as e:
             return False, f"Invalid token format: {e}"
 
-        if token.network_id != self.network_id:
+        if token.network_id not in self.host_network_ids:
             return False, "Token is for a different network"
 
         if not token.is_valid:
