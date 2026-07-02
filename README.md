@@ -36,7 +36,7 @@ mycellm pools GPUs across the internet into a single inference network. Contribu
 
 - **Credit economy** — earn credits by seeding, spend them consuming. Ed25519-signed receipts for every request. No cryptocurrency.
 - **Sensitive Data Guard** — outgoing prompts are scanned on-device for API keys, passwords, and PII. Sensitive queries route to your local model automatically.
-- **Private networks** — create invite-only inference networks for your team, lab, or org. Since 0.6.0 a node can belong to multiple networks at once — serve the public network and your private one simultaneously, with routing isolated per network. Fleet management for enterprise.
+- **Private networks** — create invite-only inference networks for your team, lab, or org. A node can belong to multiple networks at once and, since 0.6.1, **host** private networks itself — one process serves the public network and coordinates your private ones on the same port. Fleet management for enterprise.
 - **OpenAI-compatible API** — drop-in replacement at `/v1/chat/completions`. Works with Claude Code, aider, Continue.dev, or any tool that accepts an OpenAI base URL.
 - **iOS app** — native app for iPad and iPhone. Your iPad serves inference at 30+ tokens/sec on Metal and earns credits as a full network peer.
 - **No cloud, no lock-in** — QUIC transport with NAT traversal. Works across the internet, not just your LAN. Your hardware, your models.
