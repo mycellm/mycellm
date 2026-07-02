@@ -52,6 +52,13 @@ ANIMATE_SECONDS = 0.6
 class MenubarApp(rumps.App):
     def __init__(self, api: str) -> None:
         self.api = api.rstrip("/")
+        # Node API key (config .env / env var) — without it a key-protected
+        # node 401s every poll and the monitor reports a healthy node offline.
+        try:
+            from mycellm.config import get_settings
+            self._api_key = get_settings().api_key or ""
+        except Exception:
+            self._api_key = ""
         self._prefs = load_prefs()
         self._mono = bool(self._prefs.get("monochrome", False))
         first = "mono-dim" if self._mono else "gray"
@@ -117,7 +124,7 @@ class MenubarApp(rumps.App):
     # ---- timers ---------------------------------------------------------
 
     def _poll(self, _timer) -> None:
-        self._snap = fetch_snapshot(self.api)
+        self._snap = fetch_snapshot(self.api, api_key=self._api_key)
         self._history.append(self._snap)
 
         self._status_item.title = status_line(self._snap)

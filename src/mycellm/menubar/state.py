@@ -114,14 +114,14 @@ _version_cache: dict[str, str] = {}
 _version_attempts: dict[str, int] = {}
 
 
-def _fallback_version(base: str) -> str:
+def _fallback_version(base: str, api_key: str = "") -> str:
     if base in _version_cache:
         return _version_cache[base]
     if _version_attempts.get(base, 0) >= 3:
         return ""
     _version_attempts[base] = _version_attempts.get(base, 0) + 1
     try:
-        version = str(_get_json(f"{base}/v1/node/version", timeout=6.0).get("current", ""))
+        version = str(_get_json(f"{base}/v1/node/version", timeout=6.0, api_key=api_key).get("current", ""))
     except (urllib.error.URLError, OSError, ValueError):
         return ""
     if version:
@@ -129,11 +129,16 @@ def _fallback_version(base: str) -> str:
     return version
 
 
-def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
-    """Poll the local node; an unreachable node yields reachable=False."""
+def fetch_snapshot(base_url: str, timeout: float = 4.0, api_key: str = "") -> NodeSnapshot:
+    """Poll the local node; an unreachable node yields reachable=False.
+
+    api_key: sent as X-API-Key. Without it, a key-protected node 401s and
+    the monitor would wrongly report the node offline (and feed the API's
+    unauthenticated-caller lockout for localhost).
+    """
     base = base_url.rstrip("/")
     try:
-        status = _get_json(f"{base}/v1/node/status", timeout)
+        status = _get_json(f"{base}/v1/node/status", timeout, api_key)
     except (urllib.error.URLError, OSError, ValueError, KeyError):
         return NodeSnapshot(reachable=False)
 
@@ -141,7 +146,7 @@ def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
     snap = NodeSnapshot(
         reachable=True,
         node_name=str(status.get("node_name", "")),
-        version=str(status.get("version", "")) or _fallback_version(base),
+        version=str(status.get("version", "")) or _fallback_version(base, api_key),
         role=str(status.get("role", "")),
         mode=str(status.get("mode", "")),
         peer_id=str(status.get("peer_id", "")),
@@ -157,7 +162,7 @@ def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
         peers=len(status.get("peers", [])),
     )
     try:
-        credits = _get_json(f"{base}/v1/node/credits", timeout)
+        credits = _get_json(f"{base}/v1/node/credits", timeout, api_key)
         snap.balance = float(credits.get("balance", 0.0))
         snap.earned = float(credits.get("earned", 0.0))
     except (urllib.error.URLError, OSError, ValueError):
@@ -165,8 +170,11 @@ def fetch_snapshot(base_url: str, timeout: float = 4.0) -> NodeSnapshot:
     return snap
 
 
-def _get_json(url: str, timeout: float) -> dict:
-    with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — localhost API
+def _get_json(url: str, timeout: float, api_key: str = "") -> dict:
+    req = urllib.request.Request(url)
+    if api_key:
+        req.add_header("X-API-Key", api_key)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — localhost API
         return json.loads(resp.read().decode())
 
 

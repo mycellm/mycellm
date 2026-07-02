@@ -53,10 +53,16 @@ STATUS_PAYLOAD = {
 CREDITS_PAYLOAD = {"balance": 151.09, "earned": 53.73, "spent": 2.64}
 
 
+def _req_url(url_or_request) -> str:
+    """urlopen receives a Request (so the poll can carry X-API-Key) or a str."""
+    return getattr(url_or_request, "full_url", url_or_request)
+
+
 def _urlopen_returning(payloads):
     """Mock urlopen yielding canned JSON bodies per URL substring."""
 
     def fake_urlopen(url, timeout=None):
+        url = _req_url(url)
         for fragment, payload in payloads.items():
             if fragment in url:
                 cm = mock.MagicMock()
@@ -202,7 +208,7 @@ class TestVersionFallback:
             snap = fetch_snapshot("http://localhost:8420")
         assert snap.version == "0.5.1.dev0"
         assert not any(
-            "/v1/node/version" in c.args[0] for c in fake.call_args_list
+            "/v1/node/version" in _req_url(c.args[0]) for c in fake.call_args_list
         )
 
     def test_old_node_falls_back_to_version_endpoint(self):
@@ -227,7 +233,7 @@ class TestVersionFallback:
             fetch_snapshot("http://localhost:8420")
             fetch_snapshot("http://localhost:8420")
         version_calls = [
-            c for c in fake.call_args_list if "/v1/node/version" in c.args[0]
+            c for c in fake.call_args_list if "/v1/node/version" in _req_url(c.args[0])
         ]
         assert len(version_calls) == 1
 
@@ -241,7 +247,7 @@ class TestVersionFallback:
         assert snap.version == ""
         assert uptime_line(snap).split(" · ")[0] == "v?"
         version_calls = [
-            c for c in fake.call_args_list if "/v1/node/version" in c.args[0]
+            c for c in fake.call_args_list if "/v1/node/version" in _req_url(c.args[0])
         ]
         assert len(version_calls) == 3
 

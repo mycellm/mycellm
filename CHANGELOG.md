@@ -7,6 +7,11 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 ## [Unreleased]
 
 ### Fixed
+- **Menu bar monitor authenticates its polls.** With an API key set, the
+  monitor's keyless status polls were rejected (401) and the node showed as
+  offline (gray) despite being healthy; the polls also fed the API's
+  unauthenticated-caller tracking. The monitor now sends `X-API-Key` from
+  the node's config.
 - **A valid API key can no longer be locked out.** The per-IP brute-force
   lockout was checked *before* key validation, so an unauthenticated process
   sharing the caller's IP (e.g. a keyless localhost poller) could lock
