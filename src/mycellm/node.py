@@ -483,6 +483,7 @@ class MycellmNode:
     _FLEET_COMMANDS = {
         "node.status", "node.config",
         "model.list", "model.load", "model.unload", "model.scope",
+        "train.status",
     }
 
     async def _handle_fleet_command(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
@@ -602,7 +603,35 @@ class MycellmNode:
             await self.announce_capabilities()
             return {"status": "updated", "model": model_name, "scope": scope}
 
+        elif command == "train.status":
+            # Read-only: can this node take part in federated (LoRA) training?
+            # Reports capability + loaded base models an adapter could attach
+            # to. Round execution + QUIC broadcast are a later phase — this is
+            # the discovery surface so a coordinator knows who can join.
+            return self._training_status()
+
         raise ValueError(f"Unknown command: {command}")
+
+    def _training_status(self) -> dict:
+        """Federated-training readiness for this node (fleet-visible, read-only)."""
+        # numpy → aggregation core; mlx → real on-device LoRA training.
+        try:
+            import numpy  # noqa: F401
+            has_numpy = True
+        except ImportError:
+            has_numpy = False
+        try:
+            import mlx.core  # noqa: F401
+            has_mlx = True
+        except ImportError:
+            has_mlx = False
+        base_models = [m.name for m in self.inference.loaded_models]
+        return {
+            "can_aggregate": has_numpy,        # can run FedAvg (coordinator role)
+            "can_train_local": has_numpy and has_mlx,  # can produce adapter deltas
+            "base_models": base_models,
+            "active_jobs": [],  # populated once round execution lands
+        }
 
     def _resolve_peer_trust(self, peer_id: str) -> str:
         """Determine the highest trust level for a peer based on shared networks.
