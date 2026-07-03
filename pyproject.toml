@@ -49,6 +49,12 @@ inference = [
     # MLX vision-language backend (multimodal; Apple Silicon only)
     "mlx-vlm>=0.1.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
+training = [
+    # Federated LoRA aggregation core (numpy only; framework-agnostic).
+    # Real on-device LoRA training additionally needs the mlx extra — numpy
+    # arrives transitively there too, so training nodes get it either way.
+    "numpy>=1.24",
+]
 mlx = [
     "mlx-lm>=0.31.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "mlx-vlm>=0.1.0; sys_platform == 'darwin' and platform_machine == 'arm64'",

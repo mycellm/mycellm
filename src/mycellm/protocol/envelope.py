@@ -66,6 +66,16 @@ class MessageType(str, Enum):
     DHT_QUERY = "dht_query"
     DHT_RESPONSE = "dht_response"
 
+    # Federated training (coordinated LoRA/adapter averaging — F3).
+    # Round lifecycle: coordinator broadcasts TRAIN_ROUND (base adapter +
+    # hyperparams) → each participant replies TRAIN_UPDATE (its adapter delta
+    # + sample count) → coordinator aggregates and broadcasts TRAIN_RESULT
+    # (the new global adapter manifest). Request/response only — no live
+    # gradient exchange.
+    TRAIN_ROUND = "train_round"
+    TRAIN_UPDATE = "train_update"
+    TRAIN_RESULT = "train_result"
+
     # Error
     ERROR = "error"
 
