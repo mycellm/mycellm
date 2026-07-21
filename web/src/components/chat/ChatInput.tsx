@@ -61,7 +61,7 @@ export function ChatInput({ onSend, onAbort, sending, disabled }: ChatInputProps
           rows={1}
           disabled={disabled}
           className={cn(
-            'max-h-24 min-h-[40px] flex-1 resize-none rounded-xl border border-white/10 bg-black',
+            'max-h-24 min-h-[40px] min-w-0 flex-1 resize-none rounded-xl border border-white/10 bg-black',
             'px-3.5 py-2.5 text-sm text-white',
             'placeholder:text-gray-600',
             'focus:border-spore/40 focus:outline-none',
