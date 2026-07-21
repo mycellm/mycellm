@@ -58,6 +58,7 @@ export function ChatInput({ onSend, onAbort, sending, disabled }: ChatInputProps
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder={t('input.placeholder')}
+          aria-label={t('input.placeholder')}
           rows={1}
           disabled={disabled}
           className={cn(
@@ -76,6 +77,7 @@ export function ChatInput({ onSend, onAbort, sending, disabled }: ChatInputProps
           <button
             onClick={onAbort}
             title={t('input.stop')}
+            aria-label={t('input.stop')}
             className={cn(
               'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl',
               'bg-compute text-white',
@@ -89,6 +91,7 @@ export function ChatInput({ onSend, onAbort, sending, disabled }: ChatInputProps
             onClick={handleSend}
             disabled={disabled}
             title={t('input.send')}
+            aria-label={t('input.send')}
             className={cn(
               'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl',
               'bg-spore text-black',
