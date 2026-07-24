@@ -9,8 +9,9 @@ A round is one request/response cycle:
 The coordinator collects updates until a quorum is reached or the round
 deadline passes, aggregates with federated_average (norm-clipping + optional
 eval-gating first), and publishes the result. This module owns the pure
-state machine; the QUIC wiring (broadcast/collect) lives on the node so this
-stays unit-testable.
+state machine and the wire payloads; the QUIC wiring that carries them
+(broadcast/collect/publish) lives in training/session.py so this stays
+unit-testable without a transport.
 """
 
 from __future__ import annotations
@@ -103,6 +104,34 @@ class RoundResult:
     contributors: list[str]
     dropped: list[str]  # peer_ids excluded (no samples / clipped-out / gated)
     total_samples: int
+
+
+def build_train_result_payload(result: RoundResult) -> dict:
+    """TRAIN_RESULT payload: the new global adapter plus who produced it.
+
+    The fingerprint travels alongside the adapter so a participant can check
+    that what arrived is what the coordinator named before adopting it.
+    """
+    return {
+        "job_id": result.job_id,
+        "round_index": result.round_index,
+        "adapter": encode_adapter(result.adapter),
+        "fingerprint": adapter_fingerprint(result.adapter),
+        "contributors": list(result.contributors),
+        "dropped": list(result.dropped),
+        "total_samples": result.total_samples,
+    }
+
+
+def parse_train_result_payload(payload: dict) -> RoundResult:
+    return RoundResult(
+        job_id=payload["job_id"],
+        round_index=int(payload["round_index"]),
+        adapter=decode_adapter(payload["adapter"]),
+        contributors=list(payload.get("contributors") or []),
+        dropped=list(payload.get("dropped") or []),
+        total_samples=int(payload["total_samples"]),
+    )
 
 
 @dataclass

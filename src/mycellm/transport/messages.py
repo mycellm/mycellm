@@ -270,3 +270,48 @@ def fleet_response(
             "error": error,
         },
     )
+
+
+def train_round(from_peer: str, payload: dict[str, Any]) -> MessageEnvelope:
+    """Announce a federated training round to one participant (F3).
+
+    `payload` comes from ``mycellm.training.round.build_train_round_payload()``
+    (round config + the encoded base adapter) and stays opaque here so the
+    transport layer keeps no numpy dependency.
+    """
+    return MessageEnvelope(
+        type=MessageType.TRAIN_ROUND,
+        from_peer=from_peer,
+        payload=payload,
+    )
+
+
+def train_update(
+    from_peer: str,
+    request_id: str,
+    payload: dict[str, Any],
+) -> MessageEnvelope:
+    """A participant's reply to TRAIN_ROUND (its adapter delta + sample count).
+
+    Echoes the announce's `request_id` so the coordinator's send_and_wait()
+    matches it, the same way fleet_response answers fleet_command. Payload is
+    built by ``mycellm.training.round.build_train_update_payload()``.
+    """
+    return MessageEnvelope(
+        type=MessageType.TRAIN_UPDATE,
+        from_peer=from_peer,
+        id=request_id,
+        payload=payload,
+    )
+
+
+def train_result(from_peer: str, payload: dict[str, Any]) -> MessageEnvelope:
+    """Publish an aggregated global adapter to participants (no reply expected).
+
+    Payload is built by ``mycellm.training.round.build_train_result_payload()``.
+    """
+    return MessageEnvelope(
+        type=MessageType.TRAIN_RESULT,
+        from_peer=from_peer,
+        payload=payload,
+    )
