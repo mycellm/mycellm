@@ -1,7 +1,11 @@
 """Unit tests for ModelResolver."""
 
+import time
+from unittest.mock import MagicMock
 
+from mycellm.api.admin import list_nodes
 from mycellm.router.model_resolver import (
+    FLEET_ONLINE_WINDOW_S,
     ModelResolver,
     estimate_param_count,
     derive_tier,
@@ -166,17 +170,82 @@ def test_resolver_excludes_dead_peer_models():
     assert all(r.source != "quic" for r in results)
 
 
+def _fleet_entry(
+    name: str = "fleet-model-7b", age_s: float = 0.0, peer_id: str = "abc123"
+) -> dict:
+    """An approved fleet-registry entry last seen `age_s` seconds ago."""
+    return {
+        "status": "approved",
+        "peer_id": peer_id,
+        "capabilities": {"models": [{"name": name}]},
+        "last_seen": time.time() - age_s,
+    }
+
+
 def test_resolver_includes_fleet_models():
     reg = PeerRegistry()
     resolver = ModelResolver(reg)
 
-    fleet = {
-        "peer1": {
-            "status": "approved",
-            "peer_id": "abc123",
-            "capabilities": {"models": [{"name": "fleet-model-7b"}]},
-        }
-    }
+    fleet = {"peer1": _fleet_entry()}
     results = resolver.resolve("", [], fleet_registry=fleet)
 
     assert any(r.model_name == "fleet-model-7b" and r.source == "fleet" for r in results)
+
+
+def test_resolver_excludes_stale_fleet_models():
+    """An approved entry that stopped announcing must not surface as an 'auto'
+    candidate — same reasoning as a dropped QUIC session."""
+    reg = PeerRegistry()
+    resolver = ModelResolver(reg)
+
+    fleet = {"peer1": _fleet_entry(age_s=FLEET_ONLINE_WINDOW_S + 60)}
+    results = resolver.resolve("", [], fleet_registry=fleet)
+
+    assert results == []
+
+
+def test_resolver_excludes_fleet_entry_without_last_seen():
+    """A registry entry with no last_seen is unusable — announce always stamps
+    it — so it must not be routed to."""
+    reg = PeerRegistry()
+    resolver = ModelResolver(reg)
+
+    entry = _fleet_entry()
+    del entry["last_seen"]
+    results = resolver.resolve("", [], fleet_registry={"peer1": entry})
+
+    assert results == []
+
+
+def test_resolver_keeps_fresh_fleet_model_alongside_stale():
+    """Only the stale entry is dropped; a fresh peer still resolves."""
+    reg = PeerRegistry()
+    resolver = ModelResolver(reg)
+
+    fleet = {
+        "stale": _fleet_entry("stale-model-70b", age_s=FLEET_ONLINE_WINDOW_S + 1),
+        "fresh": _fleet_entry("fresh-model-7b", age_s=5),
+    }
+    results = resolver.resolve("", [], fleet_registry=fleet)
+
+    names = [r.model_name for r in results]
+    assert names == ["fresh-model-7b"]
+
+
+async def test_fleet_online_window_shared_with_admin_listing():
+    """The /nodes `online` flag and routing use one threshold, so a node the
+    dashboard shows as offline is never a routing candidate."""
+    registry = {
+        "stale": _fleet_entry("stale-model-70b", age_s=FLEET_ONLINE_WINDOW_S + 1, peer_id="stale"),
+        "fresh": _fleet_entry("fresh-model-7b", age_s=1, peer_id="fresh"),
+    }
+    request = MagicMock()
+    request.app.state.node.node_registry = registry
+
+    listed = await list_nodes(request)
+    online = {e["peer_id"]: e["online"] for e in listed["nodes"]}
+    assert online == {"stale": False, "fresh": True}
+
+    resolver = ModelResolver(PeerRegistry())
+    resolved = resolver.resolve("", [], fleet_registry=registry)
+    assert [r.model_name for r in resolved] == ["fresh-model-7b"]

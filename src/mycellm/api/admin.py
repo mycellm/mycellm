@@ -9,6 +9,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Request
 
+from mycellm.router.model_resolver import is_fleet_entry_online
 from mycellm.transport.messages import fleet_command
 
 logger = logging.getLogger("mycellm.admin")
@@ -127,10 +128,11 @@ async def list_nodes(request: Request):
     """List all registered nodes."""
     node = request.app.state.node
     nodes = []
+    now = time.time()
     for entry in node.node_registry.values():
-        # Check if node is reachable (seen in last 120s)
-        age = time.time() - entry.get("last_seen", 0)
-        entry["online"] = age < 120
+        # Reachable == announced within the routing online window, so the
+        # dashboard and the resolver agree on which nodes are usable.
+        entry["online"] = is_fleet_entry_online(entry, now)
         nodes.append(entry)
     return {"nodes": nodes}
 

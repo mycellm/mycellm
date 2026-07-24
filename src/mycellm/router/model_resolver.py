@@ -4,12 +4,30 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 from mycellm.protocol.capabilities import ModelCapability
 from mycellm.router.registry import PeerRegistry
 
 logger = logging.getLogger("mycellm.router")
+
+
+# How recently a fleet-registry entry must have announced itself to count as
+# online. Shared by the /nodes listing (the `online` flag) and by routing, so
+# a node the dashboard shows as offline is never picked as a candidate.
+FLEET_ONLINE_WINDOW_S = 120.0
+
+
+def is_fleet_entry_online(entry: dict, now: float | None = None) -> bool:
+    """Whether a fleet-registry entry has announced within the online window.
+
+    An entry with no ``last_seen`` is treated as offline — the announce path
+    always stamps it, so a missing value means the entry is unusable.
+    """
+    if now is None:
+        now = time.time()
+    return (now - entry.get("last_seen", 0)) < FLEET_ONLINE_WINDOW_S
 
 
 # Tier thresholds based on estimated parameter count
@@ -197,10 +215,16 @@ class ModelResolver:
                     score=self._score_model(param_b, tier, source="quic", health=health),
                 ))
 
-        # Collect fleet models
+        # Collect fleet models. Skip entries that have gone stale — an
+        # approved seeder that stopped announcing is treated as gone, the same
+        # way a dropped QUIC session is, so "auto" never resolves to a node
+        # that cannot answer.
         if fleet_registry:
+            now = time.time()
             for peer_id, entry in fleet_registry.items():
                 if entry.get("status") != "approved":
+                    continue
+                if not is_fleet_entry_online(entry, now):
                     continue
                 caps = entry.get("capabilities", {})
                 for m in caps.get("models", []):
