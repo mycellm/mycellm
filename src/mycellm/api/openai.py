@@ -493,10 +493,19 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     )
 
 
+def _chunk_envelope(chunk_id: str, model: str, delta: dict, finish: str | None = None) -> str:
+    """One `chat.completion.chunk` SSE payload — the shape every stream emits."""
+    return json.dumps({
+        "id": chunk_id, "object": "chat.completion.chunk",
+        "created": int(time.time()), "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+    })
+
+
 async def _stream_response(node, body: ChatCompletionRequest, messages: list[dict]):
     """Stream response via SSE."""
     from sse_starlette.sse import EventSourceResponse
-    from mycellm.inference.reasoning_dialects import make_splitter
+    from mycellm.activity import EventType
 
     reasoning_exclude = _resolve_reasoning_exclude(body.reasoning)
 
@@ -505,409 +514,436 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
         _requested = body.model if body.model not in ("auto", "") else ""
 
         # For auto routing, use ModelResolver for quality-based selection
-        # rather than first-loaded model (which could be a tiny model).
-        model_name = ""
+        # rather than first-loaded model (which could be a tiny model). We keep
+        # the *whole* ranked list rather than just resolved[0]: when the best
+        # candidate can't produce a stream (dead QUIC peer, backend error, a
+        # stream that yields nothing) the request degrades to the next-best
+        # model instead of erroring or handing the client an empty stream.
+        # Same rule as the non-streaming path and
+        # MycellmNode.route_inference_stream — failing over is only safe
+        # *before* any chunk has reached the client.
+        candidates: list[str] = []
         if not _requested and node.model_resolver:
-            resolved = node.model_resolver.resolve(
+            for cand in node.model_resolver.resolve(
                 "",
                 node.inference.loaded_models,
                 fleet_registry=node.node_registry,
-            )
-            if resolved:
-                best = resolved[0]
-                if best.source in ("local", "fleet"):
-                    model_name = best.model_name
-                # quic-only: fall through to the no-local-model path below
-        if not model_name:
-            model_name = node.inference.resolve_model_name(_requested)
+            ) or []:
+                if cand.model_name not in candidates:
+                    candidates.append(cand.model_name)
+        if not candidates:
+            candidates = [_requested]
 
-        if model_name:
-            from mycellm.inference.base import InferenceRequest
+        # emitted: has the client been handed real output (no re-routing after
+        # that)? busy/error: why the last candidate bowed out, for the final
+        # message when every candidate does.
+        state = {"emitted": False, "busy": False, "error": ""}
 
-            # Normalize stop to list[str] | None
-            stop = body.stop
-            if isinstance(stop, str):
-                stop = [stop]
-
-            req = InferenceRequest(
-                messages=messages,
-                model=model_name,
-                temperature=body.temperature,
-                max_tokens=body.max_tokens or 2048,
-                top_p=body.top_p,
-                stop=stop,
-                frequency_penalty=body.frequency_penalty,
-                presence_penalty=body.presence_penalty,
-                seed=body.seed,
-                response_format=body.response_format,
-                grammar=body.grammar,
-                tools=body.tools,
-                tool_choice=body.tool_choice,
-                reasoning_exclude=reasoning_exclude,
-            )
-
-            # Per-stream splitter routes <think>-block tokens to
-            # delta.reasoning_content and post-think tokens to delta.content.
-            # No-op (passthrough as content) for models without an output_tag_pair.
-            splitter = make_splitter(model_name)
-
-            # When tools are requested, streaming tool_call deltas are unreliable
-            # (llama-cpp-python and many backends don't emit them).  Fall back to
-            # a single non-streaming generate() call and emit the result as SSE.
-            # Also: "auto" tool_choice causes some backends to return tool calls
-            # as <tool_call> XML text instead of proper JSON tool_calls.  When
-            # exactly one tool is defined and choice is "auto"/"none"/unset, force
-            # it to {"type":"function","function":{"name":<tool>}} which reliably
-            # produces the standard tool_calls response format.
-            if req.tools:
-                if req.tool_choice in (None, "auto", "none") and len(req.tools) == 1:
-                    try:
-                        fn_name = req.tools[0]["function"]["name"]
-                        req.tool_choice = {"type": "function", "function": {"name": fn_name}}
-                    except (KeyError, TypeError, IndexError):
-                        pass
-                result = await node.inference.generate(req)
-
-                # Normalize <tool_call> XML text → tool_calls JSON (Qwen multi-tool case)
-                if not result.tool_calls and result.text and ("<tool_call>" in result.text or '"name"' in result.text):
-                    parsed = _parse_tool_call_xml(result.text)
-                    if parsed:
-                        result.tool_calls = parsed
-                        result.text = ""
-                        result.finish_reason = "tool_calls"
-
-                yield json.dumps({
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model_name,
-                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                })
-                if result.tool_calls:
-                    yield json.dumps({
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"tool_calls": result.tool_calls},
-                            "finish_reason": "tool_calls",
-                        }],
-                    })
-                elif result.text:
-                    yield json.dumps({
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{"index": 0, "delta": {"content": result.text}, "finish_reason": None}],
-                    })
-                yield json.dumps({
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model_name,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": result.finish_reason}],
-                })
+        for candidate in candidates:
+            model_name = node.inference.resolve_model_name(candidate)
+            if model_name:
+                stream = _stream_local_model(
+                    node, body, messages, model_name, chunk_id, reasoning_exclude, state,
+                )
+            else:
+                stream = _stream_remote_model(
+                    node, body, messages, candidate, chunk_id, reasoning_exclude, state,
+                )
+            async for out in stream:
+                yield out
+            if state["emitted"]:
+                yield "[DONE]"
                 return
+            logger.info(f"Stream: candidate '{candidate or 'auto'}' produced no output")
 
-            # Send role delta first
-            yield json.dumps({
-                "id": chunk_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": model_name,
-                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-            })
-
-            got_tool_calls = False
-
-            def _envelope(delta: dict, finish: str | None = None) -> str:
-                return json.dumps({
-                    "id": chunk_id, "object": "chat.completion.chunk",
-                    "created": int(time.time()), "model": model_name,
-                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-                })
-
-            def _emit_chunk(chunk_val):
-                """Feed a streaming InferenceChunk through the think-splitter and
-                yield SSE envelopes. May produce 0, 1, or multiple envelopes per
-                input chunk (one input token can straddle a <think> boundary)."""
-                nonlocal got_tool_calls
-                if chunk_val.tool_calls:
-                    got_tool_calls = True
-                    yield _envelope({"tool_calls": chunk_val.tool_calls}, finish="tool_calls")
-                    return
-                if not chunk_val.text:
-                    return
-                for kind, piece in splitter.feed(chunk_val.text):
-                    if kind == "content":
-                        yield _envelope({"content": piece})
-                    elif kind == "reasoning" and not reasoning_exclude:
-                        # OpenAI o-series convention: delta.reasoning_content
-                        yield _envelope({"reasoning_content": piece})
-                    # else: kind=="reasoning" and excluded → silently drop
-
-            try:
-                stream_iter = node.inference.generate_stream(req)
-                # Acquire the lock by getting the first iteration
-                first_chunk_val = await stream_iter.__anext__()
-                # Got the lock — yield first chunk(s) and continue
-                for out in _emit_chunk(first_chunk_val):
-                    yield out
-            except RuntimeError as busy_err:
-                if "busy" in str(busy_err).lower() or "timed out" in str(busy_err).lower():
-                    alt = _find_alternative_model(node, model_name)
-                    if alt:
-                        logger.info(f"Stream: {model_name} busy, falling back to {alt}")
-                        req.model = alt
-                        model_name = alt
-                        stream_iter = node.inference.generate_stream(req)
-                    else:
-                        yield json.dumps({
-                            "id": chunk_id, "object": "chat.completion.chunk",
-                            "model": model_name,
-                            "choices": [{"index": 0, "delta": {"content": "[Model busy — try again]"}, "finish_reason": "stop"}],
-                        })
-                        return
-                else:
-                    raise
-
-            async for chunk in stream_iter:
-                for out in _emit_chunk(chunk):
-                    yield out
-
-            # Drain the splitter — handles unclosed <think> at end of stream.
-            for kind, piece in splitter.flush():
-                if kind == "content":
-                    yield _envelope({"content": piece})
-                elif kind == "reasoning" and not reasoning_exclude:
-                    yield _envelope({"reasoning_content": piece})
-
-            # Final chunk — use "tool_calls" finish_reason if model called a tool
-            yield _envelope({}, finish=("tool_calls" if got_tool_calls else "stop"))
+        # Every candidate bowed out before producing a token — say why.
+        node.activity.record(
+            EventType.INFERENCE_FAILED,
+            model=body.model or "auto",
+            error=state["error"] or ("model_busy" if state["busy"] else "no_model_available"),
+        )
+        if state["busy"]:
+            content = "[Model busy — try again]"
+        elif state["error"]:
+            content = f"[mycellm] Inference error: {state['error']}"
         else:
-            # No local model — try streaming via direct QUIC peers first
-            # (this is the canonical P2P path: chain_builder picks the best
-            # peer that advertises the requested model in its capabilities).
-            fleet_handled = False
-            try:
-                quic_chunk_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-                role_sent = False
-                any_quic_chunk = False
-                # Apply the same think-splitter on the relay path: peer may not
-                # have suppressed thinking, so split <think> blocks at the
-                # bootstrap and route them to delta.reasoning_content.
-                quic_splitter = make_splitter(body.model or "")
-                async for piece in node.route_inference_stream(
-                    body.model, messages,
-                    temperature=body.temperature,
-                    max_tokens=body.max_tokens or 2048,
-                    tools=body.tools or None,
-                    tool_choice=body.tool_choice,
-                ):
-                    if not role_sent:
-                        yield json.dumps({
-                            "id": quic_chunk_id, "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                        })
-                        role_sent = True
-                    text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
-                    finish = piece.get("finish_reason") if isinstance(piece, dict) else None
-                    tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
-                    if tool_calls:
-                        any_quic_chunk = True
-                        yield json.dumps({
-                            "id": quic_chunk_id, "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": {"tool_calls": tool_calls}, "finish_reason": finish}],
-                        })
-                    elif text:
-                        for kind, chunk_piece in quic_splitter.feed(text):
-                            if kind == "content":
-                                any_quic_chunk = True
-                                yield json.dumps({
-                                    "id": quic_chunk_id, "object": "chat.completion.chunk",
-                                    "created": int(time.time()),
-                                    "model": body.model or "auto",
-                                    "choices": [{"index": 0, "delta": {"content": chunk_piece}, "finish_reason": None}],
-                                })
-                            elif kind == "reasoning" and not reasoning_exclude:
-                                any_quic_chunk = True
-                                yield json.dumps({
-                                    "id": quic_chunk_id, "object": "chat.completion.chunk",
-                                    "created": int(time.time()),
-                                    "model": body.model or "auto",
-                                    "choices": [{"index": 0, "delta": {"reasoning_content": chunk_piece}, "finish_reason": None}],
-                                })
-                # Drain splitter (unclosed <think> at end-of-stream)
-                for kind, chunk_piece in quic_splitter.flush():
-                    if kind == "content":
-                        yield json.dumps({
-                            "id": quic_chunk_id, "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": {"content": chunk_piece}, "finish_reason": None}],
-                        })
-                    elif kind == "reasoning" and not reasoning_exclude:
-                        yield json.dumps({
-                            "id": quic_chunk_id, "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": {"reasoning_content": chunk_piece}, "finish_reason": None}],
-                        })
-                if any_quic_chunk:
-                    yield json.dumps({
-                        "id": quic_chunk_id, "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": body.model or "auto",
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                    })
-                    yield "[DONE]"
-                    return
-            except Exception as e:
-                logging.getLogger("mycellm.router").debug(f"QUIC stream routing failed: {e}")
-
-            # Then check fleet/announced seeders (HTTP path or QUIC fallback).
-            now = time.time()
-            matching_entries = []
-            for entry in node.node_registry.values():
-                if entry.get("status") != "approved":
-                    continue
-                if now - entry.get("last_seen", 0) > 120:
-                    continue
-                caps = entry.get("capabilities", {})
-                fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
-                if body.model and body.model not in fleet_models:
-                    continue
-                matching_entries.append(entry)
-
-            # QUIC-first ordering
-            def _sk(e):
-                pid = e.get("peer_id", "")
-                return (0 if (pid and pid in getattr(node, "_peer_connections", {})) else 1,
-                        e.get("failure_count", 0))
-            matching_entries.sort(key=_sk)
-
-            for entry in matching_entries:
-                pid = entry.get("peer_id", "")
-                if not pid or pid not in getattr(node, "_peer_connections", {}):
-                    continue
-                try:
-                    chunk_id_q = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-                    yield json.dumps({
-                        "id": chunk_id_q, "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": body.model or "auto",
-                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                    })
-                    any_chunk = False
-                    async for piece in node.route_inference_stream(
-                        body.model, messages,
-                        temperature=body.temperature,
-                        max_tokens=body.max_tokens or 2048,
-                        tools=body.tools or None,
-                        tool_choice=body.tool_choice,
-                    ):
-                        any_chunk = True
-                        text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
-                        finish = piece.get("finish_reason") if isinstance(piece, dict) else None
-                        tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
-                        if text or tool_calls:
-                            delta2: dict = {}
-                            if text:
-                                delta2["content"] = text
-                            if tool_calls:
-                                delta2["tool_calls"] = tool_calls
-                            yield json.dumps({
-                                "id": chunk_id_q, "object": "chat.completion.chunk",
-                                "created": int(time.time()),
-                                "model": body.model or "auto",
-                                "choices": [{"index": 0, "delta": delta2, "finish_reason": finish}],
-                            })
-                    if any_chunk:
-                        yield json.dumps({
-                            "id": chunk_id_q, "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": body.model or "auto",
-                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                        })
-                        fleet_handled = True
-                        yield "[DONE]"
-                        return
-                except Exception as e:
-                    logging.getLogger("mycellm.router").debug(
-                        f"QUIC stream to {pid[:16]} failed: {e}")
-                    entry["failure_count"] = entry.get("failure_count", 0) + 1
-                    continue
-
-            # Fallback: try fleet HTTP streaming against api_addr.
-            import httpx
-            for entry in matching_entries:
-                if not entry.get("api_addr"):
-                    continue
-                addr = entry["api_addr"]
-                base = f"http://{addr}" if not addr.startswith("http") else addr
-                url = f"{base}/v1/chat/completions"
-
-                try:
-                    headers = {"Content-Type": "application/json"}
-                    from mycellm.config import get_settings
-                    settings = get_settings()
-                    if settings.api_key:
-                        headers["Authorization"] = f"Bearer {settings.api_key}"
-
-                    payload = {
-                        "model": body.model,
-                        "messages": messages,
-                        "temperature": body.temperature,
-                        "max_tokens": body.max_tokens or 2048,
-                        "stream": True,
-                    }
-                    if body.tools:
-                        payload["tools"] = body.tools
-                    if body.tool_choice is not None:
-                        payload["tool_choice"] = body.tool_choice
-
-                    async with httpx.AsyncClient(timeout=120) as client:
-                        async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                            if resp.status_code == 200:
-                                fleet_handled = True
-                                async for line in resp.aiter_lines():
-                                    if line.startswith("data: "):
-                                        data = line[6:]
-                                        if data == "[DONE]":
-                                            yield "[DONE]"
-                                            return
-                                        yield data
-                                return
-                except Exception as e:
-                    logging.getLogger("mycellm.router").debug(f"Fleet stream to {addr} failed: {e}")
-                    continue
-
-            if not fleet_handled:
-                yield json.dumps({
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": body.model or "none",
-                    "choices": [{
-                        "index": 0,
-                        "delta": {
-                            "role": "assistant",
-                            "content": "[mycellm] No model available.",
-                        },
-                        "finish_reason": "stop",
-                    }],
-                })
-
+            content = "[mycellm] No model available."
+        yield _chunk_envelope(
+            chunk_id, body.model or "none",
+            {"role": "assistant", "content": content}, finish="stop",
+        )
         yield "[DONE]"
 
     return EventSourceResponse(generate())
+
+
+async def _stream_local_model(
+    node, body: ChatCompletionRequest, messages: list[dict], model_name: str,
+    chunk_id: str, reasoning_exclude: bool, state: dict,
+):
+    """Yield SSE chunk payloads for one locally-loaded model.
+
+    Nothing is yielded until the backend has actually produced output, so a
+    candidate that bows out at start-up (busy with no alternative, backend
+    error, a stream that yields nothing) leaves the SSE stream untouched and
+    the caller can fail over to the next-ranked candidate. Once output has
+    gone downstream ``state["emitted"]`` is set and re-routing is off the
+    table — replaying on another model would duplicate tokens.
+    """
+    from mycellm.activity import EventType
+    from mycellm.inference.base import InferenceRequest
+    from mycellm.inference.reasoning_dialects import make_splitter
+
+    start_time = time.time()
+
+    # Normalize stop to list[str] | None
+    stop = body.stop
+    if isinstance(stop, str):
+        stop = [stop]
+
+    req = InferenceRequest(
+        messages=messages,
+        model=model_name,
+        temperature=body.temperature,
+        max_tokens=body.max_tokens or 2048,
+        top_p=body.top_p,
+        stop=stop,
+        frequency_penalty=body.frequency_penalty,
+        presence_penalty=body.presence_penalty,
+        seed=body.seed,
+        response_format=body.response_format,
+        grammar=body.grammar,
+        tools=body.tools,
+        tool_choice=body.tool_choice,
+        reasoning_exclude=reasoning_exclude,
+    )
+
+    # Per-stream splitter routes <think>-block tokens to
+    # delta.reasoning_content and post-think tokens to delta.content.
+    # No-op (passthrough as content) for models without an output_tag_pair.
+    splitter = make_splitter(model_name)
+
+    def _envelope(delta: dict, finish: str | None = None) -> str:
+        return _chunk_envelope(chunk_id, model_name, delta, finish)
+
+    def _record_complete() -> None:
+        node.activity.record(
+            EventType.INFERENCE_COMPLETE,
+            model=model_name,
+            source="local",
+            routed_to="local",
+            latency_ms=round((time.time() - start_time) * 1000),
+        )
+
+    # When tools are requested, streaming tool_call deltas are unreliable
+    # (llama-cpp-python and many backends don't emit them).  Fall back to
+    # a single non-streaming generate() call and emit the result as SSE.
+    # Also: "auto" tool_choice causes some backends to return tool calls
+    # as <tool_call> XML text instead of proper JSON tool_calls.  When
+    # exactly one tool is defined and choice is "auto"/"none"/unset, force
+    # it to {"type":"function","function":{"name":<tool>}} which reliably
+    # produces the standard tool_calls response format.
+    if req.tools:
+        if req.tool_choice in (None, "auto", "none") and len(req.tools) == 1:
+            try:
+                fn_name = req.tools[0]["function"]["name"]
+                req.tool_choice = {"type": "function", "function": {"name": fn_name}}
+            except (KeyError, TypeError, IndexError):
+                pass
+        try:
+            result = await node.inference.generate(req)
+        except Exception as e:
+            state["error"] = str(e)[:200]
+            logger.info(f"Stream: tool call on '{model_name}' failed: {e}")
+            return
+
+        # Normalize <tool_call> XML text → tool_calls JSON (Qwen multi-tool case)
+        if not result.tool_calls and result.text and ("<tool_call>" in result.text or '"name"' in result.text):
+            parsed = _parse_tool_call_xml(result.text)
+            if parsed:
+                result.tool_calls = parsed
+                result.text = ""
+                result.finish_reason = "tool_calls"
+
+        state["emitted"] = True
+        yield _envelope({"role": "assistant"})
+        if result.tool_calls:
+            yield _envelope({"tool_calls": result.tool_calls}, finish="tool_calls")
+        elif result.text:
+            yield _envelope({"content": result.text})
+        yield _envelope({}, finish=result.finish_reason)
+        _record_complete()
+        return
+
+    got_tool_calls = False
+
+    def _emit_chunk(chunk_val):
+        """Feed a streaming InferenceChunk through the think-splitter and
+        yield SSE envelopes. May produce 0, 1, or multiple envelopes per
+        input chunk (one input token can straddle a <think> boundary)."""
+        nonlocal got_tool_calls
+        if chunk_val.tool_calls:
+            got_tool_calls = True
+            yield _envelope({"tool_calls": chunk_val.tool_calls}, finish="tool_calls")
+            return
+        if not chunk_val.text:
+            return
+        for kind, piece in splitter.feed(chunk_val.text):
+            if kind == "content":
+                yield _envelope({"content": piece})
+            elif kind == "reasoning" and not reasoning_exclude:
+                # OpenAI o-series convention: delta.reasoning_content
+                yield _envelope({"reasoning_content": piece})
+            # else: kind=="reasoning" and excluded → silently drop
+
+    async def _open_stream():
+        """Start generate_stream and pull the first chunk — pulling is what
+        actually acquires the model lock. Returns (iterator, first chunk), or
+        (None, None) when the backend yielded nothing at all."""
+        it = node.inference.generate_stream(req)
+        try:
+            return it, await it.__anext__()
+        except StopAsyncIteration:
+            return None, None
+
+    try:
+        stream_iter, first_chunk_val = await _open_stream()
+    except RuntimeError as busy_err:
+        if "busy" not in str(busy_err).lower() and "timed out" not in str(busy_err).lower():
+            state["error"] = str(busy_err)[:200]
+            logger.info(f"Stream: '{model_name}' failed to start: {busy_err}")
+            return
+        alt = _find_alternative_model(node, model_name)
+        if not alt:
+            state["busy"] = True
+            return
+        logger.info(f"Stream: {model_name} busy, falling back to {alt}")
+        req.model = model_name = alt
+        splitter = make_splitter(alt)
+        try:
+            stream_iter, first_chunk_val = await _open_stream()
+        except Exception as e:
+            state["error"] = str(e)[:200]
+            logger.info(f"Stream: '{alt}' failed to start: {e}")
+            return
+    except Exception as e:
+        state["error"] = str(e)[:200]
+        logger.info(f"Stream: '{model_name}' failed to start: {e}")
+        return
+
+    async def _envelopes():
+        """Every SSE envelope this stream produces, in order: splitter-fed
+        chunks, then the splitter drain (unclosed <think> at end of stream)."""
+        if stream_iter is None:
+            return
+        for out in _emit_chunk(first_chunk_val):
+            yield out
+        async for chunk in stream_iter:
+            for out in _emit_chunk(chunk):
+                yield out
+        for kind, piece in splitter.flush():
+            if kind == "content":
+                yield _envelope({"content": piece})
+            elif kind == "reasoning" and not reasoning_exclude:
+                yield _envelope({"reasoning_content": piece})
+
+    # Hold the role delta back until the model has really produced something:
+    # a stream that ends without a single token is a dead candidate, not an
+    # answer, and the caller should try the next one.
+    envelopes = _envelopes()
+    try:
+        first_out = await envelopes.__anext__()
+    except StopAsyncIteration:
+        logger.info(f"Stream: '{model_name}' produced an empty stream")
+        return
+    except Exception as e:
+        state["error"] = str(e)[:200]
+        logger.info(f"Stream: '{model_name}' failed: {e}")
+        return
+
+    state["emitted"] = True
+    yield _envelope({"role": "assistant"})
+    yield first_out
+    try:
+        async for out in envelopes:
+            yield out
+    except Exception as e:
+        # Mid-stream failure: the client already holds tokens, so close the
+        # stream cleanly instead of re-routing (that would duplicate output).
+        logger.warning(f"Stream: '{model_name}' failed mid-stream: {e}")
+        yield _envelope({}, finish="error")
+        return
+
+    # Final chunk — use "tool_calls" finish_reason if model called a tool
+    yield _envelope({}, finish=("tool_calls" if got_tool_calls else "stop"))
+    _record_complete()
+
+
+async def _stream_remote_model(
+    node, body: ChatCompletionRequest, messages: list[dict], model: str,
+    chunk_id: str, reasoning_exclude: bool, state: dict,
+):
+    """Yield SSE chunk payloads for one candidate model served by the network.
+
+    Direct QUIC peers first — the canonical P2P path, where chain_builder
+    picks the best peer advertising the model — then announced fleet seeders
+    over HTTP. Follows the same commit rule as ``_stream_local_model``:
+    nothing is yielded until a peer produces real output, so a dead seeder or
+    an empty relay stream falls through to the caller's next candidate.
+    """
+    from mycellm.activity import EventType
+    from mycellm.inference.reasoning_dialects import make_splitter
+
+    rlogger = logging.getLogger("mycellm.router")
+    start_time = time.time()
+    display_model = model or "auto"
+
+    def _envelope(delta: dict, finish: str | None = None) -> str:
+        return _chunk_envelope(chunk_id, display_model, delta, finish)
+
+    async def _relay(pieces, source: str, routed_to: str):
+        """Relay one peer's chunk stream. Yields nothing when the peer
+        produced no output, so the caller can try the next route."""
+        # Apply the same think-splitter on the relay path: the peer may not
+        # have suppressed thinking, so split <think> blocks at the bootstrap
+        # and route them to delta.reasoning_content. One splitter per attempt.
+        splitter = make_splitter(model)
+
+        async def _envelopes():
+            async for piece in pieces:
+                text = piece.get("text", "") if isinstance(piece, dict) else getattr(piece, "text", "")
+                finish = piece.get("finish_reason") if isinstance(piece, dict) else None
+                tool_calls = piece.get("tool_calls") if isinstance(piece, dict) else None
+                if tool_calls:
+                    yield _envelope({"tool_calls": tool_calls}, finish=finish)
+                elif text:
+                    for kind, chunk_piece in splitter.feed(text):
+                        if kind == "content":
+                            yield _envelope({"content": chunk_piece})
+                        elif kind == "reasoning" and not reasoning_exclude:
+                            yield _envelope({"reasoning_content": chunk_piece})
+            # Drain the splitter (unclosed <think> at end-of-stream)
+            for kind, chunk_piece in splitter.flush():
+                if kind == "content":
+                    yield _envelope({"content": chunk_piece})
+                elif kind == "reasoning" and not reasoning_exclude:
+                    yield _envelope({"reasoning_content": chunk_piece})
+
+        envelopes = _envelopes()
+        try:
+            first_out = await envelopes.__anext__()
+        except StopAsyncIteration:
+            return
+        state["emitted"] = True
+        yield _envelope({"role": "assistant"})
+        yield first_out
+        async for out in envelopes:
+            yield out
+        yield _envelope({}, finish="stop")
+        node.activity.record(
+            EventType.INFERENCE_COMPLETE,
+            model=display_model,
+            source=source,
+            routed_to=routed_to,
+            latency_ms=round((time.time() - start_time) * 1000),
+        )
+
+    try:
+        async for out in _relay(
+            node.route_inference_stream(
+                model, messages,
+                temperature=body.temperature,
+                max_tokens=body.max_tokens or 2048,
+                tools=body.tools or None,
+                tool_choice=body.tool_choice,
+            ),
+            source="quic", routed_to="quic:peer",
+        ):
+            yield out
+    except Exception as e:
+        rlogger.debug(f"QUIC stream routing failed: {e}")
+        if state["emitted"]:
+            yield _envelope({}, finish="error")
+            return
+        state["error"] = str(e)[:200]
+    if state["emitted"]:
+        return
+
+    # Then announced fleet seeders, over HTTP against their api_addr. Skip
+    # entries whose last_seen is too stale — a seeder that hasn't checked in
+    # for >2min is treated as gone.
+    now = time.time()
+    matching_entries = []
+    for entry in node.node_registry.values():
+        if entry.get("status") != "approved":
+            continue
+        if now - entry.get("last_seen", 0) > 120:
+            continue
+        caps = entry.get("capabilities", {})
+        fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
+        if model and model not in fleet_models:
+            continue
+        matching_entries.append(entry)
+
+    # Healthiest first
+    matching_entries.sort(key=lambda e: (e.get("failure_count", 0), e.get("node_name", "")))
+
+    import httpx
+    for entry in matching_entries:
+        addr = entry.get("api_addr", "")
+        if not addr:
+            continue
+        base = f"http://{addr}" if not addr.startswith("http") else addr
+        url = f"{base}/v1/chat/completions"
+
+        try:
+            headers = {"Content-Type": "application/json"}
+            from mycellm.config import get_settings
+            settings = get_settings()
+            if settings.api_key:
+                headers["Authorization"] = f"Bearer {settings.api_key}"
+
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": body.temperature,
+                "max_tokens": body.max_tokens or 2048,
+                "stream": True,
+            }
+            if body.tools:
+                payload["tools"] = body.tools
+            if body.tool_choice is not None:
+                payload["tool_choice"] = body.tool_choice
+
+            async with httpx.AsyncClient(timeout=120) as client:
+                async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                    if resp.status_code != 200:
+                        entry["failure_count"] = entry.get("failure_count", 0) + 1
+                        rlogger.debug(f"Fleet stream {addr} returned {resp.status_code}, trying next")
+                        continue
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        state["emitted"] = True
+                        yield data
+        except Exception as e:
+            entry["failure_count"] = entry.get("failure_count", 0) + 1
+            rlogger.debug(f"Fleet stream to {addr} failed: {e}")
+            continue
+
+        if state["emitted"]:
+            entry["failure_count"] = 0
+            node.activity.record(
+                EventType.INFERENCE_COMPLETE,
+                model=display_model,
+                source="fleet",
+                routed_to=f"fleet:{entry.get('node_name', addr)}",
+                latency_ms=round((time.time() - start_time) * 1000),
+            )
+            return
 
 
 async def _route_via_fleet(
