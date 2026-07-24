@@ -395,6 +395,7 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
                 if m.get("quant"):
                     model_info.quant = m["quant"]
             node.capabilities.models = node.inference.loaded_models
+            node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
             await node.announce_capabilities()
             info["loaded_as"] = model_name
             logger.info(f"Auto-loaded model: {model_name}")
@@ -523,6 +524,7 @@ async def delete_model_file(request: Request):
     if model_name in [m.name for m in node.inference.loaded_models]:
         await node.inference.unload_model(model_name)
         node.capabilities.models = node.inference.loaded_models
+        node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
         await node.announce_capabilities()
 
     size_gb = round(target.stat().st_size / (1024 ** 3), 2)
