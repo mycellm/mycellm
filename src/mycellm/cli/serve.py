@@ -12,6 +12,14 @@ app = typer.Typer(invoke_without_command=True)
 
 PRIORITY_NICE = {"low": 15, "normal": 0, "high": -5}
 
+# launchd starts agents with macOS's stingy 256-fd soft limit. A node holds the
+# QUIC socket, the DHT socket, the API listener and a descriptor per peer/model
+# file, so a busy node runs out and starts refusing connections. Raise it to
+# match what the systemd/Linux path inherits. Hard must be >= soft or launchd
+# rejects the job.
+LAUNCHD_SOFT_FILE_LIMIT = 65536
+LAUNCHD_HARD_FILE_LIMIT = 65536
+
 
 @app.callback(invoke_without_command=True)
 def serve(
@@ -145,16 +153,12 @@ def _install_service(host, port, quic_port, dht_port, device, no_dht, priority):
         console.print(f"[red]Unsupported platform: {platform.system()}[/red]")
 
 
-def _install_launchd(mycellm_bin, host, port, quic_port, dht_port, device, no_dht, priority):
-    """Install macOS launchd plist for auto-start + auto-restart."""
+def _render_launchd_plist(mycellm_bin, host, port, quic_port, dht_port, device, no_dht, priority):
+    """Render the launchd plist XML for the node daemon (no filesystem writes)."""
     import os
-    from pathlib import Path
 
     nice_val = PRIORITY_NICE.get(priority, 0)
     label = "com.mycellm.node"
-    plist_dir = Path.home() / "Library" / "LaunchAgents"
-    plist_dir.mkdir(parents=True, exist_ok=True)
-    plist_path = plist_dir / f"{label}.plist"
 
     args = [mycellm_bin, "serve", "--host", host, "--port", str(port),
             "--quic-port", str(quic_port), "--dht-port", str(dht_port),
@@ -200,12 +204,39 @@ def _install_launchd(mycellm_bin, host, port, quic_port, dht_port, device, no_dh
     <string>/tmp/mycellm.log</string>
     <key>ProcessType</key>
     <string>{"Background" if nice_val > 0 else "Standard"}</string>
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>{LAUNCHD_SOFT_FILE_LIMIT}</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>{LAUNCHD_HARD_FILE_LIMIT}</integer>
+    </dict>
 </dict>
 </plist>
 """
+    return plist
+
+
+def _install_launchd(mycellm_bin, host, port, quic_port, dht_port, device, no_dht, priority):
+    """Install macOS launchd plist for auto-start + auto-restart."""
+    from pathlib import Path
+
+    nice_val = PRIORITY_NICE.get(priority, 0)
+    label = "com.mycellm.node"
+    plist_dir = Path.home() / "Library" / "LaunchAgents"
+    plist_dir.mkdir(parents=True, exist_ok=True)
+    plist_path = plist_dir / f"{label}.plist"
+
+    plist = _render_launchd_plist(
+        mycellm_bin, host, port, quic_port, dht_port, device, no_dht, priority
+    )
     plist_path.write_text(plist)
     console.print(f"[green]Installed:[/green] {plist_path}")
     console.print(f"[dim]Priority: {priority} (nice {nice_val})[/dim]")
+    console.print(f"[dim]Open file limit: {LAUNCHD_SOFT_FILE_LIMIT} soft / {LAUNCHD_HARD_FILE_LIMIT} hard[/dim]")
 
     # Load it
     import subprocess
