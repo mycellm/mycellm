@@ -871,13 +871,15 @@ async def _stream_remote_model(
 
     # Then announced fleet seeders, over HTTP against their api_addr. Skip
     # entries whose last_seen is too stale — a seeder that hasn't checked in
-    # for >2min is treated as gone.
+    # within the online window is treated as gone.
+    from mycellm.router.model_resolver import is_fleet_entry_online
+
     now = time.time()
     matching_entries = []
     for entry in node.node_registry.values():
         if entry.get("status") != "approved":
             continue
-        if now - entry.get("last_seen", 0) > 120:
+        if not is_fleet_entry_online(entry, now):
             continue
         caps = entry.get("capabilities", {})
         fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
@@ -967,13 +969,15 @@ async def _route_via_fleet(
 
     # Collect and sort matching fleet nodes: freshness first, then health.
     # Skip entries whose last_seen is too stale — a seeder that hasn't
-    # checked in for >2min is treated as gone.
+    # checked in within the online window is treated as gone.
+    from mycellm.router.model_resolver import is_fleet_entry_online
+
     now = time.time()
     matching_entries = []
     for entry in node.node_registry.values():
         if entry.get("status") != "approved":
             continue
-        if now - entry.get("last_seen", 0) > 120:
+        if not is_fleet_entry_online(entry, now):
             continue
         caps = entry.get("capabilities", {})
         fleet_models = [m.get("name", m) if isinstance(m, dict) else m for m in caps.get("models", [])]
