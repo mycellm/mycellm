@@ -303,6 +303,7 @@ async def load_model(request: Request):
                     if body.get("param_count_b"):
                         info.param_count_b = body["param_count_b"]
                 node.capabilities.models = node.inference.loaded_models
+                node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
                 await node.announce_capabilities()
                 node.activity.record(EventType.MODEL_LOADED, model=loaded_name, backend=backend_type)
             except Exception:
@@ -327,6 +328,7 @@ async def load_model(request: Request):
             info.visible_networks = body.get("visible_networks", [])
 
         node.capabilities.models = node.inference.loaded_models
+        node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
         await node.announce_capabilities()
         node.activity.record(EventType.MODEL_LOADED, model=loaded_name, backend=backend_type)
         return {"status": "loaded", "model": loaded_name, "backend": backend_type}
@@ -345,6 +347,7 @@ async def unload_model(request: Request):
 
     await node.inference.unload_model(model_name)
     node.capabilities.models = node.inference.loaded_models
+    node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
     await node.announce_capabilities()
     node.activity.record(EventType.MODEL_UNLOADED, model=model_name)
     return {"status": "unloaded", "model": model_name}
@@ -450,6 +453,7 @@ async def update_model(request: Request):
             ctx_len=config.get("ctx_len", 4096),
         )
         node.capabilities.models = node.inference.loaded_models
+        node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
         await node.announce_capabilities()
         node.activity.record(EventType.MODEL_LOADED, model=model_name, backend=backend_type)
         return {"status": "updated", "model": model_name}
@@ -483,6 +487,7 @@ async def reload_model(request: Request):
             ctx_len=config.get("ctx_len", 4096),
         )
         node.capabilities.models = node.inference.loaded_models
+        node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
         await node.announce_capabilities()
         node.activity.record(EventType.MODEL_LOADED, model=model_name, backend=backend_type)
         return {"status": "loaded", "model": model_name}
@@ -513,6 +518,7 @@ async def set_model_scope(request: Request):
 
     info.scope = scope
     node.capabilities.models = node.inference.loaded_models
+    node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
     await node.announce_capabilities()
 
     # Persist scope in saved config
@@ -541,6 +547,7 @@ async def remove_saved_config(request: Request):
     if model_name in {m.name for m in node.inference.loaded_models}:
         await node.inference.unload_model(model_name)
         node.capabilities.models = node.inference.loaded_models
+        node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
 
     from mycellm.config import get_settings
     await node.inference.remove_saved_config(model_name, get_settings().data_dir)
@@ -1120,6 +1127,7 @@ async def add_relay(request: Request):
 
     # Announce new models to the network
     node.capabilities.models = node.inference.loaded_models
+    node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
     await node.announce_capabilities()
 
     node.activity.record(EventType.MODEL_LOADED, model=f"relay:{relay.name}", backend="relay")
@@ -1151,6 +1159,7 @@ async def remove_relay(request: Request):
     removed = await node.relay_manager.remove(url)
     if removed:
         node.capabilities.models = node.inference.loaded_models
+        node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
         await node.announce_capabilities()
 
     return {"status": "removed" if removed else "not_found", "url": url}
@@ -1167,6 +1176,7 @@ async def refresh_relays(request: Request):
 
     if total > 0:
         node.capabilities.models = node.inference.loaded_models
+        node.capabilities.role = "seeder" if node.inference.loaded_models else "consumer"
         await node.announce_capabilities()
 
     return {"models_discovered": total, "relays": node.relay_manager.get_status()}
