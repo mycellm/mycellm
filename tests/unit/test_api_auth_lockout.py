@@ -6,8 +6,6 @@ unauthenticated localhost poller (menubar, keyless watchdog probe) could lock
 the supervisor then restart-looped a perfectly healthy node.
 """
 
-import time
-
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
