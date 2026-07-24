@@ -50,6 +50,12 @@ from mycellm.federation import FederationManager
 logger = logging.getLogger("mycellm")
 console = Console()
 
+# Per-bootstrap HTTP announce backoff. A bootstrap that keeps failing is skipped
+# for exponentially longer (doubling from the base, capped) so one dead host does
+# not slow the announce cadence for the healthy ones.
+ANNOUNCE_BACKOFF_BASE_S = 30.0
+ANNOUNCE_BACKOFF_MAX_S = 900.0
+
 
 class LogBroadcaster(logging.Handler):
     """Captures log records and broadcasts to SSE subscribers."""
@@ -174,6 +180,8 @@ class MycellmNode:
         self._selfheal_task = None
         self._force_announce: asyncio.Event | None = None
         self._addr_sig: tuple | None = None
+        # Per-bootstrap announce backoff: announce url -> (delay_s, skip_until_monotonic)
+        self._announce_backoff: dict[str, tuple[float, float]] = {}
 
     @property
     def uptime(self) -> float:
@@ -1565,7 +1573,9 @@ class MycellmNode:
     async def _announce_to_bootstrap(self) -> None:
         """Announce this node to bootstrap peers via HTTP API.
 
-        Runs as a long-lived background task. Must never crash.
+        Runs as a long-lived background task. Must never crash. Bootstraps that
+        keep failing are skipped with a per-host exponential backoff so they do
+        not hold up the cycle for the reachable ones.
         """
         import httpx
 
@@ -1625,6 +1635,15 @@ class MycellmNode:
                 else:
                     api_port = port if port != 8421 else 8420
                     url = f"http://{host}:{api_port}/v1/admin/nodes/announce"
+                # Skip hosts that are still backing off from earlier failures —
+                # healthy bootstraps keep the normal cadence regardless.
+                skip_for = self._announce_backoff_remaining(url)
+                if skip_for > 0:
+                    logger.debug(
+                        f"{styled_tag('NODE')} Skipping announce to {url} "
+                        f"(backing off, {skip_for:.0f}s left)"
+                    )
+                    continue
                 payload["node_name"] = self._settings.node_name
                 payload["system"] = sys_info
                 try:
@@ -1634,14 +1653,35 @@ class MycellmNode:
                         if resp.status_code == 200:
                             logger.info(f"{styled_tag('NODE')} Announced to bootstrap {url}")
                             self.activity.record(EventType.ANNOUNCE_OK, bootstrap=url)
+                            self._announce_backoff_reset(url)
                             any_ok = True
                         elif resp.status_code == 401:
-                            logger.warning(f"{styled_tag('SECURITY')} Bootstrap {url} rejected announce (bad API key)")
+                            delay = self._announce_backoff_bump(url)
+                            logger.warning(
+                                f"{styled_tag('SECURITY')} Bootstrap {url} rejected announce "
+                                f"(bad API key) — backing off {delay:.0f}s"
+                            )
+                            self.activity.record(
+                                EventType.ANNOUNCE_FAILED, bootstrap=url, reason="unauthorized", backoff_s=delay
+                            )
                         else:
-                            logger.warning(f"{styled_tag('NODE')} Announce to {url}: HTTP {resp.status_code}")
+                            delay = self._announce_backoff_bump(url)
+                            logger.warning(
+                                f"{styled_tag('NODE')} Announce to {url}: HTTP {resp.status_code} "
+                                f"— backing off {delay:.0f}s"
+                            )
+                            self.activity.record(
+                                EventType.ANNOUNCE_FAILED,
+                                bootstrap=url,
+                                reason=f"http_{resp.status_code}",
+                                backoff_s=delay,
+                            )
                 except Exception as e:
-                    logger.warning(f"{styled_tag('NODE')} Announce to {url} failed: {e}")
-                    self.activity.record(EventType.ANNOUNCE_FAILED, bootstrap=url, reason=str(e))
+                    delay = self._announce_backoff_bump(url)
+                    logger.warning(f"{styled_tag('NODE')} Announce to {url} failed: {e} — backing off {delay:.0f}s")
+                    self.activity.record(
+                        EventType.ANNOUNCE_FAILED, bootstrap=url, reason=str(e), backoff_s=delay
+                    )
             # Also send capabilities via QUIC to any live managed bootstrap connections.
             # This ensures the bootstrap's PeerRegistry stays current even when the
             # HTTP endpoint is unreachable (e.g. port bound to 127.0.0.1 inside Docker).
@@ -1668,6 +1708,28 @@ class MycellmNode:
                 logger.warning(f"{styled_tag('NODE')} Announce loop error: {e}")
                 interval = 30
 
+    def _announce_backoff_remaining(self, url: str) -> float:
+        """Seconds left before ``url`` may be announced to again (0 = due now)."""
+        entry = self._announce_backoff.get(url)
+        if entry is None:
+            return 0.0
+        _delay, skip_until = entry
+        return max(0.0, skip_until - time.monotonic())
+
+    def _announce_backoff_bump(self, url: str) -> float:
+        """Record a failed announce to ``url``; returns the new backoff delay."""
+        delay, _skip_until = self._announce_backoff.get(url, (0.0, 0.0))
+        delay = min(delay * 2 if delay else ANNOUNCE_BACKOFF_BASE_S, ANNOUNCE_BACKOFF_MAX_S)
+        self._announce_backoff[url] = (delay, time.monotonic() + delay)
+        return delay
+
+    def _announce_backoff_reset(self, url: str | None = None) -> None:
+        """Clear the backoff for ``url``, or for every bootstrap when omitted."""
+        if url is None:
+            self._announce_backoff.clear()
+        else:
+            self._announce_backoff.pop(url, None)
+
     async def _wait_or_forced(self, timeout: float) -> None:
         """Sleep up to ``timeout`` seconds, or wake immediately if a forced
         re-announce was requested (and consume the request)."""
@@ -1679,6 +1741,13 @@ class MycellmNode:
             await asyncio.wait_for(ev.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             return
+        else:
+            # Address-change self-heal: our old address is likely why a bootstrap
+            # was failing, so re-announce everywhere immediately — including hosts
+            # currently in backoff.
+            if self._announce_backoff:
+                logger.debug(f"{styled_tag('NODE')} Forced re-announce — clearing per-bootstrap backoff")
+            self._announce_backoff_reset()
         finally:
             ev.clear()
 
