@@ -71,7 +71,9 @@ dev = [
     "pytest-asyncio",
     "pytest-anyio",
     "httpx>=0.27",
-    "ruff",
+    # 0.16 turned on a much wider default rule set (I, BLE, ...) than the tree
+    # is linted against; pin until we opt into it explicitly via [tool.ruff.lint].
+    "ruff>=0.15,<0.16",
 ]
 
 [project.scripts]
