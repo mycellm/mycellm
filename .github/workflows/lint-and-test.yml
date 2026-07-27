@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install package and dev tools
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,training]"
 
       - name: Ruff check
         run: ruff check src tests
@@ -73,7 +73,7 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install package and dev tools
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,training]"
 
       - name: Pytest (multi-node E2E)
         run: pytest tests/e2e/test_three_nodes.py -v --tb=short
