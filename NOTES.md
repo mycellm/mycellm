@@ -1,38 +1,93 @@
-# Ticket: "Isolate unit tests from the host's real mycellm config; fix the ruff F401"
+# Ticket: land `feat/distributed-training` as a conflict-free merge candidate
 
-**Outcome: no code change needed — every acceptance criterion is already met on `main`
-(0.6.2, `3ee2788`). This branch carries only this note.**
+**Outcome: `feat/distributed-training` merged cleanly into a branch forked from
+`main`. 3 conflicts resolved by hand (documented below); everything else
+auto-merged. Merging this branch into `main` itself is still the human's call —
+not done here.**
 
-## Why there is no diff
+## Why this needed a human-reviewed merge instead of a fast-forward
 
-Both halves of the ticket landed in earlier commits:
+`main` had already picked up part of F3 independently (the `TRAIN_RESULT`
+envelope type, `node.py`'s `train.status` command, and the F2-era
+`training/aggregate.py`/`round.py` core) via earlier landed branches, while
+`feat/distributed-training` grew its own copy of the same files plus the new
+`training/session.py` QUIC wiring. Same files, independent history → git saw
+three `add/add` conflicts and one content conflict. None of them are logic
+conflicts — in every case one side is a strict superset of the other.
 
-- **Host-config isolation** — `40599fa` / `b8a36da` (and `36e2039` before them) added the
-  autouse `hermetic_settings` fixture in `tests/conftest.py` and `tests/unit/conftest.py`.
-  It scrubs every ambient `MYCELLM_*` var with `monkeypatch.delenv`, clears
-  `MycellmSettings.model_config["env_file"]` (which is resolved from the XDG config dir at
-  class-definition time, so an env var alone cannot neutralise it), and clears the
-  `get_settings` LRU cache either side of each test.
-- **The F401** — `tests/unit/test_api_auth_lockout.py` has no `import time`; the file's
-  imports are `pytest`, `fastapi`, `httpx`, `mycellm.api.app`. It was removed in
-  `461e31e` ("fix(api): valid API key beats the per-IP lockout"). `ruff check --select F401
-  src tests` is clean under the pinned ruff 0.15.7.
+## The 3 conflict resolutions
 
-## Verification run on this host (which has a populated `~/.config/mycellm/.env`
-setting `MYCELLM_QUIC_HOST=0.0.0.0`)
+### 1. `src/mycellm/training/__init__.py`, `aggregate.py`, `round.py` (add/add)
+
+Diffed `main`'s copy against `feat/distributed-training`'s copy directly
+(`git show main:<path>` vs `git show feat/distributed-training:<path>`) rather
+than trusting the conflict markers, since add/add conflicts don't show a common
+ancestor. Confirmed `feat/distributed-training`'s versions are strict supersets:
+
+- `aggregate.py`: same file, plus `_validate_shapes` renamed to the public
+  `validate_update` (needed by `session.py`'s coordinator to validate an
+  update on arrival, not just inside `federated_average`).
+- `round.py`: same file, plus `build_train_result_payload` /
+  `parse_train_result_payload` for the `TRAIN_RESULT` wire payload.
+- `__init__.py`: re-exports the above plus `training/session.py`'s
+  `LocalTrainer`, `LocalUpdate`, `RoundOutcome`, `TrainingCoordinator`,
+  `TrainingParticipant`.
+
+Resolved with `git checkout --theirs` (`theirs` = `feat/distributed-training`,
+the merge parent) for all three files — no manual splicing, since the whole
+file is a superset. `training/codec.py` and `tests/unit/test_training_aggregate.py`
+were byte-identical on both sides and auto-merged with no conflict.
+
+### 2. `tests/unit/test_security.py` (content conflict)
+
+Both branches independently fixed the same host-config-leakage hermeticity gap
+(the module reads `~/.config/mycellm/.env`, so an operator's real
+`MYCELLM_QUIC_HOST=0.0.0.0` was leaking into "assert the shipped default"
+tests), but with different mechanisms:
+
+- `main`: fixed at the `tests/conftest.py` / `tests/unit/conftest.py` layer —
+  an autouse fixture scrubs `MYCELLM_*` and neutralises the XDG `.env` for
+  every test in the suite, so individual test files stay untouched
+  (`MycellmSettings(_env_file=None)`, same as before hermeticity was a concern).
+- `feat/distributed-training`: fixed locally in this one file with a
+  per-file `defaults` fixture + `monkeypatch`.
+
+Per the acceptance criteria, hermeticity belongs in the autouse conftest
+fixtures, not scattered per-file. Resolved by taking `main`'s file verbatim
+(overwrote with `git show main:tests/unit/test_security.py`) — confirmed with
+`git diff main -- tests/unit/test_security.py` (empty). `feat`'s duplicate
+fixture is dropped; the conftest-level fixture already covers this file.
+
+### 3. `src/mycellm/node.py`, `protocol/envelope.py`, `transport/messages.py` (auto-merged, no markers)
+
+No conflict, but worth recording what came from where since these are in the
+F3 acceptance criteria: `envelope.py`'s `TRAIN_RESULT` enum member and
+`node.py`'s `train.status` command were already on `main` (landed ahead of
+this merge). The merge only added `transport/messages.py`'s `train_result()`
+builder — `feat/distributed-training`'s only new content in that file, needed
+by `training/session.py`'s `TrainingCoordinator._publish_result`.
+
+`training/session.py` is intentionally NOT wired into `node.py`'s peer-message
+dispatch — its own module docstring says hooking it up is "a single dispatch
+arm" left for later, and real on-device training, adapter distribution over
+the F2 chunk transport, and credit receipts are all explicitly deferred. This
+lands the tested foundation, not the wiring.
+
+## Verification run in this worktree
 
 | Command | Result |
 | --- | --- |
-| `python -m pytest tests/unit -q` | 641 passed |
-| synthetic `XDG_CONFIG_HOME` with `mycellm/.env` (`MYCELLM_QUIC_HOST=0.0.0.0`, `MYCELLM_API_HOST=0.0.0.0`) | 641 passed |
-| same, **plus** ambient `MYCELLM_QUIC_HOST` / `MYCELLM_API_PORT` / `MYCELLM_PUBLIC` exported | 641 passed |
-| `python -m pytest -q` (full suite) | 680 passed |
+| `git merge-base --is-ancestor main HEAD` | pass (fast-forwardable) |
+| `git diff --name-only --diff-filter=D main..HEAD` | empty (no file deleted) |
+| `git diff main -- tests/unit/test_security.py` | empty |
+| `grep ruff pyproject.toml` | `ruff>=0.15,<0.16` kept, comment intact |
+| `git grep '^<<<<<<<'` (src/tests/docs/examples/pyproject.toml) | no matches |
 | `ruff check src tests` | All checks passed |
-| `git diff main...HEAD --name-only -- src web` | empty |
+| `pytest tests/unit tests/integration tests/e2e/test_harness.py -q` | 682 passed, 2 skipped |
 
-## Optional follow-up (not done — out of ticket scope)
+## Not done here (human's call)
 
-`tests/unit/conftest.py` is a byte-for-byte copy of the fixture in `tests/conftest.py`.
-Since the root conftest already applies to `tests/unit`, the unit-level copy only shadows
-it and could be deleted. Left alone deliberately: it is harmless, and removing it is a
-separate cleanup rather than part of this ticket.
+Merging `agent/land-distributed-training` into `main`, pushing, tagging, or
+bumping the version. `main` is already 29 commits ahead of `origin/main` and
+unpushed, and per project procedures workers don't merge/deploy — this branch
+is staged as a fast-forward-ready candidate for the human to merge.
