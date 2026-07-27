@@ -56,7 +56,13 @@ class ParticipantUpdate:
             raise AggregationError(f"num_samples must be >= 0, got {self.num_samples}")
 
 
-def _validate_shapes(base: Adapter, update: ParticipantUpdate) -> None:
+def validate_update(base: Adapter, update: ParticipantUpdate) -> None:
+    """Raise AggregationError unless `update` matches the round's base adapter.
+
+    Called by federated_average before averaging, and by the coordinator's
+    transport layer on arrival so one malformed participant is dropped from the
+    round instead of failing the whole aggregation.
+    """
     missing = set(base) - set(update.delta)
     extra = set(update.delta) - set(base)
     if missing or extra:
@@ -95,7 +101,7 @@ def federated_average(
         raise AggregationError("no participant updates with samples > 0")
 
     for u in usable:
-        _validate_shapes(base, u)
+        validate_update(base, u)
 
     total = sum(u.num_samples for u in usable)
     result: Adapter = {}
