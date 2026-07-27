@@ -85,6 +85,21 @@ lands the tested foundation, not the wiring.
 | `ruff check src tests` | All checks passed |
 | `pytest tests/unit tests/integration tests/e2e/test_harness.py -q` | 682 passed, 2 skipped |
 
+The two tool commands are run as `.venv/bin/ruff` / `.venv/bin/python`, so they
+need a venv **inside this worktree** — a git worktree does not inherit the
+`.venv/` of the checkout it was branched from (and pointing at the parent
+checkout's editable install would import `mycellm` from *that* tree's `src/`,
+not this branch's). Recreate it with:
+
+```bash
+python3 -m venv .venv
+PIP_USER=0 .venv/bin/pip install -e ".[dev,training]"   # PIP_USER=0: the host sets PIP_USER=1, which pip refuses inside a venv
+```
+
+`.venv/` is gitignored, so this is worktree setup, not a tracked change. The
+`training` extra is what supplies numpy; without it the F3 tests would silently
+`importorskip` away rather than run.
+
 ## Not done here (human's call)
 
 Merging `agent/land-distributed-training` into `main`, pushing, tagging, or
