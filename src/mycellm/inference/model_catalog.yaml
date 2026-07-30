@@ -24,9 +24,65 @@
 # llama.cpp backend doesn't wire an mmproj vision projector, and the iOS app
 # still uses the text-only prompt path. See mlx_vlm.py / multimodal status.
 
-catalog_version: "2026-06-07"
+catalog_version: "2026-07-30"
 
 models:
+  - family: qwen3.5-9b
+    description: "Qwen 3.5 9B — strong general chat/reasoning for 16GB nodes (hybrid attention; no speculative decoding)"
+    roles: [reasoning, coding, chat]
+    param_count_b: 9.0
+    variants:
+      - format: mlx
+        repo: lmstudio-community/Qwen3.5-9B-MLX-4bit
+        quant: 4bit
+        size_gb: 6.0
+        ram_gb: 8
+        platforms: [darwin-arm64]
+      - format: gguf
+        repo: unsloth/Qwen3.5-9B-GGUF
+        file: Qwen3.5-9B-Q4_K_M.gguf
+        quant: Q4_K_M
+        size_gb: 5.7
+        ram_gb: 8
+        platforms: [linux-x86_64, linux-aarch64, darwin-arm64, win-x86_64]
+
+  - family: qwen3.5-2b
+    description: "Qwen 3.5 2B — capable small model for 8GB nodes and edge devices"
+    roles: [chat, edge]
+    param_count_b: 2.0
+    variants:
+      - format: mlx
+        repo: mlx-community/Qwen3.5-2B-4bit
+        quant: 4bit
+        size_gb: 1.8
+        ram_gb: 3
+        platforms: [darwin-arm64]
+
+  - family: qwen3-1.7b
+    description: "Qwen 3 1.7B — tiny, fast; the fleet's default test/benchmark model"
+    roles: [chat, edge]
+    param_count_b: 1.7
+    variants:
+      - format: mlx
+        repo: mlx-community/Qwen3-1.7B-4bit
+        quant: 4bit
+        size_gb: 1.0
+        ram_gb: 2
+        platforms: [darwin-arm64]
+
+  - family: minilm-l6-embeddings
+    description: "all-MiniLM-L6-v2 — 384-dim sentence embeddings, near-zero footprint"
+    modalities: [text, embedding]
+    roles: [embeddings]
+    param_count_b: 0.023
+    variants:
+      - format: mlx
+        repo: mlx-community/all-MiniLM-L6-v2-4bit
+        quant: 4bit
+        size_gb: 0.02
+        ram_gb: 1
+        platforms: [darwin-arm64]
+
   - family: qwen3.6-35b-a3b
     description: "Qwen 3.6 35B-A3B MoE — 3B active params, strong agentic coding"
     roles: [reasoning, coding, agentic]

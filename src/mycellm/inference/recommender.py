@@ -32,6 +32,8 @@ def _resolve_backend(fmt: str, modalities: list[str]) -> str:
     backend = FORMAT_BACKEND.get(fmt, fmt)
     if fmt == "mlx" and "image" in modalities:
         return "mlx-vlm"
+    if fmt == "mlx" and "embedding" in modalities:
+        return "mlx-embeddings"
     return backend
 
 
@@ -144,6 +146,10 @@ def recommend(
 
     for fam in catalog.get("models", []):
         if role_filter and role_filter not in fam.get("roles", []):
+            continue
+        # Embedding-only families can't chat — never surface them in general
+        # suggestions (which feed auto-load); require asking for them by role.
+        if "embedding" in fam.get("modalities", []) and role_filter != "embeddings":
             continue
 
         family_name = fam.get("family", "")
