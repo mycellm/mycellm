@@ -37,6 +37,20 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 - MLX non-streaming completion token counts are measured after stop
   truncation (previously counted the stop marker).
 
+- **Runtime memory-pressure watcher.** Kernel WARN clears the MLX Metal
+  cache; CRITICAL evicts idle local models (newest-first survivor, escalating
+  to all models on consecutive criticals) before the OOM killer hard-kills
+  the node. Evicted models stay enabled and restore on the next boot.
+  `MYCELLM_MEMORY_WATCH_*`, default on.
+- **Empirical preflight calibration.** `scripts/bench_context_calibration.py`
+  sweeps real context lengths, linear-fits measured vs predicted KV memory,
+  and (with `--apply`) writes a per-node `kv_factor` the preflight estimator
+  picks up. Hokulea M1 validation: analytical model confirmed (slope 0.87 +
+  0.66GB constant transient inside the 1GB overhead reserve).
+- **Configurable prefill chunking.** `MYCELLM_MLX_PREFILL_STEP_SIZE` plumbs
+  mlx-lm's prefill_step_size through both MLX backends so memory-tight nodes
+  can shrink the prefill transient.
+
 ### Changed
 - Dependency floors raised: `llama-cpp-python>=0.3.34`, `mlx-vlm>=0.6.8`
   (validated with mlx 0.32.0 + mlx-lm 0.31.3 on M1).
