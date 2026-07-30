@@ -74,3 +74,39 @@ def test_estimate_none_without_ceiling(tmp_path):
     p = _write_config(tmp_path, num_hidden_layers=36, num_attention_heads=16,
                       num_key_value_heads=2, hidden_size=2048)
     assert me.estimate(p, 4096, ceiling_bytes=0) is None
+
+
+class TestCalibration:
+    def test_kv_factor_scales_prediction(self, tmp_path):
+        p = _write_config(tmp_path, num_hidden_layers=36, num_attention_heads=16,
+                          num_key_value_heads=2, hidden_size=2048)
+        base = me.estimate(p, 8192, weights_bytes=GB, ceiling_bytes=12 * GB, kv_factor=1.0)
+        cal = me.estimate(p, 8192, weights_bytes=GB, ceiling_bytes=12 * GB, kv_factor=1.5)
+        assert cal["kv_bytes"] == int(base["kv_bytes_per_token"] * 1.5) * 8192
+        assert cal["max_ctx_len"] < base["max_ctx_len"]
+        assert cal["kv_factor"] == 1.5
+
+    def test_calibration_file_loaded(self, tmp_path, monkeypatch):
+        import json
+        from types import SimpleNamespace
+        import mycellm.inference.memory_estimate as mod
+        (tmp_path / "preflight_calibration.json").write_text(json.dumps({"kv_factor": 1.3}))
+        import mycellm.config as cfg
+        monkeypatch.setattr(cfg, "get_settings", lambda: SimpleNamespace(data_dir=tmp_path))
+        assert mod.load_calibration() == 1.3
+
+    def test_out_of_range_factor_ignored(self, tmp_path, monkeypatch):
+        import json
+        from types import SimpleNamespace
+        import mycellm.inference.memory_estimate as mod
+        (tmp_path / "preflight_calibration.json").write_text(json.dumps({"kv_factor": 9.0}))
+        import mycellm.config as cfg
+        monkeypatch.setattr(cfg, "get_settings", lambda: SimpleNamespace(data_dir=tmp_path))
+        assert mod.load_calibration() == 1.0
+
+    def test_missing_file_is_neutral(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+        import mycellm.inference.memory_estimate as mod
+        import mycellm.config as cfg
+        monkeypatch.setattr(cfg, "get_settings", lambda: SimpleNamespace(data_dir=tmp_path))
+        assert mod.load_calibration() == 1.0

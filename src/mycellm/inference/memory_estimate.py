@@ -172,6 +172,30 @@ def metal_ceiling_bytes() -> int:
     return 0
 
 
+def load_calibration() -> float:
+    """Measured-vs-predicted peak factor from bench_context_calibration.py.
+
+    The analytical model was hand-validated on three models; an empirical sweep
+    on the actual hardware (scripts/bench_context_calibration.py --apply)
+    writes data_dir/preflight_calibration.json with the worst-case
+    measured/predicted ratio, and estimate() scales its KV prediction by it.
+    Missing/invalid file → 1.0 (pure analytical model).
+    """
+    try:
+        from mycellm.config import get_settings
+
+        path = get_settings().data_dir / "preflight_calibration.json"
+        if not path.exists():
+            return 1.0
+        import json
+
+        factor = float(json.loads(path.read_text()).get("kv_factor", 1.0))
+        # A corrupt or wildly out-of-range file must not brick preflight.
+        return factor if 0.5 <= factor <= 4.0 else 1.0
+    except Exception:
+        return 1.0
+
+
 def estimate(
     model_path: str,
     ctx_len: int,
@@ -181,6 +205,7 @@ def estimate(
     overhead_bytes: int = _GB,
     safety_fraction: float = 0.90,
     ceiling_bytes: int | None = None,
+    kv_factor: float | None = None,
 ) -> dict | None:
     """Estimate load+serve peak memory and whether it fits the GPU ceiling.
 
@@ -201,7 +226,8 @@ def estimate(
         weights_bytes = resolve_weights_bytes(model_path)
 
     slots = max(1, int(batch_slots))
-    per_tok = kv_bytes_per_token(dims)
+    factor = load_calibration() if kv_factor is None else float(kv_factor)
+    per_tok = int(kv_bytes_per_token(dims) * factor)
     kv = per_tok * max(0, int(ctx_len)) * slots
     peak = int(weights_bytes) + kv + int(overhead_bytes)
     budget = int(ceiling * safety_fraction)
@@ -211,6 +237,7 @@ def estimate(
 
     return {
         "dims": dims,
+        "kv_factor": factor,
         "kv_bytes_per_token": per_tok,
         "weights_bytes": int(weights_bytes),
         "kv_bytes": kv,
