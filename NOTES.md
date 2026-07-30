@@ -137,3 +137,17 @@ Chunked prefill knob (mlx_prefill_step_size): 16k prompt on Qwen3-1.7B-4bit,
 step 2048 → peak 3.09GB/61.9s; step 512 → 3.04GB/63.9s. Small win on a small
 model — transient scales with hidden size, so the knob is for big models near
 the ceiling. Default 0 (mlx-lm's 2048).
+
+## Speculative decoding measurements (2026-07-30, hokulea M1 16GB)
+
+mlx-lm 0.31.3 draft-model speculative decoding, num_draft_tokens=3, greedy:
+- Qwen3-1.7B-4bit + Qwen3-0.6B draft: 31.5 vs 51.3 tok/s baseline (63% accept) — SLOWER
+- Qwen3-8B-4bit + Qwen3-0.6B draft: 9.9 vs 12.5 tok/s baseline (58% accept) — SLOWER
+- Qwen3.5-9B (hybrid/ArraysCache): unsupported upstream — "requires a trimmable
+  prompt cache" (linear-attention layers can't rewind).
+
+Conclusion: two-model drafting does not pay on M1-class hardware with mlx-lm
+0.31.3; oMLX's wins come from MTP-head drafting (Lightning MTP), which needs
+MTP checkpoints and custom kernels. Feature is opt-in (`draft_model` load
+option), correct, and left off by default. Revisit on M3/M4 nodes or when
+mlx-lm grows MTP support.

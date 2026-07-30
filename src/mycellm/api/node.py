@@ -295,6 +295,8 @@ async def load_model(request: Request):
                     ctx_len=body.get("ctx_len", 4096), timeout=body.get("timeout", 120),
                     quant=body.get("quant", ""),
                     max_kv_size=body.get("max_kv_size", 0),
+                    draft_model=body.get("draft_model", ""),
+                    num_draft_tokens=body.get("num_draft_tokens", 3),
                 )
                 scope = body.get("scope", "home")
                 info = node.inference._model_info.get(loaded_name)

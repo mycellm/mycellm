@@ -302,6 +302,8 @@ class InferenceManager:
         self._model_max_kv: dict[str, int] = {}
         # Last request activity per model (memory-pressure eviction ranking)
         self._last_used: dict[str, float] = {}
+        # Per-model speculative-decoding config: name -> (draft_model, num_draft_tokens)
+        self._model_draft: dict[str, tuple[str, int]] = {}
         # Models disabled by the crash-loop guard this process lifetime
         self._quarantined: set[str] = set()
         # Load status tracking
@@ -555,6 +557,13 @@ class InferenceManager:
                 self._model_max_kv[model_name] = _mk
             else:
                 self._model_max_kv.pop(model_name, None)
+            _draft = str(kwargs.get("draft_model") or "")
+            if _draft:
+                self._model_draft[model_name] = (
+                    _draft, int(kwargs.get("num_draft_tokens") or 3)
+                )
+            else:
+                self._model_draft.pop(model_name, None)
 
             elapsed = _time.time() - self._load_status[model_name]["started_at"]
             self._load_status[model_name].update({"status": "ready", "phase": "loaded", "elapsed": round(elapsed, 1)})
@@ -819,6 +828,8 @@ class InferenceManager:
                 config["model_path"] = self._model_paths[name]
             if self._model_max_kv.get(name):
                 config["max_kv_size"] = self._model_max_kv[name]
+            if name in self._model_draft:
+                config["draft_model"], config["num_draft_tokens"] = self._model_draft[name]
             from mycellm.inference.openai_compat import OpenAICompatibleBackend
             if isinstance(backend, OpenAICompatibleBackend):
                 remote = backend._models.get(name)
@@ -916,6 +927,8 @@ class InferenceManager:
                             ctx_len=config.get("ctx_len", _default_ctx),
                             quant=config.get("quant", ""),
                             max_kv_size=config.get("max_kv_size", 0),
+                            draft_model=config.get("draft_model", ""),
+                            num_draft_tokens=config.get("num_draft_tokens", 3),
                         )
                     else:
                         logger.warning(f"Model file missing for '{name}': {model_path}")
