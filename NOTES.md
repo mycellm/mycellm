@@ -106,3 +106,21 @@ Merging `agent/land-distributed-training` into `main`, pushing, tagging, or
 bumping the version. `main` is already 29 commits ahead of `origin/main` and
 unpushed, and per project procedures workers don't merge/deploy — this branch
 is staged as a fast-forward-ready candidate for the human to merge.
+
+## Dependency-roll baseline (2026-07-30, chore/deps-2026-07)
+
+Stack: mlx 0.32.0, mlx-lm 0.31.3, mlx-vlm 0.6.8, llama-cpp-python 0.3.34,
+cbor2 6.1.3 (arm64) / 5.8.0 pinned locally (Intel cp314 has no 6.x wheel).
+Unit suite: 654 green on hokulea (arm64+MLX), 652+2 skipped on Intel dev box.
+
+bench_mlx_batching.py, hokulea M1 16GB, Qwen3-1.7B-4bit, max_tokens=80:
+
+  conc |  seq tok/s | batch tok/s | speedup
+     1 |       48.6 |        49.9 |   1.03x
+     2 |       47.6 |        72.2 |   1.52x
+     4 |       47.0 |        76.0 |   1.62x
+     8 |       47.2 |        68.7 |   1.45x
+    16 |       47.4 |       114.3 |   2.41x
+
+Live hokulea venv rolled to same stack 2026-07-30; node restarted healthy
+(no local model was enabled before or after — fleet/relay serving only).

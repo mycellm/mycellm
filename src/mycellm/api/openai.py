@@ -40,24 +40,50 @@ def _parse_tool_call_xml(text: str) -> list | None:
             payload = match.group(1)
             if payload in seen_payloads:
                 continue
-            try:
-                data = json.loads(payload)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            if not isinstance(data, dict) or "name" not in data:
-                continue
-            seen_payloads.add(payload)
-            arguments = data.get("arguments", {})
-            if isinstance(arguments, dict):
-                arguments = json.dumps(arguments)
-            elif not isinstance(arguments, str):
-                arguments = json.dumps(arguments)
-            tool_calls.append({
-                "id": f"call_{uuid.uuid4().hex[:16]}",
-                "type": "function",
-                "function": {"name": data["name"], "arguments": arguments},
-            })
+            _collect_tool_call(payload, seen_payloads, tool_calls)
+    if not tool_calls:
+        _recover_truncated_tool_call(text, seen_payloads, tool_calls)
     return tool_calls if tool_calls else None
+
+
+def _collect_tool_call(payload: str, seen_payloads: set, tool_calls: list) -> None:
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, AttributeError):
+        return
+    if not isinstance(data, dict) or "name" not in data:
+        return
+    seen_payloads.add(payload)
+    arguments = data.get("arguments", {})
+    if not isinstance(arguments, str):
+        arguments = json.dumps(arguments)
+    tool_calls.append({
+        "id": f"call_{uuid.uuid4().hex[:16]}",
+        "type": "function",
+        "function": {"name": data["name"], "arguments": arguments},
+    })
+
+
+_TOOLCALL_UNCLOSED_RE = re.compile(r"<tool_call>\s*(\{.*)$", re.DOTALL)
+
+
+def _recover_truncated_tool_call(text: str, seen_payloads: set, tool_calls: list) -> None:
+    """Salvage a tool call whose envelope was cut off by max_tokens.
+
+    Generation can end mid-closing-marker ("...}</tool_ca") or right after the
+    JSON body. If an opening <tool_call> has no closing tag, strip any partial
+    closing-tag fragment and try the remaining payload as JSON.
+    """
+    m = _TOOLCALL_UNCLOSED_RE.search(text)
+    if not m:
+        return
+    payload = m.group(1).strip()
+    closing = "</tool_call>"
+    for k in range(len(closing), 0, -1):
+        if payload.endswith(closing[:k]):
+            payload = payload[: -k].rstrip()
+            break
+    _collect_tool_call(payload, seen_payloads, tool_calls)
 
 
 def _resolve_reasoning_exclude(body_reasoning: dict | None) -> bool:
@@ -139,6 +165,10 @@ class ChatCompletionRequest(BaseModel):
     # max_tokens by the validator below, so all downstream reads are unchanged).
     max_completion_tokens: Optional[int] = None
     stream: bool = False
+    # {"include_usage": true} → final SSE chunk with empty choices + exact
+    # usage, per OpenAI spec. Agents (Claude Code etc.) rely on this for
+    # deterministic context-window accounting.
+    stream_options: dict | None = None
     top_p: float = 1.0
     stop: list[str] | str | None = None
     frequency_penalty: float = 0
@@ -502,6 +532,26 @@ def _chunk_envelope(chunk_id: str, model: str, delta: dict, finish: str | None =
     })
 
 
+def _usage_envelope(chunk_id: str, model: str, prompt_tokens: int, completion_tokens: int) -> str:
+    """Trailing usage chunk (stream_options.include_usage): empty choices +
+    exact token counts. Only emitted when the backend reported real numbers —
+    a missing usage block beats a fabricated one."""
+    return json.dumps({
+        "id": chunk_id, "object": "chat.completion.chunk",
+        "created": int(time.time()), "model": model,
+        "choices": [],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    })
+
+
+def _wants_usage(body: "ChatCompletionRequest") -> bool:
+    return bool((body.stream_options or {}).get("include_usage"))
+
+
 async def _stream_response(node, body: ChatCompletionRequest, messages: list[dict]):
     """Stream response via SSE."""
     from sse_starlette.sse import EventSourceResponse
@@ -672,16 +722,25 @@ async def _stream_local_model(
         elif result.text:
             yield _envelope({"content": result.text})
         yield _envelope({}, finish=result.finish_reason)
+        if _wants_usage(body):
+            yield _usage_envelope(
+                chunk_id, model_name, result.prompt_tokens, result.completion_tokens
+            )
         _record_complete()
         return
 
     got_tool_calls = False
+    usage_seen: dict = {}
 
     def _emit_chunk(chunk_val):
         """Feed a streaming InferenceChunk through the think-splitter and
         yield SSE envelopes. May produce 0, 1, or multiple envelopes per
         input chunk (one input token can straddle a <think> boundary)."""
         nonlocal got_tool_calls
+        if chunk_val.prompt_tokens is not None:
+            usage_seen["prompt_tokens"] = chunk_val.prompt_tokens
+        if chunk_val.completion_tokens is not None:
+            usage_seen["completion_tokens"] = chunk_val.completion_tokens
         if chunk_val.tool_calls:
             got_tool_calls = True
             yield _envelope({"tool_calls": chunk_val.tool_calls}, finish="tool_calls")
@@ -776,6 +835,12 @@ async def _stream_local_model(
 
     # Final chunk — use "tool_calls" finish_reason if model called a tool
     yield _envelope({}, finish=("tool_calls" if got_tool_calls else "stop"))
+    if _wants_usage(body) and "completion_tokens" in usage_seen:
+        yield _usage_envelope(
+            chunk_id, model_name,
+            usage_seen.get("prompt_tokens", 0),
+            usage_seen["completion_tokens"],
+        )
     _record_complete()
 
 
@@ -1329,6 +1394,9 @@ async def list_models(request: Request):
             "object": "model",
             "created": int(time.time()),
             "owned_by": "local",
+            # Effective (post-preflight-clamp) window — lets agents size
+            # their context/auto-compaction deterministically.
+            "context_length": m.ctx_len,
         })
 
     seen = {normalize_model_name(m.name) for m in node.inference.loaded_models}
@@ -1343,6 +1411,7 @@ async def list_models(request: Request):
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": f"peer:{entry.peer_id[:8]}",
+                    "context_length": m.ctx_len,
                 })
                 seen.add(display)
 

@@ -58,7 +58,7 @@ from mycellm.inference.base import (
     InferenceResult,
     flatten_message_content,
 )
-from mycellm.inference.mlx import chat_stop_strings, truncate_at_stops
+from mycellm.inference.mlx import chat_stop_strings, stop_holdback_len, truncate_at_stops
 
 logger = logging.getLogger("mycellm.inference")
 
@@ -76,7 +76,7 @@ class _Job:
 
     __slots__ = (
         "tokens", "max_tokens", "sampler", "stop", "loop", "chunks",
-        "uid", "emitted_text", "all_token_ids", "prompt_tokens",
+        "uid", "emitted_text", "sent_len", "all_token_ids", "prompt_tokens",
         "finished", "error",
     )
 
@@ -89,6 +89,7 @@ class _Job:
         self.chunks: asyncio.Queue = chunks  # InferenceChunk | None (None = done)
         self.uid: Any = None
         self.emitted_text: str = ""
+        self.sent_len: int = 0  # chars of emitted_text already sent (stop-holdback)
         self.all_token_ids: list[int] = []
         self.prompt_tokens: int = len(tokens)
         self.finished: bool = False
@@ -110,6 +111,11 @@ class BatchedMLXBackend(InferenceBackend):
         self._path = ""
         self._completion_batch_size = completion_batch_size
         self._prefill_batch_size = prefill_batch_size
+        # Bounded (rotating) KV cache: caps per-sequence KV memory at this many
+        # tokens (older entries are overwritten). None = unbounded. Set per
+        # model via load kwarg `max_kv_size`; mutually exclusive with
+        # speculative decoding (rotating caches can't rewind).
+        self._max_kv_size: int | None = None
         # When True, a request that arrives with nothing else in flight is
         # decoded on mlx-lm's single-stream path instead of a batch-of-1.
         # Default False: benchmarked on M1 / mlx-lm 0.31.3 (scripts/
@@ -133,6 +139,7 @@ class BatchedMLXBackend(InferenceBackend):
         from mlx_lm import load as mlx_load
 
         self._model_name = kwargs.get("name") or Path(model_path).name
+        self._max_kv_size = int(kwargs.get("max_kv_size") or 0) or None
         target = model_path
         if Path(model_path).is_dir():
             target = str(Path(model_path).resolve())
@@ -220,6 +227,7 @@ class BatchedMLXBackend(InferenceBackend):
             stop_tokens=[[t] for t in self._tokenizer.eos_token_ids],
             completion_batch_size=self._completion_batch_size,
             prefill_batch_size=self._prefill_batch_size,
+            max_kv_size=self._max_kv_size,
         )
         uid_map: dict[Any, _Job] = {}
 
@@ -302,6 +310,7 @@ class BatchedMLXBackend(InferenceBackend):
             prompt=mx.array(original_prompt),
             max_tokens=job.max_tokens,
             sampler=job.sampler,
+            max_kv_size=self._max_kv_size,
         ):
             if not self._running:
                 self._emit(job, None)  # unblock the consumer on shutdown
@@ -316,14 +325,8 @@ class BatchedMLXBackend(InferenceBackend):
 
             if text:
                 job.emitted_text += text
-                cut, hit = truncate_at_stops(job.emitted_text, job.stop)
-                if hit:
-                    tail = cut[len(job.emitted_text) - len(text):]
-                    if tail:
-                        self._emit(job, InferenceChunk(text=tail))
-                    self._finish(gen, uid_map, job, "stop")
+                if self._stream_progress(gen, uid_map, job):
                     return True
-                self._emit(job, InferenceChunk(text=text))
 
             if finish is not None:
                 self._finish(gen, uid_map, job, finish)
@@ -340,6 +343,7 @@ class BatchedMLXBackend(InferenceBackend):
                 # detokenization seam glitch is possible but bounded; escalation
                 # is rare — only when a 2nd request lands mid-solo-decode).
                 job.emitted_text = self._tokenizer.decode(job.all_token_ids)
+                job.sent_len = min(job.sent_len, len(job.emitted_text))
                 return False
 
         # stream_generate exhausted without an explicit finish_reason.
@@ -351,27 +355,52 @@ class BatchedMLXBackend(InferenceBackend):
         if r.finish_reason != "stop" and r.token is not None:
             job.all_token_ids.append(r.token)
             full = self._tokenizer.decode(job.all_token_ids)
-            delta = full[len(job.emitted_text):]
-            if delta:
+            if len(full) > len(job.emitted_text):
                 job.emitted_text = full
                 # Custom stop-string handling (token-level stop covers eos only).
-                cut, hit = truncate_at_stops(job.emitted_text, job.stop)
-                if hit:
-                    tail = cut[len(job.emitted_text) - len(delta):]
-                    if tail:
-                        self._emit(job, InferenceChunk(text=tail))
-                    self._finish(gen, uid_map, job, "stop")
+                if self._stream_progress(gen, uid_map, job):
                     return
-                self._emit(job, InferenceChunk(text=delta))
 
         if r.finish_reason is not None:
             self._finish(gen, uid_map, job, r.finish_reason)
 
+    def _stream_progress(self, gen, uid_map: dict, job: _Job) -> bool:
+        """Emit the unsent portion of job.emitted_text, honoring stop strings.
+
+        A tail that is a prefix of a stop string is withheld until the next
+        token disambiguates it (streamed text cannot be recalled once sent);
+        _finish flushes a withheld tail that never completed a stop.
+        Returns True when a stop string matched and the job was finished.
+        """
+        cut, hit = truncate_at_stops(job.emitted_text, job.stop)
+        if hit:
+            # Drop the stop marker so _finish has nothing left to flush.
+            job.emitted_text = cut
+            tail = cut[job.sent_len:]
+            if tail:
+                self._emit(job, InferenceChunk(text=tail))
+            job.sent_len = len(cut)
+            self._finish(gen, uid_map, job, "stop")
+            return True
+        send_to = len(job.emitted_text) - stop_holdback_len(job.emitted_text, job.stop)
+        if send_to > job.sent_len:
+            self._emit(job, InferenceChunk(text=job.emitted_text[job.sent_len:send_to]))
+            job.sent_len = send_to
+        return False
+
     def _finish(self, gen, uid_map: dict, job: _Job, reason: str) -> None:
         if job.finished:
             return
+        # Generation ended without completing a withheld stop-string prefix —
+        # it was real content after all; flush it with the terminal chunk.
+        pending = job.emitted_text[job.sent_len:]
+        job.sent_len = len(job.emitted_text)
         # Emit a terminal chunk carrying finish_reason, then the done sentinel.
-        self._emit(job, InferenceChunk(text="", finish_reason=reason or "stop"))
+        self._emit(job, InferenceChunk(
+            text=pending, finish_reason=reason or "stop",
+            prompt_tokens=job.prompt_tokens,
+            completion_tokens=len(job.all_token_ids),
+        ))
         self._emit(job, None)
         job.finished = True
         if job.uid in uid_map:
@@ -430,20 +459,27 @@ class BatchedMLXBackend(InferenceBackend):
     async def generate(self, request: InferenceRequest) -> InferenceResult:
         text_parts: list[str] = []
         finish = "stop"
-        completion_tokens = 0
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
         async for chunk in self.generate_stream(request):
             if chunk.text:
                 text_parts.append(chunk.text)
             if chunk.finish_reason:
                 finish = chunk.finish_reason
+            if chunk.prompt_tokens is not None:
+                prompt_tokens = chunk.prompt_tokens
+            if chunk.completion_tokens is not None:
+                completion_tokens = chunk.completion_tokens
         text = "".join(text_parts)
-        # Token count from the job isn't returned through the stream; approximate
-        # from the decoded text for accounting parity with the non-batched path.
-        try:
-            completion_tokens = len(self._tokenizer.encode(text))
-        except Exception:
-            completion_tokens = 0
-        prompt_tokens = len(self._build_prompt_ids(request))
+        # Terminal chunk carries the job's exact counts; fall back to
+        # re-encoding only if it was lost (e.g. mid-stream error).
+        if completion_tokens is None:
+            try:
+                completion_tokens = len(self._tokenizer.encode(text))
+            except Exception:
+                completion_tokens = 0
+        if prompt_tokens is None:
+            prompt_tokens = len(self._build_prompt_ids(request))
         return InferenceResult(
             text=text,
             prompt_tokens=prompt_tokens,

@@ -294,6 +294,7 @@ async def load_model(request: Request):
                     model_path, name=name, backend_type=backend_type,
                     ctx_len=body.get("ctx_len", 4096), timeout=body.get("timeout", 120),
                     quant=body.get("quant", ""),
+                    max_kv_size=body.get("max_kv_size", 0),
                 )
                 scope = body.get("scope", "home")
                 info = node.inference._model_info.get(loaded_name)

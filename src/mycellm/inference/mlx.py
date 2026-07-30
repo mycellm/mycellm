@@ -76,6 +76,22 @@ def truncate_at_stops(text: str, stops: list[str]) -> tuple[str, str | None]:
     return text[:cut], hit
 
 
+def stop_holdback_len(text: str, stops: list[str]) -> int:
+    """Length of the longest suffix of text that is a proper prefix of a stop.
+
+    Streaming must withhold such a suffix: the next token(s) may complete the
+    stop string, and once text is emitted to the client it cannot be recalled.
+    Returns 0 when the tail cannot begin any stop string.
+    """
+    hold = 0
+    for s in stops:
+        for k in range(min(len(s) - 1, len(text)), hold, -1):
+            if text.endswith(s[:k]):
+                hold = k
+                break
+    return hold
+
+
 def _require_apple_silicon() -> None:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise RuntimeError(
@@ -235,10 +251,11 @@ class MLXBackend(InferenceBackend):
         text = await loop.run_in_executor(self._pool, _do_generate)
 
         prompt_tokens = len(tokenizer.encode(prompt)) if hasattr(tokenizer, "encode") else 0
-        completion_tokens = len(tokenizer.encode(text)) if hasattr(tokenizer, "encode") else 0
 
         finish = "stop"
         text, _ = truncate_at_stops(text, chat_stop_strings(tokenizer, request.stop))
+        # Count what the caller receives — after stop truncation, not before.
+        completion_tokens = len(tokenizer.encode(text)) if hasattr(tokenizer, "encode") else 0
 
         return InferenceResult(
             text=text,
@@ -263,6 +280,9 @@ class MLXBackend(InferenceBackend):
         _SENTINEL = object()
         stop_strings = chat_stop_strings(tokenizer, request.stop)
         seen_text = ""
+        sent_len = 0  # chars of seen_text already yielded (stop-holdback)
+        n_tokens = 0  # decode steps seen — one GenerationResponse per token
+        prompt_token_count: int | None = None
 
         def _run_stream():
             try:
@@ -290,17 +310,42 @@ class MLXBackend(InferenceBackend):
 
             text = getattr(item, "text", "") or ""
             finish = getattr(item, "finish_reason", None)
+            n_tokens += 1
+            prompt_token_count = getattr(item, "prompt_tokens", None) or prompt_token_count
 
             if stop_strings:
                 seen_text += text
                 cut, hit = truncate_at_stops(seen_text, stop_strings)
                 if hit:
-                    tail = cut[len(seen_text) - len(text):]
-                    yield InferenceChunk(text=tail, finish_reason="stop")
+                    # Emit only what precedes the stop and wasn't sent yet.
+                    tail = cut[sent_len:]
+                    yield InferenceChunk(
+                        text=tail, finish_reason="stop",
+                        prompt_tokens=prompt_token_count, completion_tokens=n_tokens,
+                    )
                     break
+                # Withhold a tail that could still become a stop string; if
+                # generation ends without completing it, flush it below.
+                send_to = len(seen_text) - stop_holdback_len(seen_text, stop_strings)
+                delta = seen_text[sent_len:send_to] if send_to > sent_len else ""
+                if finish is not None and send_to < len(seen_text):
+                    delta = seen_text[sent_len:]
+                    send_to = len(seen_text)
+                sent_len = max(sent_len, send_to)
+                if delta or finish:
+                    yield InferenceChunk(
+                        text=delta, finish_reason=finish,
+                        prompt_tokens=prompt_token_count if finish else None,
+                        completion_tokens=n_tokens if finish else None,
+                    )
+                continue
 
             if text or finish:
-                yield InferenceChunk(text=text, finish_reason=finish)
+                yield InferenceChunk(
+                    text=text, finish_reason=finish,
+                    prompt_tokens=prompt_token_count if finish else None,
+                    completion_tokens=n_tokens if finish else None,
+                )
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
         raise EmbeddingsNotSupportedError(

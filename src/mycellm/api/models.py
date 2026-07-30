@@ -344,7 +344,11 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
     url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
     info = _downloads[download_id]
 
+    from mycellm.inference.hf_verify import fetch_expected_hash, verify_download
+
+    tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
     try:
+        expected_hash = await fetch_expected_hash(repo_id, filename, headers=_hf_headers())
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=3600.0), follow_redirects=True, headers=_hf_headers()) as client:
             async with client.stream("GET", url) as resp:
                 resp.raise_for_status()
@@ -354,7 +358,7 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
                 last_time = time.time()
                 last_bytes = 0
 
-                with open(dest_path, "wb") as f:
+                with open(tmp_path, "wb") as f:
                     async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
                         f.write(chunk)
                         downloaded += len(chunk)
@@ -371,6 +375,9 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
                             info["eta_seconds"] = int(remaining / speed) if speed > 0 else 0
                             last_time = now
                             last_bytes = downloaded
+
+        info["verified"] = verify_download(tmp_path, expected_hash, filename)
+        tmp_path.rename(dest_path)
 
         info["status"] = "complete"
         info["progress"] = 100.0
@@ -406,12 +413,14 @@ async def _do_download(download_id: str, repo_id: str, filename: str, dest_path:
     except asyncio.CancelledError:
         info["status"] = "aborted"
         logger.info(f"Download aborted: {filename}")
+        tmp_path.unlink(missing_ok=True)
         if dest_path.exists():
             dest_path.unlink(missing_ok=True)
     except Exception as e:
         info["status"] = "failed"
         info["error"] = str(e)
         logger.error(f"Download failed for {filename}: {e}")
+        tmp_path.unlink(missing_ok=True)
         if dest_path.exists():
             dest_path.unlink(missing_ok=True)
     finally:

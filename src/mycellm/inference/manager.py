@@ -67,12 +67,15 @@ def _run_kv_preflight(model_name, model_path, kwargs, settings, runtime_backend_
     from mycellm.inference import memory_estimate as me
 
     ctx_len = int(kwargs.get("ctx_len", kwargs.get("n_ctx", settings.default_ctx_len)))
+    # A bounded (rotating) KV cache caps per-sequence KV memory below ctx_len.
+    max_kv = int(kwargs.get("max_kv_size") or 0)
+    kv_ctx = min(ctx_len, max_kv) if max_kv > 0 else ctx_len
     # KV is allocated per concurrent sequence; self-batching backends hold up to
     # max_concurrent_inferences live slots, others serialize to one.
     slots = settings.max_concurrent_inferences if runtime_backend_type in SELF_BATCHING_BACKENDS else 1
     weights = _model_size_on_disk(model_path)
     est = me.estimate(
-        model_path, ctx_len, slots,
+        model_path, kv_ctx, slots,
         weights_bytes=weights,
         overhead_bytes=int(settings.preflight_overhead_gb * (1024 ** 3)),
         safety_fraction=settings.preflight_safety_fraction,
@@ -84,7 +87,7 @@ def _run_kv_preflight(model_name, model_path, kwargs, settings, runtime_backend_
     gb = 1024 ** 3
     detail = (
         f"{model_name}: peak~{est['peak_bytes']/gb:.1f}GB "
-        f"(weights {weights/gb:.1f} + KV {est['kv_bytes']/gb:.1f}@ctx{ctx_len}x{slots} "
+        f"(weights {weights/gb:.1f} + KV {est['kv_bytes']/gb:.1f}@kv{kv_ctx}x{slots} "
         f"+ overhead {settings.preflight_overhead_gb:.1f}) vs budget {est['budget_bytes']/gb:.1f}GB "
         f"(ceiling {est['ceiling_bytes']/gb:.1f})"
     )
@@ -100,10 +103,16 @@ def _run_kv_preflight(model_name, model_path, kwargs, settings, runtime_backend_
         )
     if action == "clamp":
         safe = max(int(settings.preflight_min_ctx_len), int(est["max_ctx_len"]))
-        if safe < ctx_len:
-            kwargs["ctx_len"] = safe
-            kwargs.pop("n_ctx", None)
-            logger.warning(f"KV preflight CLAMP — {detail}; ctx_len {ctx_len} → {safe}")
+        if safe < kv_ctx:
+            if max_kv > 0:
+                # KV memory is governed by the rotating-cache bound, not
+                # ctx_len — tighten the bound and leave the window alone.
+                kwargs["max_kv_size"] = safe
+                logger.warning(f"KV preflight CLAMP — {detail}; max_kv_size {max_kv} → {safe}")
+            else:
+                kwargs["ctx_len"] = safe
+                kwargs.pop("n_ctx", None)
+                logger.warning(f"KV preflight CLAMP — {detail}; ctx_len {ctx_len} → {safe}")
         else:
             logger.warning(f"KV preflight — {detail}; min_ctx {safe} still over budget, loading anyway")
         return True
@@ -288,6 +297,8 @@ class InferenceManager:
         self._queue_depth: dict[str, int] = {}
         # Persistent configs — survives unload so models can be re-loaded
         self._saved_configs: dict[str, dict] = {}  # name -> config dict
+        # Per-model rotating-KV bound (tokens); absent = unbounded
+        self._model_max_kv: dict[str, int] = {}
         # Models disabled by the crash-loop guard this process lifetime
         self._quarantined: set[str] = set()
         # Load status tracking
@@ -536,6 +547,11 @@ class InferenceManager:
                 backend=backend_type,
                 loaded_bytes=file_size,
             )
+            _mk = int(kwargs.get("max_kv_size") or 0)
+            if _mk:
+                self._model_max_kv[model_name] = _mk
+            else:
+                self._model_max_kv.pop(model_name, None)
 
             elapsed = _time.time() - self._load_status[model_name]["started_at"]
             self._load_status[model_name].update({"status": "ready", "phase": "loaded", "elapsed": round(elapsed, 1)})
@@ -758,6 +774,8 @@ class InferenceManager:
             # Store model path for llama.cpp restore
             if name in self._model_paths:
                 config["model_path"] = self._model_paths[name]
+            if self._model_max_kv.get(name):
+                config["max_kv_size"] = self._model_max_kv[name]
             from mycellm.inference.openai_compat import OpenAICompatibleBackend
             if isinstance(backend, OpenAICompatibleBackend):
                 remote = backend._models.get(name)
@@ -854,6 +872,7 @@ class InferenceManager:
                             backend_type=backend_type,
                             ctx_len=config.get("ctx_len", _default_ctx),
                             quant=config.get("quant", ""),
+                            max_kv_size=config.get("max_kv_size", 0),
                         )
                     else:
                         logger.warning(f"Model file missing for '{name}': {model_path}")
@@ -911,8 +930,11 @@ class InferenceManager:
         if settings.hf_token:
             headers["Authorization"] = f"Bearer {settings.hf_token}"
 
+        from mycellm.inference.hf_verify import fetch_expected_hash, verify_download
+
         tmp_path = dest_path.with_suffix(".tmp")
         try:
+            expected_hash = await fetch_expected_hash(repo_id, filename, headers=headers)
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(10.0, read=3600.0),
                 follow_redirects=True,
@@ -938,6 +960,7 @@ class InferenceManager:
                                 )
                                 last_log = now
 
+            verify_download(tmp_path, expected_hash, filename)
             tmp_path.rename(dest_path)
             logger.info(f"Downloaded {filename} ({downloaded / 1024**3:.1f}GB) to {dest_path}")
             return str(dest_path)
