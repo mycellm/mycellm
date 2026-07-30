@@ -58,7 +58,7 @@ from mycellm.inference.base import (
     InferenceResult,
     flatten_message_content,
 )
-from mycellm.inference.mlx import chat_stop_strings, truncate_at_stops
+from mycellm.inference.mlx import chat_stop_strings, stop_holdback_len, truncate_at_stops
 
 logger = logging.getLogger("mycellm.inference")
 
@@ -76,7 +76,7 @@ class _Job:
 
     __slots__ = (
         "tokens", "max_tokens", "sampler", "stop", "loop", "chunks",
-        "uid", "emitted_text", "all_token_ids", "prompt_tokens",
+        "uid", "emitted_text", "sent_len", "all_token_ids", "prompt_tokens",
         "finished", "error",
     )
 
@@ -89,6 +89,7 @@ class _Job:
         self.chunks: asyncio.Queue = chunks  # InferenceChunk | None (None = done)
         self.uid: Any = None
         self.emitted_text: str = ""
+        self.sent_len: int = 0  # chars of emitted_text already sent (stop-holdback)
         self.all_token_ids: list[int] = []
         self.prompt_tokens: int = len(tokens)
         self.finished: bool = False
@@ -316,14 +317,8 @@ class BatchedMLXBackend(InferenceBackend):
 
             if text:
                 job.emitted_text += text
-                cut, hit = truncate_at_stops(job.emitted_text, job.stop)
-                if hit:
-                    tail = cut[len(job.emitted_text) - len(text):]
-                    if tail:
-                        self._emit(job, InferenceChunk(text=tail))
-                    self._finish(gen, uid_map, job, "stop")
+                if self._stream_progress(gen, uid_map, job):
                     return True
-                self._emit(job, InferenceChunk(text=text))
 
             if finish is not None:
                 self._finish(gen, uid_map, job, finish)
@@ -340,6 +335,7 @@ class BatchedMLXBackend(InferenceBackend):
                 # detokenization seam glitch is possible but bounded; escalation
                 # is rare — only when a 2nd request lands mid-solo-decode).
                 job.emitted_text = self._tokenizer.decode(job.all_token_ids)
+                job.sent_len = min(job.sent_len, len(job.emitted_text))
                 return False
 
         # stream_generate exhausted without an explicit finish_reason.
@@ -351,27 +347,48 @@ class BatchedMLXBackend(InferenceBackend):
         if r.finish_reason != "stop" and r.token is not None:
             job.all_token_ids.append(r.token)
             full = self._tokenizer.decode(job.all_token_ids)
-            delta = full[len(job.emitted_text):]
-            if delta:
+            if len(full) > len(job.emitted_text):
                 job.emitted_text = full
                 # Custom stop-string handling (token-level stop covers eos only).
-                cut, hit = truncate_at_stops(job.emitted_text, job.stop)
-                if hit:
-                    tail = cut[len(job.emitted_text) - len(delta):]
-                    if tail:
-                        self._emit(job, InferenceChunk(text=tail))
-                    self._finish(gen, uid_map, job, "stop")
+                if self._stream_progress(gen, uid_map, job):
                     return
-                self._emit(job, InferenceChunk(text=delta))
 
         if r.finish_reason is not None:
             self._finish(gen, uid_map, job, r.finish_reason)
 
+    def _stream_progress(self, gen, uid_map: dict, job: _Job) -> bool:
+        """Emit the unsent portion of job.emitted_text, honoring stop strings.
+
+        A tail that is a prefix of a stop string is withheld until the next
+        token disambiguates it (streamed text cannot be recalled once sent);
+        _finish flushes a withheld tail that never completed a stop.
+        Returns True when a stop string matched and the job was finished.
+        """
+        cut, hit = truncate_at_stops(job.emitted_text, job.stop)
+        if hit:
+            # Drop the stop marker so _finish has nothing left to flush.
+            job.emitted_text = cut
+            tail = cut[job.sent_len:]
+            if tail:
+                self._emit(job, InferenceChunk(text=tail))
+            job.sent_len = len(cut)
+            self._finish(gen, uid_map, job, "stop")
+            return True
+        send_to = len(job.emitted_text) - stop_holdback_len(job.emitted_text, job.stop)
+        if send_to > job.sent_len:
+            self._emit(job, InferenceChunk(text=job.emitted_text[job.sent_len:send_to]))
+            job.sent_len = send_to
+        return False
+
     def _finish(self, gen, uid_map: dict, job: _Job, reason: str) -> None:
         if job.finished:
             return
+        # Generation ended without completing a withheld stop-string prefix —
+        # it was real content after all; flush it with the terminal chunk.
+        pending = job.emitted_text[job.sent_len:]
+        job.sent_len = len(job.emitted_text)
         # Emit a terminal chunk carrying finish_reason, then the done sentinel.
-        self._emit(job, InferenceChunk(text="", finish_reason=reason or "stop"))
+        self._emit(job, InferenceChunk(text=pending, finish_reason=reason or "stop"))
         self._emit(job, None)
         job.finished = True
         if job.uid in uid_map:

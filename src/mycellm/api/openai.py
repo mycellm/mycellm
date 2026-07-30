@@ -40,24 +40,50 @@ def _parse_tool_call_xml(text: str) -> list | None:
             payload = match.group(1)
             if payload in seen_payloads:
                 continue
-            try:
-                data = json.loads(payload)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            if not isinstance(data, dict) or "name" not in data:
-                continue
-            seen_payloads.add(payload)
-            arguments = data.get("arguments", {})
-            if isinstance(arguments, dict):
-                arguments = json.dumps(arguments)
-            elif not isinstance(arguments, str):
-                arguments = json.dumps(arguments)
-            tool_calls.append({
-                "id": f"call_{uuid.uuid4().hex[:16]}",
-                "type": "function",
-                "function": {"name": data["name"], "arguments": arguments},
-            })
+            _collect_tool_call(payload, seen_payloads, tool_calls)
+    if not tool_calls:
+        _recover_truncated_tool_call(text, seen_payloads, tool_calls)
     return tool_calls if tool_calls else None
+
+
+def _collect_tool_call(payload: str, seen_payloads: set, tool_calls: list) -> None:
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, AttributeError):
+        return
+    if not isinstance(data, dict) or "name" not in data:
+        return
+    seen_payloads.add(payload)
+    arguments = data.get("arguments", {})
+    if not isinstance(arguments, str):
+        arguments = json.dumps(arguments)
+    tool_calls.append({
+        "id": f"call_{uuid.uuid4().hex[:16]}",
+        "type": "function",
+        "function": {"name": data["name"], "arguments": arguments},
+    })
+
+
+_TOOLCALL_UNCLOSED_RE = re.compile(r"<tool_call>\s*(\{.*)$", re.DOTALL)
+
+
+def _recover_truncated_tool_call(text: str, seen_payloads: set, tool_calls: list) -> None:
+    """Salvage a tool call whose envelope was cut off by max_tokens.
+
+    Generation can end mid-closing-marker ("...}</tool_ca") or right after the
+    JSON body. If an opening <tool_call> has no closing tag, strip any partial
+    closing-tag fragment and try the remaining payload as JSON.
+    """
+    m = _TOOLCALL_UNCLOSED_RE.search(text)
+    if not m:
+        return
+    payload = m.group(1).strip()
+    closing = "</tool_call>"
+    for k in range(len(closing), 0, -1):
+        if payload.endswith(closing[:k]):
+            payload = payload[: -k].rstrip()
+            break
+    _collect_tool_call(payload, seen_payloads, tool_calls)
 
 
 def _resolve_reasoning_exclude(body_reasoning: dict | None) -> bool:

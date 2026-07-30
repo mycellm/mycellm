@@ -76,6 +76,22 @@ def truncate_at_stops(text: str, stops: list[str]) -> tuple[str, str | None]:
     return text[:cut], hit
 
 
+def stop_holdback_len(text: str, stops: list[str]) -> int:
+    """Length of the longest suffix of text that is a proper prefix of a stop.
+
+    Streaming must withhold such a suffix: the next token(s) may complete the
+    stop string, and once text is emitted to the client it cannot be recalled.
+    Returns 0 when the tail cannot begin any stop string.
+    """
+    hold = 0
+    for s in stops:
+        for k in range(min(len(s) - 1, len(text)), hold, -1):
+            if text.endswith(s[:k]):
+                hold = k
+                break
+    return hold
+
+
 def _require_apple_silicon() -> None:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise RuntimeError(
@@ -263,6 +279,7 @@ class MLXBackend(InferenceBackend):
         _SENTINEL = object()
         stop_strings = chat_stop_strings(tokenizer, request.stop)
         seen_text = ""
+        sent_len = 0  # chars of seen_text already yielded (stop-holdback)
 
         def _run_stream():
             try:
@@ -295,9 +312,21 @@ class MLXBackend(InferenceBackend):
                 seen_text += text
                 cut, hit = truncate_at_stops(seen_text, stop_strings)
                 if hit:
-                    tail = cut[len(seen_text) - len(text):]
+                    # Emit only what precedes the stop and wasn't sent yet.
+                    tail = cut[sent_len:]
                     yield InferenceChunk(text=tail, finish_reason="stop")
                     break
+                # Withhold a tail that could still become a stop string; if
+                # generation ends without completing it, flush it below.
+                send_to = len(seen_text) - stop_holdback_len(seen_text, stop_strings)
+                delta = seen_text[sent_len:send_to] if send_to > sent_len else ""
+                if finish is not None and send_to < len(seen_text):
+                    delta = seen_text[sent_len:]
+                    send_to = len(seen_text)
+                sent_len = max(sent_len, send_to)
+                if delta or finish:
+                    yield InferenceChunk(text=delta, finish_reason=finish)
+                continue
 
             if text or finish:
                 yield InferenceChunk(text=text, finish_reason=finish)

@@ -96,3 +96,102 @@ class TestQwenCoderRegression:
         assert hit == "<|im_end|>"
         assert "<|im_end|>" not in text
         assert text.endswith("```")
+
+
+class TestStopHoldbackLen:
+    def test_no_overlap_returns_zero(self):
+        from mycellm.inference.mlx import stop_holdback_len
+        assert stop_holdback_len("hello world", ["<|im_end|>"]) == 0
+
+    def test_partial_prefix_held(self):
+        from mycellm.inference.mlx import stop_holdback_len
+        assert stop_holdback_len("hello <|im", ["<|im_end|>"]) == 4
+        assert stop_holdback_len("hello <", ["<|im_end|>"]) == 1
+        assert stop_holdback_len("hello <|im_end", ["<|im_end|>"]) == 8
+
+    def test_complete_stop_not_held(self):
+        # A full stop match is truncate_at_stops' job, not holdback's;
+        # a proper prefix is the longest thing holdback reports.
+        from mycellm.inference.mlx import stop_holdback_len
+        assert stop_holdback_len("x<|im_end|>", ["<|im_end|>"]) == 0
+
+    def test_longest_prefix_across_stops_wins(self):
+        from mycellm.inference.mlx import stop_holdback_len
+        assert stop_holdback_len("abc<|end", ["<|end|>", "<|endoftext|>"]) == 5
+
+    def test_empty_stops(self):
+        from mycellm.inference.mlx import stop_holdback_len
+        assert stop_holdback_len("anything", []) == 0
+
+
+class _RecordingLoop:
+    def call_soon_threadsafe(self, fn, arg):
+        fn(arg)
+
+
+class _RecordingQueue:
+    def __init__(self):
+        self.items = []
+
+    def put_nowait(self, item):
+        self.items.append(item)
+
+
+class _StubGen:
+    def remove(self, uids):
+        pass
+
+
+def _make_streaming_job():
+    """A _Job + fake BatchedMLXBackend wired to record emitted chunks."""
+    from mycellm.inference.mlx_batched import BatchedMLXBackend, _Job
+
+    backend = object.__new__(BatchedMLXBackend)
+    q = _RecordingQueue()
+    job = _Job(
+        tokens=[1], max_tokens=64, sampler=None,
+        stop=["<|im_end|>"], loop=_RecordingLoop(), chunks=q,
+    )
+    return backend, job, q
+
+
+def _texts(q):
+    return [c.text for c in q.items if c is not None and getattr(c, "text", "")]
+
+
+class TestStreamingStopHoldback:
+    """The oMLX-class bug: a stop string arriving split across stream chunks
+    must not leak its prefix to the client (sent text cannot be recalled)."""
+
+    def test_split_stop_marker_never_leaks(self):
+        backend, job, q = _make_streaming_job()
+        gen, uid_map = _StubGen(), {}
+        for piece in ["Hello", " world", "<|im", "_end", "|>ignored"]:
+            job.emitted_text += piece
+            if backend._stream_progress(gen, uid_map, job):
+                break
+        assert "".join(_texts(q)) == "Hello world"
+        assert job.finished
+        finals = [c for c in q.items if c is not None and c.finish_reason]
+        assert finals and finals[-1].finish_reason == "stop"
+
+    def test_withheld_prefix_flushed_on_eos_finish(self):
+        backend, job, q = _make_streaming_job()
+        gen, uid_map = _StubGen(), {}
+        for piece in ["result: a ", "<|im"]:
+            job.emitted_text += piece
+            assert not backend._stream_progress(gen, uid_map, job)
+        # Held back so far — "<|im" could still become the stop marker.
+        assert "".join(_texts(q)) == "result: a "
+        # EOS arrived instead: the held tail was real content after all.
+        backend._finish(gen, uid_map, job, "stop")
+        assert "".join(_texts(q)) == "result: a <|im"
+
+    def test_plain_text_streams_through_unchanged(self):
+        backend, job, q = _make_streaming_job()
+        gen, uid_map = _StubGen(), {}
+        for piece in ["def f():", "\n    return 1"]:
+            job.emitted_text += piece
+            assert not backend._stream_progress(gen, uid_map, job)
+        backend._finish(gen, uid_map, job, "length")
+        assert "".join(_texts(q)) == "def f():\n    return 1"

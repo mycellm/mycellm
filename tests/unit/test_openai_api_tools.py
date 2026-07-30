@@ -286,3 +286,39 @@ class TestOpenAICompatToolsForwarding:
             assert "tool_choice" not in call_kwargs
             assert result.tool_calls is None
             assert result.text == "hi"
+
+
+class TestTruncatedToolCallRecovery:
+    """Envelope cut off by max_tokens must still yield the tool call
+    (or nothing parseable — never a broken envelope as content)."""
+
+    def test_intact_envelope_still_parses(self):
+        from mycellm.api.openai import _parse_tool_call_xml
+        calls = _parse_tool_call_xml(
+            '<tool_call>{"name": "get_weather", "arguments": {"city": "SF"}}</tool_call>'
+        )
+        assert calls and calls[0]["function"]["name"] == "get_weather"
+
+    def test_truncated_mid_closing_tag(self):
+        from mycellm.api.openai import _parse_tool_call_xml
+        calls = _parse_tool_call_xml(
+            '<tool_call>{"name": "get_weather", "arguments": {"city": "SF"}}</tool_ca'
+        )
+        assert calls and calls[0]["function"]["name"] == "get_weather"
+        assert calls[0]["function"]["arguments"] == '{"city": "SF"}'
+
+    def test_truncated_right_after_json(self):
+        from mycellm.api.openai import _parse_tool_call_xml
+        calls = _parse_tool_call_xml('<tool_call>{"name": "lookup", "arguments": {}}')
+        assert calls and calls[0]["function"]["name"] == "lookup"
+
+    def test_truncated_mid_json_unrecoverable(self):
+        from mycellm.api.openai import _parse_tool_call_xml
+        assert _parse_tool_call_xml('<tool_call>{"name": "lookup", "argu') is None
+
+    def test_closed_envelope_not_double_parsed(self):
+        from mycellm.api.openai import _parse_tool_call_xml
+        calls = _parse_tool_call_xml(
+            'prefix <tool_call>{"name": "a", "arguments": {}}</tool_call> suffix'
+        )
+        assert len(calls) == 1
