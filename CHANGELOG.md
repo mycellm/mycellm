@@ -51,8 +51,18 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
   mlx-lm's prefill_step_size through both MLX backends so memory-tight nodes
   can shrink the prefill transient.
 
+- **Native MLX embeddings.** New `mlx-embeddings` backend serves
+  `/v1/embeddings` on Apple Silicon (MiniLM/BERT/XLM-R) with length-grouped
+  batching — short texts never pay a long text's padding.
+- **Opt-in MLX speculative decoding.** Per-model `draft_model` /
+  `num_draft_tokens` load options wire mlx-lm draft decoding into the
+  single-request path. Measured on M1: slower than baseline for servable
+  pairings and unsupported for Qwen3.5 hybrids (see NOTES.md) — shipped off
+  by default for future hardware/MTP support.
+
 ### Changed
-- Dependency floors raised: `llama-cpp-python>=0.3.34`, `mlx-vlm>=0.6.8`
+- Dependency floors raised: `llama-cpp-python>=0.3.34`, `mlx-vlm>=0.6.8`,
+  new optional `mlx-embeddings>=0.1.0`
   (validated with mlx 0.32.0 + mlx-lm 0.31.3 on M1).
 
 ## [0.6.2] — 2026-07-02

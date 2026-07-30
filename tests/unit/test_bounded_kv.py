@@ -68,3 +68,21 @@ class TestBoundedKvPreflight:
         assert _run_kv_preflight("m", "/nonexistent", kwargs, _settings(), "mlx")
         assert kwargs["ctx_len"] == 4096
         assert "max_kv_size" not in kwargs
+
+
+class TestPerModelOptionPersistence:
+    def test_max_kv_and_draft_survive_save(self, tmp_path):
+        import asyncio
+        import json
+        from mycellm.inference.manager import InferenceManager
+        from mycellm.protocol.capabilities import ModelCapability
+
+        m = InferenceManager()
+        m._model_info["m1"] = ModelCapability(name="m1", backend="mlx")
+        m._model_max_kv["m1"] = 4096
+        m._model_draft["m1"] = ("mlx-community/Qwen3-0.6B-4bit", 4)
+        asyncio.run(m.save_model_configs(tmp_path))
+        cfg = json.loads((tmp_path / "model_configs.json").read_text())[0]
+        assert cfg["max_kv_size"] == 4096
+        assert cfg["draft_model"] == "mlx-community/Qwen3-0.6B-4bit"
+        assert cfg["num_draft_tokens"] == 4

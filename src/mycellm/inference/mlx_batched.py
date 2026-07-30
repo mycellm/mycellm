@@ -121,6 +121,10 @@ class BatchedMLXBackend(InferenceBackend):
         # model via load kwarg `max_kv_size`; mutually exclusive with
         # speculative decoding (rotating caches can't rewind).
         self._max_kv_size: int | None = None
+        # Draft model for speculative decoding on the solo path (load kwarg
+        # `draft_model`); mutually exclusive with max_kv_size.
+        self._draft_model = None
+        self._num_draft_tokens: int = 3
         # When True, a request that arrives with nothing else in flight is
         # decoded on mlx-lm's single-stream path instead of a batch-of-1.
         # Default False: benchmarked on M1 / mlx-lm 0.31.3 (scripts/
@@ -160,6 +164,27 @@ class BatchedMLXBackend(InferenceBackend):
         self._model, self._tokenizer = await asyncio.to_thread(mlx_load, target)
         self._path = target
 
+        # Speculative decoding (solo path only — BatchGenerator has no draft
+        # support upstream). The draft must share the target's tokenizer.
+        draft = str(kwargs.get("draft_model") or "")
+        self._draft_model = None
+        self._num_draft_tokens = max(1, int(kwargs.get("num_draft_tokens") or 3))
+        if draft and self._max_kv_size:
+            logger.warning(
+                f"{self._model_name}: draft_model ignored — max_kv_size is set and "
+                "a rotating KV cache cannot rewind for speculative decoding"
+            )
+        elif draft:
+            logger.info(f"Loading draft model {draft} for speculative decoding")
+            self._draft_model, draft_tok = await asyncio.to_thread(mlx_load, draft)
+            main_vocab = getattr(self._tokenizer, "vocab_size", None)
+            if getattr(draft_tok, "vocab_size", None) != main_vocab:
+                logger.warning(
+                    f"draft model vocab differs from {self._model_name} — "
+                    "speculative decoding needs a same-tokenizer draft; disabling"
+                )
+                self._draft_model = None
+
         # Start the batch worker.
         self._running = True
         self._worker = threading.Thread(
@@ -183,6 +208,7 @@ class BatchedMLXBackend(InferenceBackend):
         self._worker = None
         self._model = None
         self._tokenizer = None
+        self._draft_model = None
         try:
             import mlx.core as mx
             mx.clear_cache()
@@ -262,7 +288,9 @@ class BatchedMLXBackend(InferenceBackend):
                 # fast path (skip the batched-cache per-token overhead). If a
                 # second request lands mid-decode, _run_solo returns False and
                 # we fold the in-progress job into the batcher below.
-                if self._solo_fast_path and self._admit.empty():
+                # A configured draft model forces the solo path for lone
+                # requests: speculative decoding only exists there upstream.
+                if (self._solo_fast_path or self._draft_model is not None) and self._admit.empty():
                     if self._run_solo(gen, uid_map, job):
                         continue  # ran to completion on the fast path
 
@@ -311,6 +339,11 @@ class BatchedMLXBackend(InferenceBackend):
 
         original_prompt = job.tokens
 
+        draft_kwargs = (
+            {"draft_model": self._draft_model, "num_draft_tokens": self._num_draft_tokens}
+            if self._draft_model is not None
+            else {}
+        )
         for resp in stream_generate(
             self._model, self._tokenizer,
             prompt=mx.array(original_prompt),
@@ -318,6 +351,7 @@ class BatchedMLXBackend(InferenceBackend):
             sampler=job.sampler,
             max_kv_size=self._max_kv_size,
             **prefill_kwargs(),
+            **draft_kwargs,
         ):
             if not self._running:
                 self._emit(job, None)  # unblock the consumer on shutdown
