@@ -6,6 +6,41 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+### Added
+- **Downloads are verified against Hugging Face's published content hashes.**
+  Both download paths (node API + `hf:` model specs) stream to a `.part` file,
+  then check the raw sha256 (LFS weights) or git blob sha1 (small files) from
+  the repo tree listing before renaming into place. A mismatch deletes the
+  file and fails the download; when the tree API is unreachable the download
+  completes as `unverified`. Download progress gains a `verified` field.
+- **Exact streaming usage.** `/v1/chat/completions` honors
+  `stream_options: {"include_usage": true}` with a trailing empty-choices
+  usage chunk carrying real backend token counts (never fabricated). llama.cpp
+  usage was previously hardcoded 0/0 — now a tokenized-prompt estimate plus
+  per-delta completion count. `/v1/models` entries expose the effective
+  (post-preflight-clamp) `context_length` so coding agents can auto-compact
+  deterministically.
+- **Bounded KV cache.** Per-model `max_kv_size` load option plumbs mlx-lm's
+  rotating KV cache through the batched backend; preflight estimates KV at
+  `min(ctx_len, max_kv_size)` and clamps the bound (not the context window)
+  when memory is tight. Persisted in `model_configs.json`.
+
+### Fixed
+- **Streamed output can no longer leak stop-string prefixes.** All MLX
+  streaming paths withhold a text tail that could still become a stop string
+  until the next token disambiguates it, flushing it with the terminal chunk
+  if generation ends first. Previously a multi-token stop marker completing
+  across chunk boundaries had already streamed its prefix to the client.
+- **Truncated tool calls are salvaged.** A `<tool_call>` envelope cut off by
+  `max_tokens` (mid-closing-tag or right after the JSON body) now parses into
+  a proper `tool_calls` response instead of surfacing as broken text.
+- MLX non-streaming completion token counts are measured after stop
+  truncation (previously counted the stop marker).
+
+### Changed
+- Dependency floors raised: `llama-cpp-python>=0.3.34`, `mlx-vlm>=0.6.8`
+  (validated with mlx 0.32.0 + mlx-lm 0.31.3 on M1).
+
 ## [0.6.2] — 2026-07-02
 
 ### Added
