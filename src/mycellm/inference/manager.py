@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -299,6 +300,8 @@ class InferenceManager:
         self._saved_configs: dict[str, dict] = {}  # name -> config dict
         # Per-model rotating-KV bound (tokens); absent = unbounded
         self._model_max_kv: dict[str, int] = {}
+        # Last request activity per model (memory-pressure eviction ranking)
+        self._last_used: dict[str, float] = {}
         # Models disabled by the crash-loop guard this process lifetime
         self._quarantined: set[str] = set()
         # Load status tracking
@@ -583,17 +586,20 @@ class InferenceManager:
             logger.error(f"Failed to load {model_name}: {e}")
             raise
 
-    async def unload_model(self, model_name: str) -> None:
+    async def unload_model(self, model_name: str, *, disable: bool = True) -> None:
         backend = self._backends.pop(model_name, None)
         if backend:
             await backend.unload_model(model_name)
             self._model_info.pop(model_name, None)
             self._model_locks.pop(model_name, None)
             self._queue_depth.pop(model_name, None)
+            self._last_used.pop(model_name, None)
             logger.info(f"Model {model_name} unloaded")
 
-            # Mark as disabled in saved configs (don't delete — allows re-enable)
-            if model_name in self._saved_configs:
+            # Mark as disabled in saved configs (don't delete — allows re-enable).
+            # disable=False (memory-pressure eviction) keeps enabled=True so the
+            # model comes back on the next restart/restore.
+            if disable and model_name in self._saved_configs:
                 self._saved_configs[model_name]["enabled"] = False
 
             # Auto-save config
@@ -602,6 +608,42 @@ class InferenceManager:
                 await self.save_model_configs(get_settings().data_dir)
             except Exception:
                 pass
+
+    LOCAL_MEMORY_BACKENDS = ("llama.cpp", "mlx", "mlx-batched", "mlx-vlm")
+
+    async def evict_idle_models(
+        self, idle_seconds: float = 60.0, *, keep_most_recent: bool = True
+    ) -> list[str]:
+        """Unload idle local models to relieve memory pressure.
+
+        Evicts local (weights-in-RAM) models with no queued requests whose last
+        activity is older than idle_seconds — newest-first survivor: the most
+        recently used model is kept unless keep_most_recent=False (escalation).
+        Evicted models stay enabled in saved configs, so they return on the
+        next restart. Returns the evicted model names.
+        """
+        now = time.time()
+        candidates = []
+        for name, info in list(self._model_info.items()):
+            if getattr(info, "backend", "") not in self.LOCAL_MEMORY_BACKENDS:
+                continue
+            if self._queue_depth.get(name, 0) > 0:
+                continue
+            lock = self._model_locks.get(name)
+            if isinstance(lock, asyncio.Lock) and lock.locked():
+                continue
+            last = self._last_used.get(name, 0.0)
+            if now - last >= idle_seconds:
+                candidates.append((last, name))
+        candidates.sort()  # oldest activity first
+        if keep_most_recent and candidates:
+            candidates = candidates[:-1]
+        evicted = []
+        for _, name in candidates:
+            logger.warning(f"Memory pressure: evicting idle model '{name}'")
+            await self.unload_model(name, disable=False)
+            evicted.append(name)
+        return evicted
 
     def get_backend(self, model_name: str) -> InferenceBackend | None:
         """Get backend for a specific model, or the first available."""
@@ -654,6 +696,7 @@ class InferenceManager:
         if lock:
             lock.release()
         self._queue_depth[model_name] = max(0, self._queue_depth.get(model_name, 1) - 1)
+        self._last_used[model_name] = time.time()
 
     async def cancel_group(self, group: str) -> int:
         """Cancel all pending/active requests in a group. Returns count cancelled."""

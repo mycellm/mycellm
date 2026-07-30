@@ -178,6 +178,7 @@ class MycellmNode:
         self._watchdog = None
         self._heartbeat_task = None
         self._selfheal_task = None
+        self._memory_watch_task = None
         self._force_announce: asyncio.Event | None = None
         self._addr_sig: tuple | None = None
         # Per-bootstrap announce backoff: announce url -> (delay_s, skip_until_monotonic)
@@ -1526,6 +1527,23 @@ class MycellmNode:
             logger.debug(f"Watchdog not started: {e}")
             self._watchdog = None
 
+        # Runtime memory-pressure watcher: clear Metal cache on WARN, evict
+        # idle models on CRITICAL — a degraded node beats an OOM-killed one.
+        try:
+            if self._settings.memory_watch_enabled:
+                from mycellm.memory_watch import MemoryPressureWatcher
+
+                self._memory_watch_task = asyncio.create_task(
+                    MemoryPressureWatcher(
+                        self.inference,
+                        interval=self._settings.memory_watch_interval,
+                        evict=self._settings.memory_watch_evict,
+                        idle_seconds=self._settings.memory_watch_idle_seconds,
+                    ).run()
+                )
+        except Exception as e:
+            logger.debug(f"Memory watcher not started: {e}")
+
         # Init subsystems (DB engine, ledger, repositories)
         await self._init_accounting()
 
@@ -2106,7 +2124,7 @@ class MycellmNode:
             self._peer_exchange_task.cancel()
 
         # Stop resilience loops + watchdog (so it doesn't fire mid-shutdown)
-        for _t in (self._heartbeat_task, self._selfheal_task):
+        for _t in (self._heartbeat_task, self._selfheal_task, self._memory_watch_task):
             if _t and not _t.done():
                 _t.cancel()
         if self._watchdog is not None:
