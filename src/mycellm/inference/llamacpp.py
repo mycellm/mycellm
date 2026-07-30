@@ -271,6 +271,10 @@ class LlamaCppBackend(InferenceBackend):
                 finish_reason = chunk.finish_reason
             if chunk.tool_calls is not None:
                 tool_calls = chunk.tool_calls
+            if chunk.prompt_tokens is not None:
+                prompt_tokens = chunk.prompt_tokens
+            if chunk.completion_tokens is not None:
+                completion_tokens = chunk.completion_tokens
 
         return InferenceResult(
             text=text,
@@ -333,6 +337,18 @@ class LlamaCppBackend(InferenceBackend):
             finally:
                 loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
 
+        # llama-cpp-python streaming chunks carry no usage block. Estimate the
+        # prompt from the raw message text (misses template overhead by a few
+        # tokens) and count completion deltas — one content delta per token.
+        try:
+            flat = "\n".join(
+                str(m.get("content", "")) for m in flatten_message_content(request.messages)
+            )
+            prompt_token_count = len(llm.tokenize(flat.encode("utf-8"), special=True))
+        except Exception:
+            prompt_token_count = None
+        completion_token_count = 0
+
         thread = threading.Thread(target=_run_stream, daemon=True)
         thread.start()
 
@@ -371,13 +387,23 @@ class LlamaCppBackend(InferenceBackend):
                 if tc_delta.get("id") and not tc["id"]:
                     tc["id"] = tc_delta["id"]
 
+            if content:
+                completion_token_count += 1
             if content or (finish and finish != "tool_calls"):
-                yield InferenceChunk(text=content, finish_reason=finish)
+                yield InferenceChunk(
+                    text=content, finish_reason=finish,
+                    prompt_tokens=prompt_token_count if finish else None,
+                    completion_tokens=completion_token_count if finish else None,
+                )
 
         # If we accumulated tool_calls, emit them as a final chunk
         if accumulated_tool_calls:
             tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls)]
-            yield InferenceChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls_list)
+            yield InferenceChunk(
+                text="", finish_reason="tool_calls", tool_calls=tool_calls_list,
+                prompt_tokens=prompt_token_count,
+                completion_tokens=completion_token_count,
+            )
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
         """Generate embeddings via llama.cpp's create_embedding.

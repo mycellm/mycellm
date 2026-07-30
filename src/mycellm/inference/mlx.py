@@ -251,10 +251,11 @@ class MLXBackend(InferenceBackend):
         text = await loop.run_in_executor(self._pool, _do_generate)
 
         prompt_tokens = len(tokenizer.encode(prompt)) if hasattr(tokenizer, "encode") else 0
-        completion_tokens = len(tokenizer.encode(text)) if hasattr(tokenizer, "encode") else 0
 
         finish = "stop"
         text, _ = truncate_at_stops(text, chat_stop_strings(tokenizer, request.stop))
+        # Count what the caller receives — after stop truncation, not before.
+        completion_tokens = len(tokenizer.encode(text)) if hasattr(tokenizer, "encode") else 0
 
         return InferenceResult(
             text=text,
@@ -280,6 +281,8 @@ class MLXBackend(InferenceBackend):
         stop_strings = chat_stop_strings(tokenizer, request.stop)
         seen_text = ""
         sent_len = 0  # chars of seen_text already yielded (stop-holdback)
+        n_tokens = 0  # decode steps seen — one GenerationResponse per token
+        prompt_token_count: int | None = None
 
         def _run_stream():
             try:
@@ -307,6 +310,8 @@ class MLXBackend(InferenceBackend):
 
             text = getattr(item, "text", "") or ""
             finish = getattr(item, "finish_reason", None)
+            n_tokens += 1
+            prompt_token_count = getattr(item, "prompt_tokens", None) or prompt_token_count
 
             if stop_strings:
                 seen_text += text
@@ -314,7 +319,10 @@ class MLXBackend(InferenceBackend):
                 if hit:
                     # Emit only what precedes the stop and wasn't sent yet.
                     tail = cut[sent_len:]
-                    yield InferenceChunk(text=tail, finish_reason="stop")
+                    yield InferenceChunk(
+                        text=tail, finish_reason="stop",
+                        prompt_tokens=prompt_token_count, completion_tokens=n_tokens,
+                    )
                     break
                 # Withhold a tail that could still become a stop string; if
                 # generation ends without completing it, flush it below.
@@ -325,11 +333,19 @@ class MLXBackend(InferenceBackend):
                     send_to = len(seen_text)
                 sent_len = max(sent_len, send_to)
                 if delta or finish:
-                    yield InferenceChunk(text=delta, finish_reason=finish)
+                    yield InferenceChunk(
+                        text=delta, finish_reason=finish,
+                        prompt_tokens=prompt_token_count if finish else None,
+                        completion_tokens=n_tokens if finish else None,
+                    )
                 continue
 
             if text or finish:
-                yield InferenceChunk(text=text, finish_reason=finish)
+                yield InferenceChunk(
+                    text=text, finish_reason=finish,
+                    prompt_tokens=prompt_token_count if finish else None,
+                    completion_tokens=n_tokens if finish else None,
+                )
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
         raise EmbeddingsNotSupportedError(

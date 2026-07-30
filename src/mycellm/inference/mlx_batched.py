@@ -388,7 +388,11 @@ class BatchedMLXBackend(InferenceBackend):
         pending = job.emitted_text[job.sent_len:]
         job.sent_len = len(job.emitted_text)
         # Emit a terminal chunk carrying finish_reason, then the done sentinel.
-        self._emit(job, InferenceChunk(text=pending, finish_reason=reason or "stop"))
+        self._emit(job, InferenceChunk(
+            text=pending, finish_reason=reason or "stop",
+            prompt_tokens=job.prompt_tokens,
+            completion_tokens=len(job.all_token_ids),
+        ))
         self._emit(job, None)
         job.finished = True
         if job.uid in uid_map:
@@ -447,20 +451,27 @@ class BatchedMLXBackend(InferenceBackend):
     async def generate(self, request: InferenceRequest) -> InferenceResult:
         text_parts: list[str] = []
         finish = "stop"
-        completion_tokens = 0
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
         async for chunk in self.generate_stream(request):
             if chunk.text:
                 text_parts.append(chunk.text)
             if chunk.finish_reason:
                 finish = chunk.finish_reason
+            if chunk.prompt_tokens is not None:
+                prompt_tokens = chunk.prompt_tokens
+            if chunk.completion_tokens is not None:
+                completion_tokens = chunk.completion_tokens
         text = "".join(text_parts)
-        # Token count from the job isn't returned through the stream; approximate
-        # from the decoded text for accounting parity with the non-batched path.
-        try:
-            completion_tokens = len(self._tokenizer.encode(text))
-        except Exception:
-            completion_tokens = 0
-        prompt_tokens = len(self._build_prompt_ids(request))
+        # Terminal chunk carries the job's exact counts; fall back to
+        # re-encoding only if it was lost (e.g. mid-stream error).
+        if completion_tokens is None:
+            try:
+                completion_tokens = len(self._tokenizer.encode(text))
+            except Exception:
+                completion_tokens = 0
+        if prompt_tokens is None:
+            prompt_tokens = len(self._build_prompt_ids(request))
         return InferenceResult(
             text=text,
             prompt_tokens=prompt_tokens,

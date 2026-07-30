@@ -43,6 +43,11 @@ class InferenceChunk:
     # API layer (or callers) route it into the streaming `delta.reasoning_content`
     # field so clients can render it in an ephemeral "thinking" panel.
     reasoning_content: str | None = None
+    # Exact token counts, set by backends on the terminal chunk (or a trailing
+    # zero-text chunk) so streaming clients get real usage numbers — agents use
+    # these for context-window accounting, so never report made-up values.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 @dataclass
