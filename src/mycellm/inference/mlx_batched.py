@@ -111,6 +111,11 @@ class BatchedMLXBackend(InferenceBackend):
         self._path = ""
         self._completion_batch_size = completion_batch_size
         self._prefill_batch_size = prefill_batch_size
+        # Bounded (rotating) KV cache: caps per-sequence KV memory at this many
+        # tokens (older entries are overwritten). None = unbounded. Set per
+        # model via load kwarg `max_kv_size`; mutually exclusive with
+        # speculative decoding (rotating caches can't rewind).
+        self._max_kv_size: int | None = None
         # When True, a request that arrives with nothing else in flight is
         # decoded on mlx-lm's single-stream path instead of a batch-of-1.
         # Default False: benchmarked on M1 / mlx-lm 0.31.3 (scripts/
@@ -134,6 +139,7 @@ class BatchedMLXBackend(InferenceBackend):
         from mlx_lm import load as mlx_load
 
         self._model_name = kwargs.get("name") or Path(model_path).name
+        self._max_kv_size = int(kwargs.get("max_kv_size") or 0) or None
         target = model_path
         if Path(model_path).is_dir():
             target = str(Path(model_path).resolve())
@@ -221,6 +227,7 @@ class BatchedMLXBackend(InferenceBackend):
             stop_tokens=[[t] for t in self._tokenizer.eos_token_ids],
             completion_batch_size=self._completion_batch_size,
             prefill_batch_size=self._prefill_batch_size,
+            max_kv_size=self._max_kv_size,
         )
         uid_map: dict[Any, _Job] = {}
 
@@ -303,6 +310,7 @@ class BatchedMLXBackend(InferenceBackend):
             prompt=mx.array(original_prompt),
             max_tokens=job.max_tokens,
             sampler=job.sampler,
+            max_kv_size=self._max_kv_size,
         ):
             if not self._running:
                 self._emit(job, None)  # unblock the consumer on shutdown
