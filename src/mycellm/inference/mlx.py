@@ -92,6 +92,22 @@ def stop_holdback_len(text: str, stops: list[str]) -> int:
     return hold
 
 
+def prefill_kwargs() -> dict:
+    """mlx-lm generation kwargs for the configured prefill chunk size.
+
+    Empty when unset (mlx-lm's 2048 default applies). The prefill transient
+    scales with the chunk size, so memory-tight nodes shrink it via
+    MYCELLM_MLX_PREFILL_STEP_SIZE.
+    """
+    try:
+        from mycellm.config import get_settings
+
+        step = int(get_settings().mlx_prefill_step_size)
+    except Exception:
+        step = 0
+    return {"prefill_step_size": step} if step > 0 else {}
+
+
 def _require_apple_silicon() -> None:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise RuntimeError(
@@ -245,6 +261,7 @@ class MLXBackend(InferenceBackend):
                 max_tokens=request.max_tokens,
                 sampler=sampler,
                 verbose=False,
+                **prefill_kwargs(),
             )
 
         loop = asyncio.get_running_loop()
@@ -291,6 +308,7 @@ class MLXBackend(InferenceBackend):
                     prompt=prompt,
                     max_tokens=request.max_tokens,
                     sampler=sampler,
+                    **prefill_kwargs(),
                 ):
                     loop.call_soon_threadsafe(chunk_queue.put_nowait, resp)
             except Exception as e:

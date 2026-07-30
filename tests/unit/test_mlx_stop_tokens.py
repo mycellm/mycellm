@@ -195,3 +195,21 @@ class TestStreamingStopHoldback:
             assert not backend._stream_progress(gen, uid_map, job)
         backend._finish(gen, uid_map, job, "length")
         assert "".join(_texts(q)) == "def f():\n    return 1"
+
+
+class TestPrefillKwargs:
+    def test_default_is_empty(self, monkeypatch):
+        from types import SimpleNamespace
+        import mycellm.config as cfg
+        from mycellm.inference.mlx import prefill_kwargs
+        monkeypatch.setattr(cfg, "get_settings",
+                            lambda: SimpleNamespace(mlx_prefill_step_size=0))
+        assert prefill_kwargs() == {}
+
+    def test_configured_step_passed_through(self, monkeypatch):
+        from types import SimpleNamespace
+        import mycellm.config as cfg
+        from mycellm.inference.mlx import prefill_kwargs
+        monkeypatch.setattr(cfg, "get_settings",
+                            lambda: SimpleNamespace(mlx_prefill_step_size=512))
+        assert prefill_kwargs() == {"prefill_step_size": 512}

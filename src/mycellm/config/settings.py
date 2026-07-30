@@ -122,6 +122,12 @@ class MycellmSettings(BaseSettings):
     # Set false (MYCELLM_MLX_CONTINUOUS_BATCHING=false) to force the legacy
     # single-stream MLX backend.
     mlx_continuous_batching: bool = True  # MYCELLM_MLX_CONTINUOUS_BATCHING
+    # Prefill chunk size (tokens) for MLX generation. 0 = mlx-lm's default
+    # (2048). Long prompts are prefilled in chunks with the Metal cache cleared
+    # between them; the prefill memory transient scales with this, so
+    # memory-tight nodes can lower it (e.g. 512) to trade prefill speed for
+    # headroom. (MYCELLM_MLX_PREFILL_STEP_SIZE)
+    mlx_prefill_step_size: int = 0
     kv_cache_quant: str = "q8_0"  # KV cache quantization: "none", "q8_0", "q4_0" (legacy, use k/v below)
     kv_cache_quant_k: str = ""  # Key cache quantization (default: use kv_cache_quant)
     kv_cache_quant_v: str = ""  # Value cache quantization (default: q4_0 for asymmetric)
