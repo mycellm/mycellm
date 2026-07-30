@@ -122,6 +122,20 @@ class MycellmSettings(BaseSettings):
     # Set false (MYCELLM_MLX_CONTINUOUS_BATCHING=false) to force the legacy
     # single-stream MLX backend.
     mlx_continuous_batching: bool = True  # MYCELLM_MLX_CONTINUOUS_BATCHING
+    # Runtime memory-pressure watcher (macOS): on kernel WARN clear the Metal
+    # cache; on CRITICAL evict idle local models (newest-first survivor) before
+    # the OOM killer hard-kills the process. Evicted models stay enabled and
+    # restore on restart. (MYCELLM_MEMORY_WATCH_*)
+    memory_watch_enabled: bool = True
+    memory_watch_interval: float = 10.0
+    memory_watch_evict: bool = True
+    memory_watch_idle_seconds: float = 60.0
+    # Prefill chunk size (tokens) for MLX generation. 0 = mlx-lm's default
+    # (2048). Long prompts are prefilled in chunks with the Metal cache cleared
+    # between them; the prefill memory transient scales with this, so
+    # memory-tight nodes can lower it (e.g. 512) to trade prefill speed for
+    # headroom. (MYCELLM_MLX_PREFILL_STEP_SIZE)
+    mlx_prefill_step_size: int = 0
     kv_cache_quant: str = "q8_0"  # KV cache quantization: "none", "q8_0", "q4_0" (legacy, use k/v below)
     kv_cache_quant_k: str = ""  # Key cache quantization (default: use kv_cache_quant)
     kv_cache_quant_v: str = ""  # Value cache quantization (default: q4_0 for asymmetric)

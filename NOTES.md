@@ -124,3 +124,16 @@ bench_mlx_batching.py, hokulea M1 16GB, Qwen3-1.7B-4bit, max_tokens=80:
 
 Live hokulea venv rolled to same stack 2026-07-30; node restarted healthy
 (no local model was enabled before or after — fleet/relay serving only).
+
+## Context calibration (2026-07-30, hokulea M1 16GB, Qwen3-1.7B-4bit)
+
+scripts/bench_context_calibration.py: measured_kv ≈ 0.66GB + 0.87 × predicted_kv
+(ctx 2k–16k). The preflight v2 analytical model is slightly conservative per
+token; the miss is a ~0.66GB CONSTANT transient, covered by the 1.0GB
+preflight_overhead_gb reserve → kv_factor stays 1.0 on this hardware. Never
+calibrate from small-ctx ratios (they're dominated by the constant).
+
+Chunked prefill knob (mlx_prefill_step_size): 16k prompt on Qwen3-1.7B-4bit,
+step 2048 → peak 3.09GB/61.9s; step 512 → 3.04GB/63.9s. Small win on a small
+model — transient scales with hidden size, so the knob is for big models near
+the ceiling. Default 0 (mlx-lm's 2048).

@@ -58,7 +58,12 @@ from mycellm.inference.base import (
     InferenceResult,
     flatten_message_content,
 )
-from mycellm.inference.mlx import chat_stop_strings, stop_holdback_len, truncate_at_stops
+from mycellm.inference.mlx import (
+    chat_stop_strings,
+    prefill_kwargs,
+    stop_holdback_len,
+    truncate_at_stops,
+)
 
 logger = logging.getLogger("mycellm.inference")
 
@@ -228,6 +233,7 @@ class BatchedMLXBackend(InferenceBackend):
             completion_batch_size=self._completion_batch_size,
             prefill_batch_size=self._prefill_batch_size,
             max_kv_size=self._max_kv_size,
+            **prefill_kwargs(),
         )
         uid_map: dict[Any, _Job] = {}
 
@@ -311,6 +317,7 @@ class BatchedMLXBackend(InferenceBackend):
             max_tokens=job.max_tokens,
             sampler=job.sampler,
             max_kv_size=self._max_kv_size,
+            **prefill_kwargs(),
         ):
             if not self._running:
                 self._emit(job, None)  # unblock the consumer on shutdown
