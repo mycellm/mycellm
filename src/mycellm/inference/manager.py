@@ -911,8 +911,11 @@ class InferenceManager:
         if settings.hf_token:
             headers["Authorization"] = f"Bearer {settings.hf_token}"
 
+        from mycellm.inference.hf_verify import fetch_expected_hash, verify_download
+
         tmp_path = dest_path.with_suffix(".tmp")
         try:
+            expected_hash = await fetch_expected_hash(repo_id, filename, headers=headers)
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(10.0, read=3600.0),
                 follow_redirects=True,
@@ -938,6 +941,7 @@ class InferenceManager:
                                 )
                                 last_log = now
 
+            verify_download(tmp_path, expected_hash, filename)
             tmp_path.rename(dest_path)
             logger.info(f"Downloaded {filename} ({downloaded / 1024**3:.1f}GB) to {dest_path}")
             return str(dest_path)
