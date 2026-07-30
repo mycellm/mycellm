@@ -48,6 +48,8 @@ inference = [
     "mlx-lm>=0.31.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
     # MLX vision-language backend (multimodal; Apple Silicon only)
     "mlx-vlm>=0.6.8; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # MLX embedding models (MiniLM/BERT/XLM-R; Apple Silicon only)
+    "mlx-embeddings>=0.1.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 training = [
     # Federated LoRA aggregation core (numpy only; framework-agnostic).

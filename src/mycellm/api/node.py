@@ -272,7 +272,7 @@ async def load_model(request: Request):
         api_key = node.secret_store.resolve(api_key)
 
     # Local backends require model_path; remote backends don't
-    LOCAL_BACKENDS = ("llama.cpp", "mlx")
+    LOCAL_BACKENDS = ("llama.cpp", "mlx", "mlx-embeddings")
     if backend_type in LOCAL_BACKENDS and not model_path:
         return {"error": f"model_path required for {backend_type} backend"}
 

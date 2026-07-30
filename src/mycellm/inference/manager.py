@@ -23,7 +23,7 @@ logger = logging.getLogger("mycellm.inference")
 # Backends that load model bytes into local memory (need RAM check, file-based
 # progress tracking, single-threaded Lock). Remote backends (openai-compat)
 # stream over HTTP and don't need any of that.
-LOCAL_BACKENDS = ("llama.cpp", "mlx", "mlx-batched", "mlx-vlm")
+LOCAL_BACKENDS = ("llama.cpp", "mlx", "mlx-batched", "mlx-vlm", "mlx-embeddings")
 # Local backends that manage their own internal concurrency (own the Metal
 # queue via a worker thread) and so must NOT be serialized with a per-model
 # Lock — they get a Semaphore so requests flow into the batcher concurrently.
@@ -919,7 +919,7 @@ class InferenceManager:
                     # "mlx-community/foo") which won't exist as a local path —
                     # let the backend resolve/download it. llama.cpp models must
                     # be a real local file.
-                    if backend_type in ("mlx", "mlx-vlm") or Path(model_path).exists():
+                    if backend_type in ("mlx", "mlx-vlm", "mlx-embeddings") or Path(model_path).exists():
                         await self.load_model(
                             model_path,
                             name=name,
@@ -1039,6 +1039,9 @@ class InferenceManager:
         if backend_type == "mlx-vlm":
             from mycellm.inference.mlx_vlm import MLXVLMBackend
             return MLXVLMBackend()
+        if backend_type == "mlx-embeddings":
+            from mycellm.inference.mlx_embed import MLXEmbeddingsBackend
+            return MLXEmbeddingsBackend()
         if backend_type in ("openai", "openai-compatible"):
             from mycellm.inference.openai_compat import OpenAICompatibleBackend
             return OpenAICompatibleBackend()
