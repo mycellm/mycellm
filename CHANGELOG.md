@@ -6,6 +6,16 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+### Fixed
+- **Dashboard no longer leaks the local admin api_key to remote node
+  addresses.** `remote()` (used by the Model tab's device switcher) called
+  the target node's origin directly with the browser's Authorization
+  header attached; a fleet peer could self-report an attacker-controlled
+  `api_addr` and harvest the admin's credential. It now proxies through a
+  new same-origin route (`POST /v1/node/proxy`), which relays only to
+  addresses already approved in the node registry and never forwards the
+  local api_key outbound.
+
 ## [0.6.3] — 2026-07-30
 
 ### Added
