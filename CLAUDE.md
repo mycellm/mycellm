@@ -11,10 +11,17 @@ Distributed LLM inference protocol ("BitTorrent for LLMs").
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest
-mycellm --help
+python3 -m venv .venv
+PIP_USER=0 .venv/bin/python -m pip install -e ".[dev]"   # PIP_USER=0 required
+.venv/bin/python -m pytest
+.venv/bin/mycellm --help
 ```
+
+`.venv/` is gitignored, so a fresh `git worktree` has no interpreter until you
+run the above — CI/verify steps invoke `.venv/bin/ruff` and `.venv/bin/python`
+directly. `PIP_USER=0` is not optional: a global `pip.conf` sets `user = true`,
+which makes `pip install` inside a venv fail with "Can not perform a '--user'
+install" *and still exit 0*, leaving an empty venv behind.
 
 ## Architecture
 

@@ -232,3 +232,78 @@ refreshed at release time, not on every `web/src` change (last touched at
 `6cf24d8`, long before several unrelated `web/src` commits) — so the
 rebuilt output was reverted after verifying the build succeeds, rather than
 committed here.
+
+## Ticket: Stop api.remote() forwarding the local node key to remote origins (dispatched again, already resolved)
+
+**Outcome: no code change. This ticket describes exactly the leak fixed
+above (commits `867f973`/`6815478`, already on `main`), down to matching
+prose in the ticket's own acceptance criteria. `agent/remote-proxy-no-token-forward`
+was forked from `main` after that fix landed, so `HEAD` here is bit-identical
+to `main` before I touched anything (`git diff main --stat` was empty).**
+
+Re-verified independently rather than trusting the prior commit message:
+`grep _PUBLIC_PATHS src/mycellm/api/app.py` confirms `/v1/node/proxy` isn't
+public, so it sits behind `AuthMiddleware` like every other `/v1` route;
+`proxy_to_node` in `src/mycellm/api/node.py` only relays to `node_addr`
+values matching an `approved` entry in `node.node_registry` (not an
+arbitrary caller URL) and builds the outbound request with only
+`Content-Type`, never the local `api_key`; `remote()` in
+`web/src/api/client.ts` calls `POST /v1/node/proxy` same-origin instead of
+`fetch()`-ing the target node directly, with all 8 call sites unchanged.
+Reran all three verify commands fresh in this worktree: `ruff check src
+tests` clean, `pytest tests/unit tests/integration -q` → 736 passed, 2
+skipped, and `cd web && npm ci && npm run lint && npm run build` all clean
+(rebuilt web assets reverted, same as above).
+
+Two differences from this ticket's stated scope, neither functional: the
+existing test file is `tests/unit/test_node_proxy.py` rather than the
+`tests/unit/test_remote_proxy.py` named in scope, and the prior fix also
+touched `web/src/api/endpoints.ts`, `CHANGELOG.md` and `NOTES.md`, which
+aren't in this ticket's touch-list. Adding a second, differently-named test
+file or a second changelog entry for the same fix would be pure churn, so I
+left the tree as-is rather than manufacture a diff. This reads as the same
+ticket dispatched twice (concurrent or re-queued Drydock runs) — worth
+deduping the ticket rather than re-running this branch again. Flagging per
+`.drydock/procedures.md`'s STOP-and-document rule for ambiguous/duplicate
+work rather than guessing.
+
+## Environment: `.venv` bootstrap in fresh worktrees (verify-run failure)
+
+The previous verify run on this branch failed with `exit 127` on
+`.venv/bin/ruff check src tests` — not a code defect. `.venv/` is gitignored
+(`.gitignore:1`), so `git worktree add` produces a tree with no interpreter,
+and the verify commands invoke `.venv/bin/ruff` / `.venv/bin/python` by path.
+Earlier runs on this branch passed their checks against the *system* `ruff`
+and `pytest` on `PATH` (`~/.local/bin`), which masked the gap.
+
+Bootstrapping it surfaced a second trap worth recording, since it fails
+silently: a global pip config sets `user = true`, so `pip install -e ".[dev]"`
+inside the venv aborts with
+
+    ERROR: Can not perform a '--user' install. User site-packages are not
+    visible in this virtualenv.
+
+**while still exiting 0** — leaving an empty `.venv` that reproduces the exact
+same `exit 127` on the next command. `PIP_USER=0` is required. Added to
+`CLAUDE.md`'s Development block so the next worktree doesn't rediscover it.
+
+With the venv built, all four checks pass here against the code already on
+this branch (no source change was needed):
+
+- `.venv/bin/ruff check src tests` → `All checks passed!`
+- `.venv/bin/python -m pytest tests/unit tests/integration -q` → **695 passed,
+  4 skipped** (`tests/unit/test_node_proxy.py` → 4 passed)
+- `cd web && npm ci && npm run lint` → clean
+- `cd web && npm run build` → built in 2.52s
+
+Re-confirmed the hard requirement directly rather than inferring it from the
+diff: every `fetch()` in `web/src` that attaches an `Authorization` header
+targets `window.location.origin` (`client.ts:8` `getBaseUrl()`, the only
+header-bearing path at `client.ts:26`), and `remote()` no longer constructs a
+remote origin at all. The rebuilt `src/mycellm/web/assets/*` was reverted
+again for the reason documented in the section above — those compiled assets
+already lag several unrelated `web/src` commits and are refreshed at release
+time, so rebuilding them here would fold three unrelated UI commits into this
+one. **That does mean the committed dashboard bundle still contains the
+pre-fix `remote()`; it needs the normal release rebuild before the fix reaches
+anyone installing from the repo.** Flagging rather than widening scope.
