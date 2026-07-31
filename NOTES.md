@@ -266,3 +266,44 @@ ticket dispatched twice (concurrent or re-queued Drydock runs) — worth
 deduping the ticket rather than re-running this branch again. Flagging per
 `.drydock/procedures.md`'s STOP-and-document rule for ambiguous/duplicate
 work rather than guessing.
+
+## Environment: `.venv` bootstrap in fresh worktrees (verify-run failure)
+
+The previous verify run on this branch failed with `exit 127` on
+`.venv/bin/ruff check src tests` — not a code defect. `.venv/` is gitignored
+(`.gitignore:1`), so `git worktree add` produces a tree with no interpreter,
+and the verify commands invoke `.venv/bin/ruff` / `.venv/bin/python` by path.
+Earlier runs on this branch passed their checks against the *system* `ruff`
+and `pytest` on `PATH` (`~/.local/bin`), which masked the gap.
+
+Bootstrapping it surfaced a second trap worth recording, since it fails
+silently: a global pip config sets `user = true`, so `pip install -e ".[dev]"`
+inside the venv aborts with
+
+    ERROR: Can not perform a '--user' install. User site-packages are not
+    visible in this virtualenv.
+
+**while still exiting 0** — leaving an empty `.venv` that reproduces the exact
+same `exit 127` on the next command. `PIP_USER=0` is required. Added to
+`CLAUDE.md`'s Development block so the next worktree doesn't rediscover it.
+
+With the venv built, all four checks pass here against the code already on
+this branch (no source change was needed):
+
+- `.venv/bin/ruff check src tests` → `All checks passed!`
+- `.venv/bin/python -m pytest tests/unit tests/integration -q` → **695 passed,
+  4 skipped** (`tests/unit/test_node_proxy.py` → 4 passed)
+- `cd web && npm ci && npm run lint` → clean
+- `cd web && npm run build` → built in 2.52s
+
+Re-confirmed the hard requirement directly rather than inferring it from the
+diff: every `fetch()` in `web/src` that attaches an `Authorization` header
+targets `window.location.origin` (`client.ts:8` `getBaseUrl()`, the only
+header-bearing path at `client.ts:26`), and `remote()` no longer constructs a
+remote origin at all. The rebuilt `src/mycellm/web/assets/*` was reverted
+again for the reason documented in the section above — those compiled assets
+already lag several unrelated `web/src` commits and are refreshed at release
+time, so rebuilding them here would fold three unrelated UI commits into this
+one. **That does mean the committed dashboard bundle still contains the
+pre-fix `remote()`; it needs the normal release rebuild before the fix reaches
+anyone installing from the repo.** Flagging rather than widening scope.
