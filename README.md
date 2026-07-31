@@ -126,10 +126,11 @@ You (consumer) ──QUIC──▶ Bootstrap (relay) ──QUIC──▶ Seeder 
 - **MLX** backend for Apple Silicon (M-series) — typically faster than Metal-via-llama.cpp for the same quantization, uses unified memory more efficiently
 - **Multimodal (vision)** — vision-language models (Qwen2.5-VL, Gemma 3) via the MLX-VLM backend; `/v1/chat/completions` accepts OpenAI image content parts (`image_url`), and the public gateway routes image requests only to vision-capable nodes
 - **OpenAI tool/function calling** — `tools` and `tool_choice` pass through local backends, the OpenAI-compat relay, and QUIC peer routing
-- **Streaming** token generation via SSE
-- **Embeddings** — OpenAI-compatible `/v1/embeddings` backed by llama.cpp GGUF embedding models (load with `"embedding": true`) or relayed to an OpenAI-compatible upstream
+- **Streaming** token generation via SSE — exact usage reporting (`stream_options.include_usage`) and effective `context_length` on `/v1/models` for coding agents; stop sequences never leak partial markers into output
+- **Embeddings** — OpenAI-compatible `/v1/embeddings` backed by native MLX embedding models (MiniLM/BERT/XLM-R via the `mlx-embeddings` backend, with length-grouped batching), llama.cpp GGUF embedding models (load with `"embedding": true`), or an OpenAI-compatible upstream
 - **Grammar-constrained output** via GBNF (`grammar` field on chat completions)
-- **Model management** — download from HuggingFace, load/unload, scope control, platform-aware recommender
+- **Model management** — download from HuggingFace with content-hash verification (SHA-256 against the repo's published hashes), load/unload, scope control, platform-aware recommender
+- **Memory resilience** — KV-aware load preflight (validated empirically), bounded KV cache (`max_kv_size`), and a runtime memory-pressure watcher that clears caches and evicts idle models before the OS OOM killer fires
 - **Thermal throttling** — auto-adjusts on mobile devices
 - **macOS menu bar monitor** — `pip install "mycellm[menubar]"` then `mycellm menubar`: the mushroom sits in your menu bar (green = healthy, cycling colors = inference in flight, gold = no models, gray = offline) with node stats, credits, and a link to the dashboard; hideable, optional launch-at-login
 
