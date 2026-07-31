@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '@/api/client';
+import { api, type SseConnection } from '@/api/client';
 import { API } from '@/api/endpoints';
 import type { ActivityData, ActivityEvent } from '@/api/types';
 import { useActivityStore } from '@/stores/activity';
@@ -10,7 +10,7 @@ export function useActivityStream(): void {
   const appState = useAuthStore((s) => s.appState);
   const setActivityData = useActivityStore((s) => s.setActivityData);
   const addLiveEvent = useActivityStore((s) => s.addLiveEvent);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventSourceRef = useRef<SseConnection | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Poll for stats/sparkline updates
@@ -51,7 +51,7 @@ export function useActivityStream(): void {
       const es = api.stream(API.node.activityStream);
       eventSourceRef.current = es;
 
-      es.onmessage = (event: MessageEvent) => {
+      es.onmessage = (event) => {
         if (!mounted) return;
         try {
           const parsed: ActivityEvent = JSON.parse(event.data);

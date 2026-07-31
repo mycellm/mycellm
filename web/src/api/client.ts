@@ -3,6 +3,12 @@ import { API } from './endpoints'
 
 let logoutPending = false
 
+export interface SseConnection {
+  onmessage: ((event: { data: string }) => void) | null
+  onerror: (() => void) | null
+  close(): void
+}
+
 class ApiClient {
   private getBaseUrl(): string {
     return window.location.origin
@@ -131,11 +137,62 @@ class ApiClient {
     })
   }
 
-  stream(path: string): EventSource {
-    const apiKey = useAuthStore.getState().apiKey
-    const separator = path.includes('?') ? '&' : '?'
-    const url = `${this.getBaseUrl()}${path}${apiKey ? `${separator}api_key=${encodeURIComponent(apiKey)}` : ''}`
-    return new EventSource(url)
+  stream(path: string): SseConnection {
+    const controller = new AbortController()
+    const conn: SseConnection = {
+      onmessage: null,
+      onerror: null,
+      close() {
+        controller.abort()
+      },
+    }
+
+    // Goes through fetchWithAuth (not a bare fetch) so the stream carries the
+    // same Authorization: Bearer header as every other call and shares the
+    // 401 -> logout path. EventSource can't set headers, which is why the key
+    // used to ride in the query string; parsing text/event-stream by hand is
+    // the price of getting it into a header.
+    ;(async () => {
+      try {
+        const response = await this.fetchWithAuth(path, {
+          signal: controller.signal,
+        })
+        if (!response.ok || !response.body) {
+          conn.onerror?.()
+          return
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          buffer = buffer.replace(/\r\n/g, '\n')
+
+          const events = buffer.split('\n\n')
+          buffer = events.pop() ?? ''
+
+          for (const rawEvent of events) {
+            const data = rawEvent
+              .split('\n')
+              .filter((line) => line.startsWith('data:'))
+              .map((line) => line.slice(5).trimStart())
+              .join('\n')
+            if (data) conn.onmessage?.({ data })
+          }
+        }
+
+        conn.onerror?.()
+      } catch {
+        if (controller.signal.aborted) return
+        conn.onerror?.()
+      }
+    })()
+
+    return conn
   }
 }
 

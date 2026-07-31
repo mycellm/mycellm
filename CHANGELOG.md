@@ -15,6 +15,13 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
   new same-origin route (`POST /v1/node/proxy`), which relays only to
   addresses already approved in the node registry and never forwards the
   local api_key outbound.
+- **Dashboard SSE connections no longer put the API key in the URL.** The
+  activity and log streams now open via `fetch` with an
+  `Authorization: Bearer …` header (same accessor `ApiClient` already uses
+  for regular requests), instead of an `EventSource` URL carrying
+  `?api_key=…` — which could land in browser history, proxy logs, or
+  `Referer` headers. The server-side `api_key` query param is unchanged for
+  other clients.
 - **Model resolution is now capability-aware, so embeddings and chat stop
   crossing wires.** `resolve_model_name("")` picked whichever model happened
   to load first, regardless of what it could actually do. `/v1/embeddings`

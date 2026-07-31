@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { api } from '@/api/client';
+import { api, type SseConnection } from '@/api/client';
 import { API } from '@/api/endpoints';
 import type { LogEntry } from '@/api/types';
 import { useLogsStore } from '@/stores/logs';
@@ -9,7 +9,7 @@ export function useLogStream(): void {
   const appState = useAuthStore((s) => s.appState);
   const setEntries = useLogsStore((s) => s.setEntries);
   const addEntry = useLogsStore((s) => s.addEntry);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventSourceRef = useRef<SseConnection | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export function useLogStream(): void {
       const es = api.stream(API.node.logsStream);
       eventSourceRef.current = es;
 
-      es.onmessage = (event: MessageEvent) => {
+      es.onmessage = (event) => {
         if (!mounted) return;
         try {
           const entry: LogEntry = JSON.parse(event.data);
