@@ -19,10 +19,7 @@ class ApiClient {
     return headers
   }
 
-  private async request<T>(
-    path: string,
-    opts?: RequestInit
-  ): Promise<T> {
+  private async fetchWithAuth(path: string, opts?: RequestInit): Promise<Response> {
     const url = `${this.getBaseUrl()}${path}`
     const response = await fetch(url, {
       ...opts,
@@ -47,6 +44,15 @@ class ApiClient {
       throw new Error('Unauthorized')
     }
 
+    return response
+  }
+
+  private async request<T>(
+    path: string,
+    opts?: RequestInit
+  ): Promise<T> {
+    const response = await this.fetchWithAuth(path, opts)
+
     if (response.status === 429) {
       throw new Error('Rate limited')
     }
@@ -62,6 +68,24 @@ class ApiClient {
     const text = await response.text()
     if (!text) return undefined as T
     return JSON.parse(text) as T
+  }
+
+  // Like post(), but hands back the raw Response instead of parsed JSON/thrown
+  // errors — for callers (e.g. chat streaming/retry ladders) that need to
+  // branch on specific status codes (429/503) themselves rather than have
+  // request() collapse them into a generic Error.
+  async postRaw(path: string, body?: unknown, opts?: RequestInit): Promise<Response> {
+    const response = await this.fetchWithAuth(path, {
+      ...opts,
+      method: 'POST',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+
+    if (response.ok) {
+      logoutPending = false
+    }
+
+    return response
   }
 
   async get<T>(path: string): Promise<T> {

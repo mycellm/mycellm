@@ -23,6 +23,26 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+// setTimeout wrapped so an aborted signal rejects immediately instead of
+// waiting out the retry delay -- lets handleAbort cut a backoff short.
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
@@ -263,15 +283,9 @@ export function ChatTab() {
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const resp = await fetch(
-            `${window.location.origin}${API.chat.completions}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(reqBody),
-              signal: controller.signal,
-            }
-          )
+          const resp = await api.postRaw(API.chat.completions, reqBody, {
+            signal: controller.signal,
+          })
 
           if (!resp.ok) {
             const status = resp.status
@@ -292,9 +306,12 @@ export function ChatTab() {
                 }),
                 timestamp: Date.now(),
               })
-              await new Promise((r) => setTimeout(r, delay * 1000))
-              // Remove retry indicator
-              removeMessages((m) => m.id === retryId)
+              try {
+                await abortableSleep(delay * 1000, controller.signal)
+              } finally {
+                // Remove retry indicator
+                removeMessages((m) => m.id === retryId)
+              }
               continue
             }
 
