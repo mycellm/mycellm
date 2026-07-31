@@ -273,7 +273,8 @@ Built by [Michael Gifford-Santos](https://github.com/mijkal).
 
 - **AI pair programming**: [Claude Code](https://claude.ai/code) by Anthropic
 - **Protocol**: QUIC + CBOR + Ed25519
-- **Inference**: [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
+- **Inference**: [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov; [MLX](https://github.com/ml-explore/mlx) + [mlx-lm](https://github.com/ml-explore/mlx-lm) by Apple; [mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings) by Prince Canuma
+- **Design references**: [oMLX](https://github.com/jundot/omlx) (batching engine, calibration, memory-pressure recovery, streaming correctness) and [turbo-fieldfare](https://github.com/drumih/turbo-fieldfare) (verified downloads) — see [NOTICE](NOTICE)
 - **DHT**: [kademlia](https://github.com/bmuller/kademlia) by Brian Muller
 - **iOS inference**: [llama.swift](https://github.com/mattt/llama.swift) by Mattt
 

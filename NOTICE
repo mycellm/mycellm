@@ -14,3 +14,20 @@ Third-party attributions:
   omlx/engine/batched.py, which is licensed under the Apache License,
   Version 2.0. mycellm's implementation drives mlx-lm's BatchGenerator directly
   and does not copy oMLX source; oMLX is credited as a design reference.
+
+* Several 0.6.3 features were informed by the engineering write-ups in the
+  oMLX v0.5.4rc1 release (https://github.com/jundot/omlx, Apache-2.0): the
+  empirical context-memory calibration benchmark
+  (scripts/bench_context_calibration.py), the runtime memory-pressure
+  watcher (src/mycellm/memory_watch.py), the streaming stop-sequence
+  holdback and truncated tool-call recovery, exact streaming usage
+  reporting, and length-grouped embedding batching
+  (src/mycellm/inference/mlx_embed.py). mycellm's implementations are
+  original and do not copy oMLX source; oMLX is credited as a design
+  reference.
+
+* The verified model-download pipeline (src/mycellm/inference/hf_verify.py
+  and its iOS mirror) was informed by the manifest/hash-verified streaming
+  installer described in turbo-fieldfare
+  (https://github.com/drumih/turbo-fieldfare). No source was copied;
+  turbo-fieldfare is credited as a design reference.

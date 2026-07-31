@@ -62,6 +62,19 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
   pairings and unsupported for Qwen3.5 hybrids (see NOTES.md) — shipped off
   by default for future hardware/MTP support.
 
+### Acknowledgements
+- Several features in this release were inspired by the engineering
+  write-ups in [oMLX](https://github.com/jundot/omlx) v0.5.4rc1 — the
+  context calibration benchmark, memory-pressure recovery, stop-sequence
+  and tool-call streaming fixes, exact usage reporting, and embedding
+  batch grouping. Implementations are original (see NOTICE).
+- The verified-download pipeline was inspired by
+  [turbo-fieldfare](https://github.com/drumih/turbo-fieldfare)'s
+  hash-verified streaming installer.
+- Native MLX embeddings are powered by
+  [mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings) by
+  Prince Canuma.
+
 ### Changed
 - Dependency floors raised: `llama-cpp-python>=0.3.34`, `mlx-vlm>=0.6.8`,
   new optional `mlx-embeddings>=0.1.0`
