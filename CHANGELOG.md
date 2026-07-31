@@ -6,6 +6,8 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-07-30
+
 ### Added
 - **Downloads are verified against Hugging Face's published content hashes.**
   Both download paths (node API + `hf:` model specs) stream to a `.part` file,
