@@ -232,3 +232,37 @@ refreshed at release time, not on every `web/src` change (last touched at
 `6cf24d8`, long before several unrelated `web/src` commits) — so the
 rebuilt output was reverted after verifying the build succeeds, rather than
 committed here.
+
+## Ticket: Stop api.remote() forwarding the local node key to remote origins (dispatched again, already resolved)
+
+**Outcome: no code change. This ticket describes exactly the leak fixed
+above (commits `867f973`/`6815478`, already on `main`), down to matching
+prose in the ticket's own acceptance criteria. `agent/remote-proxy-no-token-forward`
+was forked from `main` after that fix landed, so `HEAD` here is bit-identical
+to `main` before I touched anything (`git diff main --stat` was empty).**
+
+Re-verified independently rather than trusting the prior commit message:
+`grep _PUBLIC_PATHS src/mycellm/api/app.py` confirms `/v1/node/proxy` isn't
+public, so it sits behind `AuthMiddleware` like every other `/v1` route;
+`proxy_to_node` in `src/mycellm/api/node.py` only relays to `node_addr`
+values matching an `approved` entry in `node.node_registry` (not an
+arbitrary caller URL) and builds the outbound request with only
+`Content-Type`, never the local `api_key`; `remote()` in
+`web/src/api/client.ts` calls `POST /v1/node/proxy` same-origin instead of
+`fetch()`-ing the target node directly, with all 8 call sites unchanged.
+Reran all three verify commands fresh in this worktree: `ruff check src
+tests` clean, `pytest tests/unit tests/integration -q` → 736 passed, 2
+skipped, and `cd web && npm ci && npm run lint && npm run build` all clean
+(rebuilt web assets reverted, same as above).
+
+Two differences from this ticket's stated scope, neither functional: the
+existing test file is `tests/unit/test_node_proxy.py` rather than the
+`tests/unit/test_remote_proxy.py` named in scope, and the prior fix also
+touched `web/src/api/endpoints.ts`, `CHANGELOG.md` and `NOTES.md`, which
+aren't in this ticket's touch-list. Adding a second, differently-named test
+file or a second changelog entry for the same fix would be pure churn, so I
+left the tree as-is rather than manufacture a diff. This reads as the same
+ticket dispatched twice (concurrent or re-queued Drydock runs) — worth
+deduping the ticket rather than re-running this branch again. Flagging per
+`.drydock/procedures.md`'s STOP-and-document rule for ambiguous/duplicate
+work rather than guessing.
