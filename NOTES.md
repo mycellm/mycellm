@@ -151,3 +151,84 @@ Conclusion: two-model drafting does not pay on M1-class hardware with mlx-lm
 MTP checkpoints and custom kernels. Feature is opt-in (`draft_model` load
 option), correct, and left off by default. Revisit on M3/M4 nodes or when
 mlx-lm grows MTP support.
+
+## Ticket: stop the dashboard sending the local admin key to remote node origins
+
+**Outcome: fixed. `remote()` in `web/src/api/client.ts` now POSTs to a new
+same-origin route, `POST /v1/node/proxy`, instead of `fetch()`-ing the
+target node's origin directly. The daemon relays the request server-side.**
+
+### The leak
+
+`ModelTable`, `LocalFileLoader`, `ModelBrowser`, `VariantTable`, and
+`ApiProviderForm` all let an admin pick another fleet device from
+`DeviceTable` (`selectedDevice`, sourced from `node_registry.api_addr` via
+`/v1/admin/nodes` + `/v1/node/fleet/hardware`) and call `remote(nodeAddr,
+path, opts)` to manage models on it. The old `remote()` did a direct
+cross-origin `fetch()` to `http://{nodeAddr}` and attached
+`getHeaders()` — the browser session's own `Authorization: Bearer
+<local api_key>`. Since `nodeAddr` is whatever `api_addr` a peer
+self-reported in its announce (`POST /v1/admin/nodes/announce`, see
+`admin.py::announce_node`), a malicious or compromised fleet member could
+announce an attacker-controlled `api_addr` and, once approved, harvest the
+admin's real dashboard credential the next time the admin opened that
+device's Model tab.
+
+### The fix
+
+`remote()` now calls `this.post(API.node.proxy, {node_addr, path, method,
+body})` — same-origin, so the existing `getHeaders()`/AuthMiddleware
+handshake is between the browser and *this* daemon only, same as every
+other `api.*` call. The new handler, `proxy_to_node` in
+`src/mycellm/api/node.py`, does the actual outbound hop:
+
+1. Rejects if `node_addr` isn't `api_addr` on an entry with `status ==
+   "approved"` in `node.node_registry` — the same trust boundary
+   `openai.py`'s fleet HTTP routing (`_route_via_fleet`,
+   `_stream_via_fleet_http`) already relies on for inference forwarding.
+2. Builds the outbound request with only `Content-Type: application/json`
+   — no `Authorization` header, and specifically never the local
+   `settings.api_key` or the caller's own Bearer token.
+
+### Outbound-credential decision — settled from the acceptance criteria + code, no open question
+
+The acceptance criteria for this ticket is explicit and unambiguous: the
+test must assert the local api_key is *not* in the outbound headers the
+proxy builds. That fully decides the question on its own, so this wasn't a
+"guess vs. stop" judgment call — but it's worth recording why that's also
+the right call architecturally, since `openai.py` already forwards
+`settings.api_key` (this node's *own* configured key) to fleet peers for
+inference routing (`route_inference` → `_route_via_fleet` /
+`_stream_via_fleet_http`, both do `if settings.api_key: headers["Authorization"]
+= f"Bearer {settings.api_key}"`). That pattern only works because it's
+server-to-server: two nodes an operator configured with the *same* shared
+`MYCELLM_API_KEY` trusting each other for inference. The dashboard proxy is
+a different trust shape — it's forwarding a *specific browser session's*
+authenticated action, and node_registry entries don't store any
+credential for the target node (`announce_node` never persists one). There
+is no key on hand that's known to be valid for the target, and forwarding
+the local one would be exactly the leak this ticket exists to close (it's
+also the *browser's* key, not a value this handler should ever see reused
+outbound). So: no Authorization header at all on the proxied request. If a
+target node has its own `MYCELLM_API_KEY` set, its proxied dashboard calls
+will 401 from the target's own `ApiKeyMiddleware` — a real product gap
+(no shared credential store for fleet-to-fleet dashboard management), but
+out of scope here per the ticket (review items 2-17, and no new
+credential-storage design was asked for). Left as-is rather than guessed at.
+
+### Left untouched (out of scope)
+
+- `openai.py`'s existing `settings.api_key`-forwarding for inference
+  routing — different code path, different trust model (shared fleet
+  key), not part of this ticket's scope list.
+- `admin.py`'s QUIC `fleet_command` relay — explicitly out of scope.
+
+Verify commands run in this worktree: `ruff check src tests` (clean),
+`pytest -q` (747 passed, 2 skipped — matches main's baseline), and `cd web
+&& npm ci && npm run lint && npm run build` (all clean). The web build
+regenerates `src/mycellm/web/assets/*` with new content hashes; per
+`git log -- src/mycellm/web/assets`, those compiled assets are only
+refreshed at release time, not on every `web/src` change (last touched at
+`6cf24d8`, long before several unrelated `web/src` commits) — so the
+rebuilt output was reverted after verifying the build succeeds, rather than
+committed here.

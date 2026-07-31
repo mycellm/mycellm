@@ -1,4 +1,5 @@
 import { useAuthStore } from '../stores/auth'
+import { API } from './endpoints'
 
 let logoutPending = false
 
@@ -93,24 +94,17 @@ class ApiClient {
     path: string,
     opts?: RequestInit
   ): Promise<T> {
-    const base = nodeAddr.startsWith('http') ? nodeAddr : `http://${nodeAddr}`
-    const url = `${base}${path}`
-    const response = await fetch(url, {
-      ...opts,
-      headers: {
-        ...this.getHeaders(),
-        ...opts?.headers,
-      },
+    // Routed through the local daemon (same-origin) rather than fetched
+    // cross-origin — a direct fetch to nodeAddr would hand this session's
+    // Authorization header to whatever origin nodeAddr resolves to. The
+    // daemon relays to nodeAddr itself and only to nodes it already has
+    // approved, without attaching this session's credentials outbound.
+    return this.post<T>(API.node.proxy, {
+      node_addr: nodeAddr,
+      path,
+      method: opts?.method || 'GET',
+      body: opts?.body,
     })
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '')
-      throw new Error(`Remote API error ${response.status}: ${body}`)
-    }
-
-    const text = await response.text()
-    if (!text) return undefined as T
-    return JSON.parse(text) as T
   }
 
   stream(path: string): EventSource {

@@ -30,6 +30,7 @@ export const API = {
     relayRefresh: '/v1/node/relay/refresh',
     telemetry: '/v1/node/settings/telemetry',
     secrets: '/v1/node/settings/secrets',
+    proxy: '/v1/node/proxy',
   },
   models: {
     list: '/v1/models',

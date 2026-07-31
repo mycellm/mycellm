@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 
+import httpx
 from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
 
@@ -125,6 +126,52 @@ async def node_peers(request: Request):
     """List connected peers."""
     node = request.app.state.node
     return {"peers": node.get_status().get("peers", [])}
+
+
+@router.post("/proxy")
+async def proxy_to_node(request: Request):
+    """Proxy a dashboard request to another node's HTTP API.
+
+    The dashboard's device switcher lets an admin browse/manage models on
+    other fleet nodes, but the browser must never fetch a remote node's
+    origin directly — that would hand the local admin session's api_key to
+    whatever origin the target address resolves to. Routing it through the
+    local daemon keeps the browser same-origin, and the local api_key is
+    never attached to the outbound request; only node_addr values that
+    match an approved entry in node.node_registry are relayed, the same
+    trust boundary the fleet HTTP routing in openai.py already relies on.
+    """
+    node = request.app.state.node
+    body = await request.json()
+    node_addr = body.get("node_addr", "")
+    path = body.get("path", "")
+    method = body.get("method", "GET").upper()
+    payload = body.get("body")
+
+    if not node_addr or not path:
+        return {"error": "node_addr and path required"}
+
+    approved = any(
+        entry.get("api_addr") == node_addr and entry.get("status") == "approved"
+        for entry in node.node_registry.values()
+    )
+    if not approved:
+        return {"error": "node not approved", "node_addr": node_addr}
+
+    base = f"http://{node_addr}" if not node_addr.startswith("http") else node_addr
+    url = f"{base}{path}"
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.request(method, url, headers=headers, content=payload)
+    except Exception as e:
+        return {"error": f"proxy request to {node_addr} failed: {e}"}
+
+    try:
+        return resp.json()
+    except ValueError:
+        return {"error": f"non-JSON response from {node_addr} ({resp.status_code})"}
 
 
 @router.get("/credits")
