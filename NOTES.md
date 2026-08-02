@@ -307,3 +307,111 @@ time, so rebuilding them here would fold three unrelated UI commits into this
 one. **That does mean the committed dashboard bundle still contains the
 pre-fix `remote()`; it needs the normal release rebuild before the fix reaches
 anyone installing from the repo.** Flagging rather than widening scope.
+
+## Ticket: salvage and document the reverted working tree in the main checkout
+
+**Outcome: the main checkout at `/data/projects/mycellm/app` was found dirty —
+`HEAD` (`2ff9809`) is unchanged, but the index+worktree net out to a partial
+revert of the token-leak fixes that had just landed on `main`. Captured
+non-destructively with `git stash create` and pinned to a ref so the state
+survives even if something later cleans the tree. The main checkout and the
+`main` ref were not written to — no `git add`, `restore`, `stash push/pop`,
+`clean`, `reset`, or `checkout --` was run against them, only read-only
+inspection (`status`, `diff`, `log`, `show`, `ls-tree`, `ls-files`) plus the
+non-mutating `stash create` (which does not touch the index/worktree/refs by
+itself) and `update-ref` (which only wrote a new, previously-unused ref).**
+
+### What's dirty, and against what
+
+`git diff HEAD --stat` in `/data/projects/mycellm/app` (captured verbatim):
+
+```
+ CLAUDE.md                           |  13 +---
+ NOTES.md                            |  75 --------------------
+ tests/unit/test_node_proxy.py       | 132 ------------------------------------
+ web/src/api/client.ts               |  32 ++-------
+ web/src/components/chat/ChatTab.tsx |  41 ++++-------
+ 5 files changed, 19 insertions(+), 274 deletions(-)
+```
+
+Three other files (`CHANGELOG.md`, `src/mycellm/api/node.py`,
+`web/src/api/endpoints.ts`) show as staged-and-modified in `git status`
+(`MM`), but their staged change and unstaged change net to zero against
+`HEAD` (`git diff HEAD -- <path>` is empty for all three) — the working tree
+still matches `HEAD` for those files' actual content, so they're omitted from
+the `--stat` above and don't need restoring.
+
+`tests/unit/test_node_proxy.py` is a special case: it's staged as deleted
+(`git ls-files -s` has no entry) while an untracked file with the same name
+and content still sits on disk (`git status` shows both `D` and `??` for it).
+`git diff HEAD` correctly reports it as a full deletion since it ignores the
+untracked copy, but the bytes aren't actually gone from the worktree.
+
+### What this reverts
+
+The dirty state undoes the file-level changes introduced by three commits
+already on `main`'s history at `HEAD`:
+
+- **`2ff9809`** (merge, current `HEAD`) — "Stop api.remote() forwarding the
+  local node key to remote origins" — touched `CLAUDE.md` + `NOTES.md`.
+- **`b6e8751`** / its pre-merge equivalent **`180d3a4`** — "Route ChatTab
+  through the authenticated client and make cancel abort the retry backoff"
+  — touched `web/src/api/client.ts` + `web/src/components/chat/ChatTab.tsx`
+  (identical file list/stat on both, confirming `b6e8751` is `180d3a4`
+  landed through the merge).
+- **`fb9f3f7`** — "docs: record .venv bootstrap (incl. PIP_USER=0) that
+  blocked verification" — touched `CLAUDE.md` + `NOTES.md` (merged into
+  `2ff9809` alongside `180d3a4`).
+
+Confirmed by diffing each commit's own `--stat` against the paths in the
+dirty diff above — same files, same line counts, opposite sign. `git log
+--graph` also confirms `2ff9809` is a merge commit with `180d3a4` and
+`fb9f3f7` as its two branches into `main`.
+
+### Salvage
+
+Snapshotted via `git stash create` (does not touch the index, worktree, or
+`HEAD`, and — unlike `git stash push` — does not create a stash-list entry
+either):
+
+```
+$ git stash create
+105388c0d8849d513daa1eeb9f9e509186143476
+$ git update-ref refs/salvage/main-worktree-20260731 105388c0d8849d513daa1eeb9f9e509186143476
+```
+
+Ref name: **`refs/salvage/main-worktree-20260731`** — resolves to commit
+`105388c0`, a snapshot of the exact index+worktree state described above,
+parented on `2ff9809` (`HEAD`). `main` and the main checkout were re-verified
+byte-for-byte unchanged immediately after (`git status --short` identical
+before/after, `git rev-parse HEAD` still `2ff9809`).
+
+### Restoring (human decision, not performed here)
+
+The human can bring the reverted content back into the main checkout's
+worktree+index with:
+
+```
+git restore --source=HEAD --staged --worktree -- CLAUDE.md NOTES.md tests/unit/test_node_proxy.py web/src/api/client.ts web/src/components/chat/ChatTab.tsx
+```
+
+That restores from `HEAD` (`2ff9809`, where these fixes already live) rather
+than from the salvage ref — the salvage ref exists so the *current* dirty
+state isn't lost if someone cleans first, not as the restore source. If the
+dirty state itself turns out to be desired (e.g. it's someone's in-progress
+revert, not accidental damage), the salvage ref is what to recover instead:
+`git stash apply refs/salvage/main-worktree-20260731`.
+
+### Not done here (human's call, per `.drydock/procedures.md`)
+
+Cleaning the main checkout — running any of `git checkout -- .`,
+`git restore` (without the human choosing a direction first), `git stash
+push/pop`, `git clean`, or `git reset` against
+`/data/projects/mycellm/app` — was **not performed**. `.drydock/procedures.md`
+gates outward-facing/irreversible actions to explicit human decision, and
+this repo's own binding rule set (HARD STOP: never perform an irreversible
+action on a throwaway branch) applies with more force to the *canonical*
+checkout, which isn't a throwaway branch at all. Whether the dirty state is
+accidental damage to discard or an in-progress edit to keep is not
+determinable from the tree alone, so the choice — and the `git restore` /
+`git stash apply` command above — is left for a human to run.
