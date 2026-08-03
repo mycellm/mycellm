@@ -1,3 +1,11 @@
+# Verification environment note (capability-aware resolution follow-up)
+
+The failed verification did not reach lint or tests: this worktree had no
+`.venv/`, so both requested executables were absent. No additional source fix
+was required. Bootstrap the verifier with `python -m venv .venv` followed by
+`.venv/bin/python -m pip install -e '.[dev]'`; after that, the exact requested
+commands pass (`ruff`: clean; `pytest`: 721 passed, 4 skipped).
+
 # Ticket: land `feat/distributed-training` as a conflict-free merge candidate
 
 **Outcome: `feat/distributed-training` merged cleanly into a branch forked from
