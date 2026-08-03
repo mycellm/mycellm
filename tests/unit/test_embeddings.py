@@ -20,6 +20,7 @@ from mycellm.inference.base import (
 from mycellm.inference.llamacpp import LlamaCppBackend
 from mycellm.inference.manager import InferenceManager
 from mycellm.inference.openai_compat import OpenAICompatibleBackend, _RemoteModel
+from mycellm.protocol.capabilities import ModelCapability
 
 
 # ── Helpers ──
@@ -55,6 +56,19 @@ def _manager_with(backend: InferenceBackend, name: str = "embed-model") -> Infer
     mgr._backends[name] = backend
     mgr._model_locks[name] = asyncio.Lock()
     mgr._queue_depth[name] = 0
+    return mgr
+
+
+def _manager_with_multi(*specs: tuple[str, InferenceBackend, str]) -> InferenceManager:
+    """specs: (name, backend_instance, backend_type) triples, in load order
+    (dict insertion order). backend_type populates ModelCapability so
+    capability-aware auto resolution has something to derive tags from."""
+    mgr = InferenceManager()
+    for name, backend, backend_type in specs:
+        mgr._backends[name] = backend
+        mgr._model_locks[name] = asyncio.Lock()
+        mgr._queue_depth[name] = 0
+        mgr._model_info[name] = ModelCapability(name=name, backend=backend_type)
     return mgr
 
 
@@ -216,6 +230,51 @@ async def test_api_embeddings_unsupported_backend_maps_to_400():
         _manager_with(DummyBackend(), name="chat-model"),
         {"model": "chat-model", "input": "hello"},
     )
+    assert resp.status_code == 400
+    err = resp.json()["error"]
+    assert err["code"] == "embeddings_not_supported"
+    assert "not supported" in err["message"]
+
+
+# ── Capability-aware auto resolution ──
+#
+# model omitted/"auto" must pick a loaded embedding-capable model even when
+# it isn't first in the backend dict; when none is loaded, the response is
+# unchanged (falls back to the first-loaded model, which then reports
+# embeddings_not_supported/model_not_found as before). "all-MiniLM-L6-v2"
+# deliberately has no "embed"/"embedding" substring, so these tests exercise
+# the mlx-embeddings backend-type signal, not just the pre-existing name
+# heuristic.
+
+
+async def test_api_embeddings_auto_picks_embedding_capable_model_not_first():
+    embed_backend = FakeEmbeddingBackend()
+    manager = _manager_with_multi(
+        ("qwen2.5-7b", DummyBackend(), "llama.cpp"),
+        ("all-MiniLM-L6-v2", embed_backend, "mlx-embeddings"),
+    )
+    resp = await _post_embeddings(manager, {"input": "hello world"})
+    assert resp.status_code == 200
+    assert resp.json()["model"] == "all-MiniLM-L6-v2"
+    assert len(embed_backend.requests) == 1
+
+
+async def test_api_embeddings_auto_keyword_picks_embedding_capable_model():
+    embed_backend = FakeEmbeddingBackend()
+    manager = _manager_with_multi(
+        ("qwen2.5-7b", DummyBackend(), "llama.cpp"),
+        ("all-MiniLM-L6-v2", embed_backend, "mlx-embeddings"),
+    )
+    resp = await _post_embeddings(manager, {"model": "auto", "input": "hello world"})
+    assert resp.status_code == 200
+    assert resp.json()["model"] == "all-MiniLM-L6-v2"
+
+
+async def test_api_embeddings_auto_unchanged_when_no_embedding_model_loaded():
+    """No embedding-capable model loaded -> falls back to the first-loaded
+    model (existing default), which then reports embeddings_not_supported."""
+    manager = _manager_with_multi(("chat-model", DummyBackend(), "llama.cpp"))
+    resp = await _post_embeddings(manager, {"input": "hello world"})
     assert resp.status_code == 400
     err = resp.json()["error"]
     assert err["code"] == "embeddings_not_supported"

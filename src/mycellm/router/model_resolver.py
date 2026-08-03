@@ -117,6 +117,20 @@ def derive_tags(model_name: str) -> list[str]:
     return tags
 
 
+def derive_capability_tags(model_name: str, backend: str = "") -> list[str]:
+    """derive_tags(), plus a backend-type override for embedding-only backends.
+
+    ``mlx-embeddings`` (MLXEmbeddingsBackend) is a dedicated embeddings
+    backend that cannot generate chat completions regardless of what its
+    model name looks like — e.g. a MiniLM/BERT model whose name has no
+    "embed" substring. The backend type is authoritative there; otherwise
+    fall back to the name heuristic.
+    """
+    if backend == "mlx-embeddings":
+        return ["embedding"]
+    return derive_tags(model_name)
+
+
 @dataclass
 class QualityConstraints:
     """Quality constraints for model resolution."""
@@ -179,8 +193,8 @@ class ModelResolver:
         for m in local_models:
             param_b = getattr(m, 'param_count_b', 0.0) or estimate_param_count(m.name)
             tier = getattr(m, 'tier', '') or derive_tier(param_b)
-            tags = getattr(m, 'tags', []) or derive_tags(m.name)
             backend = getattr(m, 'backend', '') or ''
+            tags = getattr(m, 'tags', []) or derive_capability_tags(m.name, backend)
             candidates.append(ResolvedModel(
                 model_name=m.name,
                 peer_id="",
@@ -249,6 +263,14 @@ class ModelResolver:
             filtered = self._filter_candidates(requested, candidates)
             if filtered:
                 candidates = filtered
+        else:
+            # Auto/default resolution ("" or normalized "auto") is a chat
+            # request — it must never hand back an embedding-only candidate,
+            # since an embeddings model cannot generate (MLXEmbeddingsBackend
+            # raises on generate()/generate_stream()). An embedding model is
+            # still reachable via its exact name or the "embedding" tag,
+            # both handled by the branch above.
+            candidates = [c for c in candidates if "embedding" not in c.tags]
 
         # Apply quality constraints
         if constraints:

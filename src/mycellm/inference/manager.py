@@ -662,17 +662,52 @@ class InferenceManager:
             return next(iter(self._backends.values()))
         return None
 
-    def resolve_model_name(self, requested: str) -> str:
+    def resolve_model_name(
+        self,
+        requested: str,
+        *,
+        prefer_tag: str | None = None,
+        exclude_tag: str | None = None,
+    ) -> str:
         """Resolve a model name to a loaded model.
 
         Returns exact match if found. Falls back to first available only
-        when no specific model is requested (empty string).
+        when no specific model is requested (empty string) — the fallback is
+        capability-aware when ``prefer_tag``/``exclude_tag`` is given:
+
+        - ``prefer_tag``: prefer a loaded model whose derived capability tags
+          include it, even if it isn't first in load order. Falls back to
+          the first loaded model if none match (unchanged default fallback).
+        - ``exclude_tag``: skip loaded models whose derived capability tags
+          include it (e.g. never auto-fall back to an embedding-only model
+          for a chat/generate request). Returns "" if every model is
+          excluded, rather than force-picking one.
         """
         if requested and requested in self._backends:
             return requested
         if not requested and self._backends:
+            if prefer_tag:
+                for name in self._backends:
+                    if prefer_tag in self._capability_tags(name):
+                        return name
+            if exclude_tag:
+                for name in self._backends:
+                    if exclude_tag not in self._capability_tags(name):
+                        return name
+                return ""
             return next(iter(self._backends))
         return ""
+
+    def _capability_tags(self, name: str) -> list[str]:
+        """Derive chat/embedding capability tags for a loaded model."""
+        from mycellm.router.model_resolver import derive_capability_tags
+
+        info = self._model_info.get(name)
+        if info is None:
+            return derive_capability_tags(name)
+        if info.tags:
+            return info.tags
+        return derive_capability_tags(info.name, info.backend)
 
     @property
     def queue_status(self) -> dict[str, int]:
@@ -731,7 +766,7 @@ class InferenceManager:
 
     async def generate(self, request: InferenceRequest) -> InferenceResult:
         """Run inference with per-model locking and global concurrency control."""
-        model_name = self.resolve_model_name(request.model)
+        model_name = self.resolve_model_name(request.model, exclude_tag="embedding")
         if not model_name:
             raise RuntimeError("No models loaded")
 
@@ -771,7 +806,7 @@ class InferenceManager:
         Backends that can't embed raise EmbeddingsNotSupportedError (the API
         layer maps it to a 400).
         """
-        model_name = self.resolve_model_name(request.model)
+        model_name = self.resolve_model_name(request.model, prefer_tag="embedding")
         if not model_name:
             raise RuntimeError("No models loaded")
 
@@ -790,7 +825,7 @@ class InferenceManager:
         self, request: InferenceRequest
     ) -> AsyncIterator[InferenceChunk]:
         """Run streaming inference with per-model locking and global concurrency control."""
-        model_name = self.resolve_model_name(request.model)
+        model_name = self.resolve_model_name(request.model, exclude_tag="embedding")
         if not model_name:
             raise RuntimeError("No models loaded")
 

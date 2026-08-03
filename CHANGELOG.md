@@ -15,6 +15,15 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
   new same-origin route (`POST /v1/node/proxy`), which relays only to
   addresses already approved in the node registry and never forwards the
   local api_key outbound.
+- **Model resolution is now capability-aware, so embeddings and chat stop
+  crossing wires.** `resolve_model_name("")` picked whichever model happened
+  to load first, regardless of what it could actually do. `/v1/embeddings`
+  now prefers a loaded embedding-capable model (derived from
+  `ModelCapability`/backend type, e.g. `mlx-embeddings`, plus the existing
+  name heuristics) even when it isn't first in load order; empty/"auto" chat
+  requests now exclude embedding-only candidates instead of risking a crash
+  in the backend's chat guard when no other model is loaded. Explicit model
+  names and the "embedding" tag still resolve exactly as before.
 
 ## [0.6.3] — 2026-07-30
 

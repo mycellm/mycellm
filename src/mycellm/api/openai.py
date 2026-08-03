@@ -356,9 +356,12 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
                 if fleet_result:
                     return fleet_result
 
-    # Try local inference
+    # Try local inference. Excludes embedding-only models from the auto/empty
+    # fallback — an embeddings backend cannot generate (MLXEmbeddingsBackend
+    # raises on generate()), so this must degrade to the "no model available"
+    # path below rather than reach that guard.
     if not model_name:
-        model_name = node.inference.resolve_model_name(requested_model)
+        model_name = node.inference.resolve_model_name(requested_model, exclude_tag="embedding")
 
     if model_name:
         from mycellm.inference.base import InferenceRequest
@@ -573,7 +576,9 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
         # MycellmNode.route_inference_stream — failing over is only safe
         # *before* any chunk has reached the client.
         candidates: list[str] = []
+        consulted_resolver = False
         if not _requested and node.model_resolver:
+            consulted_resolver = True
             for cand in node.model_resolver.resolve(
                 "",
                 node.inference.loaded_models,
@@ -581,8 +586,12 @@ async def _stream_response(node, body: ChatCompletionRequest, messages: list[dic
             ) or []:
                 if cand.model_name not in candidates:
                     candidates.append(cand.model_name)
-        if not candidates:
+        if not candidates and not consulted_resolver:
             candidates = [_requested]
+        # If the resolver *was* consulted and still found nothing (e.g. the
+        # only loaded model is embedding-only — it cannot generate), don't
+        # fall back to a blind resolve_model_name("") lookup: that would
+        # reach the backend's chat guard instead of "no model available".
 
         # emitted: has the client been handed real output (no re-routing after
         # that)? busy/error: why the last candidate bowed out, for the final
@@ -1471,7 +1480,7 @@ async def create_embeddings(request: Request, body: EmbeddingsRequest):
         )
 
     requested_model = body.model if body.model != "auto" else ""
-    model_name = node.inference.resolve_model_name(requested_model)
+    model_name = node.inference.resolve_model_name(requested_model, prefer_tag="embedding")
     if not model_name:
         detail = (
             f"Model '{body.model}' not found. No loaded model serves embeddings."
