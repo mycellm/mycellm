@@ -1,0 +1,12 @@
+{
+  "name": "mycellm",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Root delegator for the web/ dashboard workspace, so npm run build/lint work from the repo root.",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "lint": "npm --prefix web run lint",
+    "preview": "npm --prefix web run preview"
+  }
+}
