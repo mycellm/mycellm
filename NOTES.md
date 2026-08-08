@@ -423,3 +423,46 @@ checkout, which isn't a throwaway branch at all. Whether the dirty state is
 accidental damage to discard or an in-progress edit to keep is not
 determinable from the tree alone, so the choice — and the `git restore` /
 `git stash apply` command above — is left for a human to run.
+
+## Ticket: repo-drift report — `agent/sse-auth-header-refresh` unmerged
+
+**Outcome: abandoned, not merged. The branch's fix is a stale duplicate of a
+better version already on `main`.**
+
+The drift check flagged `agent/sse-auth-header-refresh` (2 commits ahead of
+`main`, last commit 2026-08-01) with the objective "Land agent/sse-auth-header
+to main — the SSE-auth P0 fix EXISTS (`72365a6`) but was never merged." That
+premise is now stale: `main` has carried an equivalent fix since `0f97bb3`
+("fix: send SSE auth via Authorization header instead of api_key URL param",
+2026-07-31) — landed the day *before* this branch's own copy of the same fix
+(`5838b69`, same title, 2026-08-01). The two evidently raced.
+
+Diffing `5838b69` (branch) against `0f97bb3` (main) shows they solve the
+identical problem (dashboard SSE opened via `EventSource` with `?api_key=` in
+the URL → switched to `fetch` + `Authorization: Bearer`), but main's version
+is strictly ahead:
+
+- `stream()` goes through `fetchWithAuth` (introduced by the sibling
+  `remote()`-token-leak fix), so a stream's 401 shares the same logout path as
+  every other request. The branch's version uses a bare `fetch`.
+- Main ships `tests/unit/test_sse_auth.py` (209 lines) asserting the stream
+  routes accept `Authorization: Bearer` and reject bad/missing auth. The
+  branch has no test for this at all.
+
+The branch's second commit (`766df16`) is docs-only — a NOTES.md note that
+`/var/tmp` was read-only on one exec host during verification, no source
+change — so there is nothing else on the branch worth porting.
+
+**Nothing to merge.** Merging `agent/sse-auth-header-refresh` now would
+*regress* main (drop `fetchWithAuth` routing and the test file) to reintroduce
+a fix main already has in better form. The loop's premise — "fix exists but
+unmerged" — is answered: the fix is merged; the branch that thought it wasn't
+is the stale one.
+
+**Left for the branch-hygiene pass** (`.drydock/branch-triage.md`), not done
+here: deleting `agent/sse-auth-header-refresh` and its siblings
+(`agent/sse-auth-header`, `agent/land-sse-auth-header`,
+`agent/sse-auth-header-r1-5e51`, `agent/sse-auth-header-refresh-r1-42a5`) — all
+look like repeated attempts at the same already-landed fix. This worktree only
+records the finding; pruning branches is out of scope for a throwaway branch
+and belongs to whoever runs the hygiene sweep.
