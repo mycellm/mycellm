@@ -166,6 +166,8 @@ mycellm works as a drop-in backend for OpenAI-compatible coding tools:
 
 No API keys to manage, no usage limits, no vendor lock-in. Your hardware, your models.
 
+Or build your own: [`examples/hyphae/`](examples/hyphae/) is a coding agent that plans a task DAG and executes it across your nodes, using no cloud API. [Running a coding agent on a heterogeneous local fleet](docs/coding-agent-on-a-heterogeneous-fleet.md) writes up what measuring it taught us — including why small local models fail at tool calling, and why a "total time" number is meaningless unless it says whether the model was already loaded.
+
 ### Homelab GPU Fleet
 Pool every GPU in your house into one inference endpoint. An M1 Max Mac Studio, an old gaming PC with an RTX 3090, an iPad Pro — they all join the same network and share the load. The dashboard lets you manage models across all devices from a single browser tab.
 
