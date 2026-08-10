@@ -1,0 +1,185 @@
+{
+  "conditions": {
+    "host": "Hokulea",
+    "chip": "Apple M1",
+    "ram_gb": 16,
+    "os": "Darwin 26.6.1",
+    "python": "3.14.5",
+    "mlx": "0.31.1",
+    "mlx_lm": "0.31.2",
+    "load_at_start": [
+      3.21,
+      3.06,
+      3.72
+    ],
+    "thermal_at_start": "Note: No CPU power status has been recorded",
+    "started_utc": "2026-08-10T11:19:32+00:00",
+    "mode": "batch",
+    "model": "mlx-community/Qwen3-1.7B-4bit",
+    "max_tokens": 80,
+    "repeats": 3,
+    "sampler": "greedy (temp=0)",
+    "note": "hokulea M1 16GB \u2014 same host and model as the June figure; Plex-guarded (aborts if playback starts)",
+    "load_at_end": [
+      4.35,
+      3.8,
+      3.78
+    ],
+    "thermal_at_end": "Note: No CPU power status has been recorded",
+    "machine_was_busy": true
+  },
+  "result": {
+    "levels": [
+      {
+        "concurrency": 1,
+        "serial_tok_s_median": 46.7,
+        "batched_tok_s_median": 49.2,
+        "speedup_median": 1.05,
+        "speedup_range": [
+          1.03,
+          1.09
+        ],
+        "runs": [
+          {
+            "repeat": 1,
+            "serial_tok_s": 45.8,
+            "batched_tok_s": 49.7,
+            "speedup": 1.09
+          },
+          {
+            "repeat": 2,
+            "serial_tok_s": 46.7,
+            "batched_tok_s": 49.2,
+            "speedup": 1.05
+          },
+          {
+            "repeat": 3,
+            "serial_tok_s": 47.2,
+            "batched_tok_s": 48.5,
+            "speedup": 1.03
+          }
+        ]
+      },
+      {
+        "concurrency": 4,
+        "serial_tok_s_median": 46.8,
+        "batched_tok_s_median": 76.2,
+        "speedup_median": 1.63,
+        "speedup_range": [
+          1.61,
+          1.64
+        ],
+        "runs": [
+          {
+            "repeat": 1,
+            "serial_tok_s": 46.8,
+            "batched_tok_s": 76.1,
+            "speedup": 1.63
+          },
+          {
+            "repeat": 2,
+            "serial_tok_s": 46.5,
+            "batched_tok_s": 76.2,
+            "speedup": 1.64
+          },
+          {
+            "repeat": 3,
+            "serial_tok_s": 47.6,
+            "batched_tok_s": 76.5,
+            "speedup": 1.61
+          }
+        ]
+      },
+      {
+        "concurrency": 8,
+        "serial_tok_s_median": 47.4,
+        "batched_tok_s_median": 67.9,
+        "speedup_median": 1.43,
+        "speedup_range": [
+          1.43,
+          1.44
+        ],
+        "runs": [
+          {
+            "repeat": 1,
+            "serial_tok_s": 47.6,
+            "batched_tok_s": 67.9,
+            "speedup": 1.43
+          },
+          {
+            "repeat": 2,
+            "serial_tok_s": 47.2,
+            "batched_tok_s": 68.0,
+            "speedup": 1.44
+          },
+          {
+            "repeat": 3,
+            "serial_tok_s": 47.4,
+            "batched_tok_s": 67.9,
+            "speedup": 1.43
+          }
+        ]
+      },
+      {
+        "concurrency": 16,
+        "serial_tok_s_median": 47.3,
+        "batched_tok_s_median": 114.3,
+        "speedup_median": 2.42,
+        "speedup_range": [
+          2.39,
+          2.43
+        ],
+        "runs": [
+          {
+            "repeat": 1,
+            "serial_tok_s": 47.4,
+            "batched_tok_s": 113.1,
+            "speedup": 2.39
+          },
+          {
+            "repeat": 2,
+            "serial_tok_s": 47.3,
+            "batched_tok_s": 114.6,
+            "speedup": 2.42
+          },
+          {
+            "repeat": 3,
+            "serial_tok_s": 47.0,
+            "batched_tok_s": 114.3,
+            "speedup": 2.43
+          }
+        ]
+      },
+      {
+        "concurrency": 32,
+        "serial_tok_s_median": 45.7,
+        "batched_tok_s_median": 193.7,
+        "speedup_median": 4.23,
+        "speedup_range": [
+          4.11,
+          4.27
+        ],
+        "runs": [
+          {
+            "repeat": 1,
+            "serial_tok_s": 47.1,
+            "batched_tok_s": 193.7,
+            "speedup": 4.11
+          },
+          {
+            "repeat": 2,
+            "serial_tok_s": 45.7,
+            "batched_tok_s": 193.2,
+            "speedup": 4.23
+          },
+          {
+            "repeat": 3,
+            "serial_tok_s": 45.5,
+            "batched_tok_s": 194.2,
+            "speedup": 4.27
+          }
+        ]
+      }
+    ]
+  }
+}

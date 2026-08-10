@@ -1,0 +1,121 @@
+{
+  "conditions": {
+    "host": "utopia-planitia",
+    "chip": "",
+    "ram_gb": null,
+    "os": "Linux 6.12.94+deb13-amd64",
+    "python": "3.13.5",
+    "note": "utopia -> hokulea over LAN HTTP (not the QUIC overlay). Same host/model/stack as the local anchor, so the delta is the serving path. Levels capped at 8: at 32 the node queues past a 180s client timeout, which is itself a finding.",
+    "load_at_start": [
+      6.68,
+      7.67,
+      7.44
+    ],
+    "thermal_at_start": "unknown",
+    "started_utc": "2026-08-10T17:18:26+00:00",
+    "mode": "network",
+    "model": "qwen3-1.7b",
+    "max_tokens": 80,
+    "repeats": 2,
+    "sampler": "greedy (temp=0)",
+    "load_at_end": [
+      5.04,
+      7.17,
+      7.28
+    ],
+    "thermal_at_end": "unknown",
+    "machine_was_busy": true
+  },
+  "result": {
+    "levels": [
+      {
+        "concurrency": 1,
+        "aggregate_tok_s_median": 44.1,
+        "slowest_request_s_median": 1.817,
+        "nodes_seen": [],
+        "runs": [
+          {
+            "repeat": 1,
+            "wall_s": 1.92,
+            "aggregate_tok_s": 41.6,
+            "slowest_request_s": 1.92,
+            "nodes": []
+          },
+          {
+            "repeat": 2,
+            "wall_s": 1.71,
+            "aggregate_tok_s": 46.6,
+            "slowest_request_s": 1.714,
+            "nodes": []
+          }
+        ]
+      },
+      {
+        "concurrency": 2,
+        "aggregate_tok_s_median": 56.5,
+        "slowest_request_s_median": 2.841,
+        "nodes_seen": [],
+        "runs": [
+          {
+            "repeat": 1,
+            "wall_s": 3.02,
+            "aggregate_tok_s": 53.0,
+            "slowest_request_s": 3.015,
+            "nodes": []
+          },
+          {
+            "repeat": 2,
+            "wall_s": 2.67,
+            "aggregate_tok_s": 59.9,
+            "slowest_request_s": 2.668,
+            "nodes": []
+          }
+        ]
+      },
+      {
+        "concurrency": 4,
+        "aggregate_tok_s_median": 78.8,
+        "slowest_request_s_median": 4.061,
+        "nodes_seen": [],
+        "runs": [
+          {
+            "repeat": 1,
+            "wall_s": 4.0,
+            "aggregate_tok_s": 79.9,
+            "slowest_request_s": 4.003,
+            "nodes": []
+          },
+          {
+            "repeat": 2,
+            "wall_s": 4.12,
+            "aggregate_tok_s": 77.6,
+            "slowest_request_s": 4.119,
+            "nodes": []
+          }
+        ]
+      },
+      {
+        "concurrency": 8,
+        "aggregate_tok_s_median": 83.1,
+        "slowest_request_s_median": 7.69,
+        "nodes_seen": [],
+        "runs": [
+          {
+            "repeat": 1,
+            "wall_s": 7.68,
+            "aggregate_tok_s": 83.4,
+            "slowest_request_s": 7.673,
+            "nodes": []
+          },
+          {
+            "repeat": 2,
+            "wall_s": 7.72,
+            "aggregate_tok_s": 82.8,
+            "slowest_request_s": 7.706,
+            "nodes": []
+          }
+        ]
+      }
+    ]
+  }
+}

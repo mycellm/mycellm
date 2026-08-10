@@ -1,0 +1,67 @@
+{
+  "conditions": {
+    "host": "aurora",
+    "chip": "Apple M1 Max",
+    "ram_gb": 64,
+    "os": "Darwin 26.6.1",
+    "python": "3.13.14",
+    "mlx": "0.32.0",
+    "mlx_lm": "0.31.3",
+    "load_at_start": [
+      9.95,
+      8.22,
+      6.29
+    ],
+    "thermal_at_start": "Note: No CPU power status has been recorded",
+    "started_utc": "2026-08-10T17:02:24+00:00",
+    "mode": "solo",
+    "model": "mlx-community/Qwen3-1.7B-4bit",
+    "max_tokens": 80,
+    "repeats": 5,
+    "sampler": "greedy (temp=0)",
+    "note": "aurora M1 Max 64GB - quiet; same model as hokulea anchor",
+    "load_at_end": [
+      8.88,
+      8.05,
+      6.25
+    ],
+    "thermal_at_end": "Note: No CPU power status has been recorded",
+    "machine_was_busy": true
+  },
+  "result": {
+    "ttft_s_median": 0.129,
+    "tok_s_median": 127.8,
+    "runs": [
+      {
+        "repeat": 1,
+        "ttft_s": 0.159,
+        "tok_s": 127.8,
+        "tokens": 80
+      },
+      {
+        "repeat": 2,
+        "ttft_s": 0.125,
+        "tok_s": 136.1,
+        "tokens": 80
+      },
+      {
+        "repeat": 3,
+        "ttft_s": 0.129,
+        "tok_s": 132.4,
+        "tokens": 80
+      },
+      {
+        "repeat": 4,
+        "ttft_s": 0.126,
+        "tok_s": 122.1,
+        "tokens": 80
+      },
+      {
+        "repeat": 5,
+        "ttft_s": 0.688,
+        "tok_s": 35.4,
+        "tokens": 80
+      }
+    ]
+  }
+}
