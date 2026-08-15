@@ -234,10 +234,38 @@ print(response.choices[0].message.content)
 | GET | `/v1/node/status` | Node status |
 | GET | `/v1/node/peers` | Connected peers |
 | POST | `/v1/node/models/load` | Load a model |
+| POST | `/v1/node/models/download` | Install a model (Hugging Face, or any URL) |
 | POST | `/v1/node/federation/invite` | Create network invite |
 | POST | `/v1/node/federation/join` | Join a network |
 
 See [API docs](https://docs.mycellm.dev/api/overview/) for the full reference.
+
+### Installing a model from somewhere other than Hugging Face
+
+A fleet often needs a model the Hub doesn't have — a private fine-tune, or
+anything an air-gapped network has to stage itself. `/v1/node/models/download`
+takes a URL instead of a `repo`/`filename` pair:
+
+```bash
+# Single file (GGUF)
+curl -X POST localhost:8420/v1/node/models/download \
+  -H "Authorization: Bearer $MYCELLM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name": "my-finetune", "source_url": "https://models.example.org/my-finetune-Q4_K_M.gguf",
+       "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}'
+
+# MLX directory — many files, so pass a manifest
+curl -X POST localhost:8420/v1/node/models/download \
+  -H "Authorization: Bearer $MYCELLM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name": "my-finetune-mlx", "manifest": [
+        {"name": "config.json",         "url": "https://…/config.json",         "sha256": "…"},
+        {"name": "model.safetensors",   "url": "https://…/model.safetensors",   "sha256": "…"}]}'
+```
+
+`https` and a `sha256` per file are **required**, and the digest is verified as
+each file lands — a mismatch fails the install and deletes the staged bytes.
+Files stage under `.staging/` and the model is published by rename, so an
+interrupted install never leaves a half-written model that looks loadable. The
+same request shape works against an iOS node.
 
 ## Private Networks
 

@@ -1,0 +1,99 @@
+{
+  "conditions": {
+    "host": "utopia-planitia",
+    "chip": "",
+    "ram_gb": null,
+    "os": "Linux 6.12.94+deb13-amd64",
+    "python": "3.13.5",
+    "note": "Discovery \u2014 M4 iPad, mycellm 0.6.3 iOS, llama.cpp GGUF, over LAN WiFi",
+    "load_at_start": [
+      7.66,
+      9.24,
+      11.17
+    ],
+    "thermal_at_start": "unknown",
+    "started_utc": "2026-08-09T20:49:48+00:00",
+    "mode": "network",
+    "model": "qwen2.5-7b-instruct-uncensored-q4_k_m.gguf",
+    "max_tokens": 48,
+    "repeats": 2,
+    "sampler": "greedy (temp=0)",
+    "load_at_end": [
+      9.96,
+      9.61,
+      11.23
+    ],
+    "thermal_at_end": "unknown",
+    "machine_was_busy": true
+  },
+  "result": {
+    "levels": [
+      {
+        "concurrency": 1,
+        "aggregate_tok_s_median": 19.4,
+        "slowest_request_s_median": 2.476,
+        "nodes_seen": [],
+        "runs": [
+          {
+            "repeat": 1,
+            "wall_s": 2.55,
+            "aggregate_tok_s": 18.8,
+            "slowest_request_s": 2.546,
+            "nodes": []
+          },
+          {
+            "repeat": 2,
+            "wall_s": 2.41,
+            "aggregate_tok_s": 19.9,
+            "slowest_request_s": 2.406,
+            "nodes": []
+          }
+        ]
+      },
+      {
+        "concurrency": 2,
+        "aggregate_tok_s_median": 19.9,
+        "slowest_request_s_median": 4.832,
+        "nodes_seen": [],
+        "runs": [
+          {
+            "repeat": 1,
+            "wall_s": 4.83,
+            "aggregate_tok_s": 19.9,
+            "slowest_request_s": 4.828,
+            "nodes": []
+          },
+          {
+            "repeat": 2,
+            "wall_s": 4.84,
+            "aggregate_tok_s": 19.8,
+            "slowest_request_s": 4.835,
+            "nodes": []
+          }
+        ]
+      },
+      {
+        "concurrency": 4,
+        "aggregate_tok_s_median": 19.3,
+        "slowest_request_s_median": 9.955,
+        "nodes_seen": [],
+        "runs": [
+          {
+            "repeat": 1,
+            "wall_s": 9.85,
+            "aggregate_tok_s": 19.5,
+            "slowest_request_s": 9.846,
+            "nodes": []
+          },
+          {
+            "repeat": 2,
+            "wall_s": 10.07,
+            "aggregate_tok_s": 19.1,
+            "slowest_request_s": 10.064,
+            "nodes": []
+          }
+        ]
+      }
+    ]
+  }
+}
