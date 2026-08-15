@@ -4,6 +4,35 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [0.7.1] — 2026-08-15
+
+### Security
+
+- **The model download destination is now contained inside the models
+  directory.** `POST /v1/node/models/download` performed no validation on
+  `filename` on the Hugging Face branch: it went straight into
+  `model_dir / filename`, and the download worker finishes with
+  `tmp_path.rename(dest_path)`. A caller holding the node API key could
+  therefore write a file anywhere the node process could write, overwriting
+  whatever was already there — on a container running as root, that is the
+  whole filesystem, which turns "manage this node's models" into "run code on
+  this host". The `url` branch rejected a `/` and so was incidentally narrower,
+  but not deliberately safe.
+
+  Both branches now resolve the destination and require it to stay under the
+  models directory. The check is the one `delete-file` already used rather than
+  a second opinion about what a safe path is. Repo subdirectories remain legal,
+  since they resolve inside the directory; the worker creates the parent, which
+  it previously never had to.
+
+  **Exposure:** `/v1/node/**` requires the node API key on every node,
+  including public bootstraps, so this was not reachable anonymously. Upgrade
+  anyway if any party you would not grant shell access holds a node key.
+
+  Found by probing an iOS node's API against a live device, which turned up the
+  same class of bug there, and then reading this path to see whether the flaw
+  was shared. It was.
+
 ## [0.7.0] — 2026-08-15
 
 ### Added
