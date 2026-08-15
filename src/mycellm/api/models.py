@@ -19,6 +19,34 @@ _downloads: dict[str, dict] = {}  # download_id -> {status, progress, ...}
 _download_tasks: dict[str, asyncio.Task] = {}  # download_id -> asyncio.Task
 
 
+def _safe_model_dest(model_dir: Path, filename: str) -> Path | None:
+    """Resolve `filename` under `model_dir`, or None if it escapes.
+
+    ⚠️ THE DOWNLOAD PATH HAD NO CHECK AT ALL ON THE HUGGING FACE BRANCH.
+    `filename` came straight off the request body into `model_dir / filename`,
+    and the worker finishes with `tmp_path.rename(dest_path)` — so a caller
+    holding the node API key could write a file anywhere the node process can
+    write, overwriting whatever was there. On a container running as root that
+    is the whole filesystem, which makes it a privilege escalation from "manage
+    this node's models" to "run code on this host". The URL branch rejected a
+    "/" and so was incidentally narrower; this closes both.
+
+    `delete-file` already did exactly this check — the containment test below is
+    lifted from it rather than invented, so the two agree.
+
+    A repo may legitimately hold the file in a subdirectory, so a relative path
+    that stays inside `model_dir` is allowed; only escaping is refused.
+    """
+    if not filename or filename in (".", ".."):
+        return None
+    candidate = model_dir / filename
+    try:
+        candidate.resolve().relative_to(model_dir.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
 def _hf_headers() -> dict[str, str]:
     """Build HuggingFace API headers with optional auth token."""
     from mycellm.config import get_settings
@@ -392,7 +420,10 @@ async def download_model(request: Request):
     settings = get_settings()
     model_dir = settings.model_dir or settings.data_dir / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = model_dir / filename
+
+    dest_path = _safe_model_dest(model_dir, filename)
+    if dest_path is None:
+        return {"error": "filename must resolve inside the models directory"}
 
     if dest_path.exists():
         return {"error": f"File already exists: {filename}", "path": str(dest_path)}
@@ -450,6 +481,11 @@ async def _do_download(
     info = _downloads[download_id]
 
     from mycellm.inference.hf_verify import fetch_expected_hash, verify_download
+
+    # A repo subdirectory is a legal destination (it stays inside model_dir),
+    # but nothing has created it yet — without this the write fails at the
+    # last moment, after the bytes are already on disk.
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
 
     tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
     try:
