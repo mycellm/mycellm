@@ -1,3 +1,56 @@
+# Triage: agent/sse-auth-header-refresh repo drift (follow-up)
+
+## Task
+
+Drydock flagged this repo separately: `agent/sse-auth-header-refresh` has 2
+unmerged commits, idle 13 days. Proposed action: merge it, or delete it and
+say so.
+
+## Finding: already covered by the sibling-branch triage below — don't merge
+
+`agent/sse-auth-header-refresh`'s two commits are `5838b69` ("fix: send SSE
+auth via Authorization header instead of api_key URL param" — the same title
+as `72365a6`/`0f97bb3` below) and `766df16` (a NOTES.md-only record of a
+`/var/tmp`-is-read-only verification blocker on some exec host, no code
+change).
+
+This is the exact branch the "Triage: agent/sse-auth-header repo drift"
+entry immediately below already named and dispositioned, while triaging its
+sibling `agent/sse-auth-header`:
+
+> `agent/sse-auth-header-refresh` — not an ancestor of main; carries the
+> same superseded pre-refactor client.ts/hooks diff as
+> agent/sse-auth-header plus its own NOTES.md. Same disposition: abandon,
+> don't merge.
+
+Reconfirmed directly for this ticket:
+- `git patch-id` on `5838b69` vs. `main`@`0f97bb3` (the landed fix): different
+  patch-ids — not a byte-identical duplicate — but `0f97bb3` is strictly
+  newer: it routes through `fetchWithAuth` (shared 401→logout path, added by
+  the later `867f973`), while `5838b69` is `agent/sse-auth-header-refresh`'s
+  own bare-`fetch` pre-refactor implementation.
+- `git merge-base --is-ancestor 0f97bb3 main` → true; the fix this branch
+  wants is already shipped on `main`.
+- `766df16`, the branch's second commit, adds no code — it records that the
+  branch's own checks were green using a workaround cache path. That
+  observation is now moot: the code it validates is superseded, not merged.
+
+## Disposition
+
+**Abandoning `agent/sse-auth-header-refresh`** for the same reason as
+`agent/sse-auth-header`: its payload is fully superseded by `main`@`0f97bb3`.
+Merging would reintroduce the older, untested `stream()` implementation and
+conflict with `client.ts`/`CHANGELOG.md` as already documented below.
+
+Not deleted here — worker branches don't push/delete remote refs per
+`.drydock/procedures.md`. Recommending the human delete
+`agent/sse-auth-header-refresh` (along with the other superseded
+`agent/sse-auth-header*` branches enumerated below).
+
+No code changes were needed; the fix this ticket wants is already shipped.
+
+---
+
 # Triage: agent/sse-auth-header repo drift
 
 ## Task
