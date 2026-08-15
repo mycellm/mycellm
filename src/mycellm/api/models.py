@@ -290,9 +290,102 @@ async def download_model(request: Request):
     body = await request.json()
     repo_id = body.get("repo_id", "")
     filename = body.get("filename", "")
+    source_url = (body.get("url") or "").strip()
+    sha256 = (body.get("sha256") or "").strip().lower()
 
-    if not repo_id or not filename:
-        return {"error": "repo_id and filename required"}
+    manifest = body.get("files")
+    if isinstance(manifest, list) and manifest:
+        # ── MLX manifest ─────────────────────────────────────────────────
+        # An MLX model is a DIRECTORY — config, tokenizer and one or more
+        # safetensors shards that only mean anything together — so the
+        # admin-install form is per-file, each entry naming its own URL and
+        # digest.
+        #
+        # ⚠️ THE PYTHON NODE COULD NOT INSTALL AN MLX MODEL AT ALL BEFORE THIS.
+        # /download fetches exactly one file to one path, which is the GGUF
+        # shape; the iOS node has had MLXRepo for directory installs since
+        # build 16. Adding the manifest here closes that asymmetry rather than
+        # widening it, which matters on a fleet where every node is Apple
+        # Silicon and MLX is the native format.
+        name = (body.get("name") or "").strip()
+        if not name or "/" in name:
+            return {"error": "name required for a manifest install"}
+
+        assets = []
+        for f in manifest:
+            path_ = (f.get("path") or "").strip()
+            if not path_ or ".." in path_ or path_.startswith("/"):
+                return {"error": "each file needs a safe relative path"}
+            u = (f.get("url") or "").strip()
+            if not u.lower().startswith("https://"):
+                return {"error": f"{path_}: url must be an absolute https URL"}
+            digest = (f.get("sha256") or "").strip().lower()
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                return {"error": f"{path_}: sha256 required — 64 hex characters"}
+            assets.append({"path": path_, "url": u, "sha256": digest,
+                           "size": int(f.get("size") or 0)})
+
+        # `scan_local_models` treats a directory as loadable when it holds
+        # config.json and any .safetensors. A manifest missing either publishes
+        # something the picker offers and the engine cannot load, so refuse it
+        # before downloading rather than after.
+        if not any(a["path"].endswith(".safetensors") for a in assets):
+            return {"error": "manifest must include at least one .safetensors file"}
+        if not any(a["path"] == "config.json" for a in assets):
+            return {"error": "manifest must include config.json"}
+
+        from mycellm.config import get_settings
+        settings = get_settings()
+        model_dir = settings.model_dir or settings.data_dir / "models"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        dest_dir = model_dir / name
+        if dest_dir.exists():
+            return {"error": f"Model already exists: {name}", "path": str(dest_dir)}
+
+        import hashlib as _h
+        download_id = _h.sha256(f"manifest:{name}".encode()).hexdigest()[:16]
+        if download_id in _downloads and _downloads[download_id].get("status") == "downloading":
+            return {"error": "Download already in progress", "download_id": download_id}
+
+        total = sum(a["size"] for a in assets)
+        _downloads[download_id] = {
+            "download_id": download_id, "repo_id": "manifest", "filename": name,
+            "status": "downloading", "progress": 0.0, "bytes_downloaded": 0,
+            "total_bytes": total, "started_at": time.time(),
+            "dest_path": str(dest_dir), "speed_mbps": 0.0, "eta_seconds": 0,
+            "format": "mlx",
+        }
+        task = asyncio.create_task(_do_manifest_download(download_id, assets, dest_dir, node))
+        _download_tasks[download_id] = task
+        return {"download_id": download_id, "status": "started", "name": name,
+                "format": "mlx", "files": len(assets), "total_bytes": total,
+                "dest_path": str(dest_dir)}
+
+    if source_url:
+        # Arbitrary URL: for models that aren't on Hugging Face — an internal
+        # mirror, a private build, an admin coordinating a fleet install.
+        #
+        # ⚠️ `sha256` IS REQUIRED HERE AND NOWHERE ELSE. Every other download is
+        # checked against a hash the node looks up itself (HF publishes
+        # `lfs.oid`), so it can always tell whether it got the file it asked
+        # for. A caller-supplied URL has no such attestation; without a digest
+        # this would be the only way to place unverified weights on a node, on
+        # the say-so of whoever holds the API key. Requiring the caller to
+        # commit to a hash up front preserves the invariant that everything on
+        # disk was verified against something stated in advance.
+        if not source_url.lower().startswith("https://"):
+            return {"error": "url must be an absolute https URL"}
+        if len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
+            return {
+                "error": "sha256 required for url downloads — "
+                         "64 hex characters of the file's digest"
+            }
+        if not filename:
+            filename = source_url.rsplit("/", 1)[-1].split("?")[0]
+        if not filename or "/" in filename:
+            return {"error": "filename required (or a URL ending in one)"}
+    elif not repo_id or not filename:
+        return {"error": "repo_id and filename, url and sha256, or files (manifest), required"}
 
     # Determine download path
     from mycellm.config import get_settings
@@ -305,15 +398,17 @@ async def download_model(request: Request):
         return {"error": f"File already exists: {filename}", "path": str(dest_path)}
 
     import hashlib
-    download_id = hashlib.sha256(f"{repo_id}/{filename}".encode()).hexdigest()[:16]
+    key = f"{source_url}#{filename}" if source_url else f"{repo_id}/{filename}"
+    download_id = hashlib.sha256(key.encode()).hexdigest()[:16]
 
     if download_id in _downloads and _downloads[download_id].get("status") == "downloading":
         return {"error": "Download already in progress", "download_id": download_id}
 
     _downloads[download_id] = {
         "download_id": download_id,
-        "repo_id": repo_id,
+        "repo_id": repo_id or (source_url.split("/")[2] if source_url else ""),
         "filename": filename,
+        "source_url": source_url,
         "status": "downloading",
         "progress": 0.0,
         "bytes_downloaded": 0,
@@ -333,23 +428,47 @@ async def download_model(request: Request):
     }
 
     # Start download in background
-    task = asyncio.create_task(_do_download(download_id, repo_id, filename, dest_path, node, meta))
+    task = asyncio.create_task(_do_download(
+        download_id, repo_id, filename, dest_path, node, meta,
+        source_url=source_url or None, sha256=sha256 or None))
     _download_tasks[download_id] = task
 
-    return {"download_id": download_id, "status": "started", "dest_path": str(dest_path)}
+    return {
+        "download_id": download_id,
+        "status": "started",
+        "dest_path": str(dest_path),
+        **({"url": source_url, "sha256": sha256} if source_url else {"repo_id": repo_id}),
+    }
 
 
-async def _do_download(download_id: str, repo_id: str, filename: str, dest_path: Path, node, meta: dict | None = None) -> None:
+async def _do_download(
+    download_id: str, repo_id: str, filename: str, dest_path: Path, node,
+    meta: dict | None = None, source_url: str | None = None, sha256: str | None = None,
+) -> None:
     """Background download task."""
-    url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+    url = source_url or f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
     info = _downloads[download_id]
 
     from mycellm.inference.hf_verify import fetch_expected_hash, verify_download
 
     tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
     try:
-        expected_hash = await fetch_expected_hash(repo_id, filename, headers=_hf_headers())
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=3600.0), follow_redirects=True, headers=_hf_headers()) as client:
+        if source_url:
+            # Not advisory: there is no second source to fall back on, so an
+            # unverifiable URL download is a failed one.
+            expected_hash = ("sha256", sha256)
+        else:
+            expected_hash = await fetch_expected_hash(repo_id, filename, headers=_hf_headers())
+        # ⚠️ NO HUGGING FACE CREDENTIALS ON A THIRD-PARTY URL. `_hf_headers()`
+        # carries the node's HF token; sending it to whatever host an admin
+        # names would hand that token to a server that has no business seeing
+        # it — and to any host it redirects to.
+        request_headers = _hf_headers() if not source_url else {}
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, read=3600.0),
+            follow_redirects=True,
+            headers=request_headers,
+        ) as client:
             async with client.stream("GET", url) as resp:
                 resp.raise_for_status()
                 total = int(resp.headers.get("content-length", 0))
@@ -586,3 +705,68 @@ async def suggested_models(request: Request, role: str = "", limit: int = 10):
         "loaded_bytes": loaded_bytes,
         "catalog_version": catalog.get("catalog_version", ""),
     }
+
+
+async def _do_manifest_download(download_id: str, assets: list[dict], dest_dir: Path, node) -> None:
+    """Fetch every file of an MLX model, then publish the directory in one move.
+
+    Mirrors MLXRepo on the iOS node, and for the same reasons:
+
+    1. **Publish atomically.** A directory is "a loadable model" the moment it
+       holds config.json and any .safetensors, so writing in place would make an
+       interrupted download look installed — offered by the picker and failing
+       at load. Assemble in `.staging/` and rename once every file is present.
+    2. **Stage on the same volume**, so publishing is a rename rather than a
+       multi-gigabyte copy needing the model's size twice.
+    3. **Verify per file, not at the end.** There is no tree API to fall back on
+       here, so the caller-supplied digest is the only evidence the bytes are
+       right — and checking each shard as it lands fails a bad one before the
+       next multi-gigabyte fetch starts.
+    """
+    from mycellm.inference.hf_verify import file_content_hash
+
+    info = _downloads[download_id]
+    staging = dest_dir.parent / ".staging" / dest_dir.name
+    staging.mkdir(parents=True, exist_ok=True)
+
+    downloaded_total = 0
+    try:
+        # No credentials on third-party hosts — see the note in _do_download.
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, read=3600.0), follow_redirects=True
+        ) as client:
+            for asset in assets:
+                target = staging / asset["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+
+                if target.exists() and asset["size"] and target.stat().st_size == asset["size"]:
+                    downloaded_total += asset["size"]
+                    continue
+
+                async with client.stream("GET", asset["url"]) as resp:
+                    resp.raise_for_status()
+                    with open(target, "wb") as fh:
+                        async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                            fh.write(chunk)
+                            downloaded_total += len(chunk)
+                            info["bytes_downloaded"] = downloaded_total
+                            if info["total_bytes"]:
+                                info["progress"] = downloaded_total / info["total_bytes"] * 100
+
+                got = file_content_hash(target, "sha256")
+                if got != asset["sha256"]:
+                    target.unlink(missing_ok=True)
+                    raise ValueError(
+                        f"{asset['path']} does not match the digest supplied for it "
+                        f"(expected {asset['sha256'][:12]}…, got {got[:12]}…)"
+                    )
+
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+        staging.rename(dest_dir)
+        info["status"] = "completed"
+        info["progress"] = 100.0
+        logger.info("Manifest install complete: %s", dest_dir)
+    except Exception as e:  # noqa: BLE001 - surfaced to the caller via _downloads
+        info["status"] = "failed"
+        info["error"] = str(e)
+        logger.error("Manifest install failed for %s: %s", dest_dir.name, e)
