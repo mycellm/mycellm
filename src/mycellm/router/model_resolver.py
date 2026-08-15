@@ -100,6 +100,36 @@ def _backend_efficiency(backend: str) -> float:
     return 1.0
 
 
+# Name fragments that identify an embedding model.
+#
+# "embed" alone was the original rule, and it only ever caught models that say
+# so — nomic-embed-text, text-embedding-3. Every model actually shipped as GGUF
+# for this job (all-MiniLM-L6-v2, bge-small-en, gte-base, multilingual-e5-large)
+# names its architecture instead, and was tagged "chat": harmless while
+# embeddings only arrived through the mlx-embeddings backend, whose type is
+# authoritative, but wrong for a GGUF embedding model loaded into llama.cpp on
+# either platform. Mirrored by EmbeddingModels.families in the iOS node, which
+# has no backend signal to fall back on — keep the two lists in step.
+_EMBEDDING_FAMILIES = (
+    "embed",       # nomic-embed, arctic-embed, jina-embeddings, text-embedding
+    "minilm",
+    "bge-",
+    "gte-",
+    "e5-",         # multilingual-e5, intfloat e5
+    "mxbai",
+    "mpnet",
+    "sentence-t5",
+    "paraphrase-",
+    "stella-",
+)
+
+
+def is_embedding_model_name(model_name: str) -> bool:
+    """Whether a model name identifies an embedding model."""
+    stem = model_name.rsplit("/", 1)[-1].lower().removesuffix(".gguf")
+    return any(k in stem for k in _EMBEDDING_FAMILIES)
+
+
 def derive_tags(model_name: str) -> list[str]:
     """Auto-derive tags from model name heuristics."""
     tags = ["chat"]  # all models are assumed chat-capable
@@ -111,7 +141,7 @@ def derive_tags(model_name: str) -> list[str]:
         tags.append("reasoning")
     if any(k in name_lower for k in ("vision", "vl", "llava", "pixtral")):
         tags.append("vision")
-    if any(k in name_lower for k in ("embed", "embedding")):
+    if is_embedding_model_name(model_name):
         tags = ["embedding"]  # override
 
     return tags
