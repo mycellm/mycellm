@@ -4,7 +4,37 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
-## [Unreleased]
+## [0.7.0] — 2026-08-15
+
+### Added
+- **Models can be installed from a URL or an MLX manifest, not just Hugging
+  Face.** `POST /v1/node/models/download` previously accepted `repo_id` +
+  `filename` and built a huggingface.co URL — so a model on an internal mirror,
+  a private build, or anything an admin wanted to place across a fleet had no
+  route in at all. Two new forms:
+
+      {"url": "…", "sha256": "…", "filename": "…"}          single file
+      {"name": "…", "files": [{path, url, sha256, size}, …]} MLX directory
+
+  `sha256` is required on both, and only here. Every other download is checked
+  against a hash the node looks up itself (HF publishes `lfs.oid`); a
+  caller-supplied URL has no such attestation, so without a digest this would be
+  the only way to place unverified weights on a node. Verification is not
+  advisory on this path either — there is no second source to fall back on, so
+  unverifiable means failed.
+
+  The manifest form also closes an asymmetry: the Python node could not install
+  an MLX model at all, while the iOS node has had directory installs since its
+  build 16 — on a fleet where every node is Apple Silicon and MLX is the native
+  format. The worker stages in `.staging/`, publishes by rename so an
+  interrupted install never looks complete, and verifies each file as it lands
+  so a bad shard fails before the next multi-gigabyte fetch starts.
+
+### Security
+- **The Hugging Face token is no longer sent to third-party hosts.**
+  `_hf_headers()` was applied to every download request regardless of
+  destination, which would have handed the node's HF credential to whatever
+  host an admin named in a URL — and to anything it redirected to.
 
 ### Fixed
 - **GGUF embedding models are tagged `embedding` instead of `chat`.**
