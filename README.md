@@ -247,19 +247,25 @@ anything an air-gapped network has to stage itself. `/v1/node/models/download`
 takes a URL instead of a `repo`/`filename` pair:
 
 ```bash
-# Single file (GGUF)
+# Single file (GGUF) — `filename` is optional; it defaults to the URL's last path component
 curl -X POST localhost:8420/v1/node/models/download \
   -H "Authorization: Bearer $MYCELLM_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"name": "my-finetune", "source_url": "https://models.example.org/my-finetune-Q4_K_M.gguf",
-       "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}'
+  -d '{"url": "https://models.example.org/my-finetune-Q4_K_M.gguf",
+       "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+       "filename": "my-finetune-Q4_K_M.gguf"}'
 
-# MLX directory — many files, so pass a manifest
+# MLX directory — many files, so pass `files`; `name` is the directory it publishes as
 curl -X POST localhost:8420/v1/node/models/download \
   -H "Authorization: Bearer $MYCELLM_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"name": "my-finetune-mlx", "manifest": [
-        {"name": "config.json",         "url": "https://…/config.json",         "sha256": "…"},
-        {"name": "model.safetensors",   "url": "https://…/model.safetensors",   "sha256": "…"}]}'
+  -d '{"name": "my-finetune-mlx", "files": [
+        {"path": "config.json",       "url": "https://…/config.json",       "sha256": "…"},
+        {"path": "model.safetensors", "url": "https://…/model.safetensors", "sha256": "…", "size": 4128},
+        {"path": "tokenizer.json",    "url": "https://…/tokenizer.json",    "sha256": "…"}]}'
 ```
+
+A manifest must include `config.json` and at least one `.safetensors` file — a
+directory missing either is refused up front rather than published as something
+the model picker offers and the engine cannot load.
 
 `https` and a `sha256` per file are **required**, and the digest is verified as
 each file lands — a mismatch fails the install and deletes the staged bytes.
