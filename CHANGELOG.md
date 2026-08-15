@@ -7,6 +7,20 @@ uses semantic-ish versioning (0.x.y while pre-1.0).
 ## [Unreleased]
 
 ### Fixed
+- **GGUF embedding models are tagged `embedding` instead of `chat`.**
+  `derive_tags()` keyed on the substring "embed", which catches models that say
+  so (`nomic-embed-text`, `text-embedding-3`) but misses every family that names
+  its architecture instead — `all-MiniLM-L6-v2`, `bge-small-en`, `gte-base`,
+  `multilingual-e5-large`, `mxbai`, `mpnet`. That was survivable while
+  embeddings only arrived through `mlx-embeddings`, whose backend type is
+  authoritative and overrides the name, but a GGUF embedding model loaded into
+  llama.cpp got `["chat"]` — so `/v1/embeddings` wouldn't resolve to it and
+  auto-routing would hand it a chat request it cannot serve. The family list now
+  lives in `_EMBEDDING_FAMILIES` with a shared `is_embedding_model_name()`
+  helper, mirrored by `EmbeddingModels.families` in the iOS node — which has no
+  backend signal to fall back on, so the name is its whole decision. Keep the
+  two lists in step: a model must not be an embedding model on one node and a
+  chat model on another.
 - **Dashboard no longer leaks the local admin api_key to remote node
   addresses.** `remote()` (used by the Model tab's device switcher) called
   the target node's origin directly with the browser's Authorization
