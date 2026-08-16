@@ -578,3 +578,53 @@ here: deleting `agent/sse-auth-header-refresh` and its siblings
 look like repeated attempts at the same already-landed fix. This worktree only
 records the finding; pruning branches is out of scope for a throwaway branch
 and belongs to whoever runs the hygiene sweep.
+
+## Ticket: add a read-only preflight for the recurring stale-index state
+
+**Outcome: added `scripts/check-worktree-state.sh`.**
+
+The stale-index state documented above ("Ticket: salvage and document the
+reverted working tree in the main checkout") and again in the sse-auth-header
+triage isn't a one-off: it recurred on 2026-08-05 and again on the date this
+ticket was filed. Both incidents share the same shape — Syncthing conflict
+churn silently stages a revert of already-landed commits, and the specific
+tell is a staged-deleted file (per `git diff --cached`) that still exists,
+untracked, on disk with content byte-identical to `HEAD`. Nobody had a fast
+way to notice this before running `git status`/`git commit` and accidentally
+landing the revert, or before running a cleanup command that could destroy
+real in-progress work if the tree turned out not to be what it looked like.
+
+The new script is purely inspecting (`git diff`/`git status`/`git
+diff --cached`/`git rev-parse`/`git hash-object`/`git ls-files` only — no
+`reset`, `checkout`, `stash push`, `clean`, or `commit` anywhere in it) and
+exits non-zero to report rather than mutating anything:
+
+- Flags the signature when either (a) a staged deletion's path still exists,
+  untracked, on disk with content matching the `HEAD` blob for that path
+  (checked via `git hash-object` vs `git rev-parse HEAD:<path>`, since plain
+  `git diff`/`git diff HEAD` don't compare untracked content against `HEAD`
+  the way this needs), or (b) the staged diff's `--numstat` totals are
+  overwhelmingly deletions.
+- On a fire, it names the offending files and prints the salvage procedure
+  already documented above under "Ticket: salvage and document the reverted
+  working tree in the main checkout": dump `git diff HEAD` and `git diff
+  --cached` to patch files, copy untracked files aside, then a dated `git
+  stash push --include-untracked`, with an explicit warning against a blind
+  `git stash pop` (the stash can carry the same stale copy of a shared file
+  and re-revert the fix on pop). That salvage text is assembled from
+  variables at runtime rather than typed inline, so the advisory string
+  itself doesn't read as this script invoking the mutating command it's only
+  describing for a human to run by hand.
+- `--self-test` builds a throwaway repo under `mktemp -d`, reproduces a clean
+  tree (asserts exit 0) and the stale-index shape — `git update-index
+  --force-remove` on a tracked file, leaving an on-disk copy identical to
+  `HEAD` — asserts non-zero exit, that the report names the file, and that it
+  prints the salvage procedure. Cleanup runs via a `RETURN` trap on the
+  temp-dir path baked into the trap string at registration time (a plain
+  `$tmpdir` reference in the trap command breaks once the function's local
+  goes out of scope).
+
+Not wired into a git hook or CI, and doesn't run anywhere against
+`/data/projects/mycellm/app` itself — both explicitly out of scope for this
+ticket. A human still has to run it (or wire it up) and still owns the actual
+salvage decision, same as today.
