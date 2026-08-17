@@ -1146,6 +1146,74 @@ async def list_relays(request: Request):
     return {"relays": node.relay_manager.get_status()}
 
 
+@router.post("/plan")
+async def explain_plan(request: Request):
+    """Explain how a request WOULD be executed, without executing it.
+
+    Body: {"model": "mycellm/swarm", "messages": [...], "trust": "", "fanout": 0}
+
+    The planner is a pure function, so this is the same decision the real
+    request would make — including which targets the egress policy refuses and
+    why. That matters more than the selections: a silently-blocked target is
+    indistinguishable from one that was never there.
+    """
+    from mycellm.execution.models import Job
+    from mycellm.execution.planner import ExecutionPlanner
+
+    node = request.app.state.node
+    body = await request.json()
+    job = Job(
+        job_id=Job.new_id("plan"),
+        model=body.get("model", ""),
+        messages=body.get("messages") or [{"role": "user", "content": ""}],
+        temperature=float(body.get("temperature", 0.7)),
+        max_tokens=int(body.get("max_tokens", 2048)),
+        trust=body.get("trust", ""),
+        token_budget=int(body.get("token_budget", 0) or 0),
+        fanout=int(body.get("fanout", 0) or 0),
+    )
+    if job.network_ids is None:
+        job.network_ids = node._own_network_ids()
+    targets = node.execution_targets()
+    plan = ExecutionPlanner().plan(
+        job, targets,
+        override_privacy=request.headers.get("X-Privacy-Override") == "acknowledged",
+    )
+    return {
+        "plan": plan.to_dict(),
+        "candidates": [
+            {"target": str(t), "model": t.model, "kind": t.kind,
+             "remote": t.is_remote, "tok_s": t.tok_s}
+            for t in targets
+        ],
+    }
+
+
+@router.get("/groups")
+async def list_serving_groups(request: Request):
+    """Serving groups and their deployments (0.8 Adaptive Inference Fabric).
+
+    A ServingGroup is a gateway-owned serving service — an external
+    OpenAI-compatible endpoint, which may itself front a distributed cluster
+    (oMLX, vLLM, Ollama). Each model it serves is a Deployment with a stable
+    id, so two groups serving the same model name remain distinguishable.
+
+    Read-only. This is the consumer for the `serving_group_id` /
+    `deployment_id` capability fields — they and this endpoint shipped
+    together on purpose.
+    """
+    node = request.app.state.node
+    if not hasattr(node, "relay_manager") or not node.relay_manager:
+        return {"groups": [], "count": 0}
+    groups = node.relay_manager.get_groups()
+    return {
+        "groups": groups,
+        "count": len(groups),
+        "healthy_count": sum(1 for g in groups if g["healthy"]),
+        "deployment_count": sum(len(g["deployments"]) for g in groups),
+    }
+
+
 @router.post("/relay/add")
 async def add_relay(request: Request):
     """Add a relay backend (OpenAI-compatible API endpoint).

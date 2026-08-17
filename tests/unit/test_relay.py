@@ -151,10 +151,16 @@ async def test_add_auth_failure(relay_manager, mock_inference):
 
 @pytest.mark.asyncio
 async def test_remove_unloads_models(relay_manager, mock_inference):
+    # `registered` is the ownership record `_discover_models` populates; a
+    # relay that never registered anything has nothing to unload. Removal
+    # unloads exactly what this relay registered rather than reconstructing
+    # `relay:{id}` from the upstream list, which used to unload another
+    # relay's identically-named model.
     relay_manager._relays["http://ipad:8080"] = RelayEndpoint(
         url="http://ipad:8080",
         name="ipad",
         models=[{"id": "llama3"}, {"id": "phi-4"}],
+        registered={"relay:llama3": "llama3", "relay:phi-4": "phi-4"},
         online=True,
     )
 
@@ -162,6 +168,29 @@ async def test_remove_unloads_models(relay_manager, mock_inference):
     assert removed
     assert mock_inference.unload_model.call_count == 2
     assert len(relay_manager.relays) == 0
+
+
+@pytest.mark.asyncio
+async def test_remove_does_not_unload_another_relays_model(relay_manager, mock_inference):
+    """Two relays serving the same upstream model must not unload each other.
+
+    Removal used to derive names from the upstream model list, so removing
+    either relay unloaded whichever one held `relay:llama3`.
+    """
+    relay_manager._relays["http://a:8080"] = RelayEndpoint(
+        url="http://a:8080", name="alpha", models=[{"id": "llama3"}],
+        registered={"relay:llama3": "llama3"}, online=True,
+    )
+    relay_manager._relays["http://b:8080"] = RelayEndpoint(
+        url="http://b:8080", name="bravo", models=[{"id": "llama3"}],
+        registered={"relay:bravo:llama3": "llama3"}, online=True,
+    )
+
+    await relay_manager.remove("http://a:8080")
+
+    unloaded = [c.args[0] for c in mock_inference.unload_model.call_args_list]
+    assert unloaded == ["relay:llama3"]
+    assert "relay:bravo:llama3" not in unloaded
 
 
 @pytest.mark.asyncio
