@@ -60,6 +60,43 @@ class ModelCapability:
     throughput_tok_s: float = 0.0  # measured tokens/sec
     loaded_bytes: int = 0  # approximate model footprint (file size on disk; 0 for remote)
 
+    # ── 0.8 Adaptive Inference Fabric (additive, optional) ──────────────
+    #
+    # ⚠️ EVERY ONE OF THESE IS OMITTED FROM `to_dict()` WHEN UNSET, AND THAT
+    # IS LOAD-BEARING, NOT TIDINESS. A 0.7.1 peer parses this map with
+    # explicit `d.get(...)` lookups per key (see `from_dict` below), so it
+    # ignores keys it does not know — but only if we never *require* them.
+    # Emitting `parallelism: {"type": "standalone"}` on every model would
+    # also inflate every announcement on a network where nothing uses it.
+    #
+    # Adding fields here is safe. Adding a new `MessageType` is NOT — but not
+    # for the reason usually given. Both decoders reject an unknown type
+    # (Python raises `ValueError` from `MessageType(obj["type"])`,
+    # `envelope.py`; iOS throws `invalidCBOR`, `MessageEnvelope.swift:73`),
+    # and both transports then swallow it: `quic.py:118-121` logs and returns,
+    # `QUICTransport.swift:155-158` uses `try?` and returns. The connection
+    # SURVIVES; the message is silently lost. That is worse than a hard
+    # failure for request/response — a `send_and_wait` on a new type hangs
+    # until timeout instead of failing fast — and it cannot be feature-gated,
+    # because the advertised capability version is meaningful only as of the
+    # fix in this release. So 0.8 information travels inside existing
+    # messages, in these fields, rather than in new message types.
+
+    #: Which deployment serves this model. Empty = served by this peer directly.
+    deployment_id: str = ""
+    #: The serving group the deployment belongs to (e.g. an oMLX cluster).
+    serving_group_id: str = ""
+    #: {"type": "standalone"|"tensor"|"pipeline"|"external", "world_size": int}
+    parallelism: dict = field(default_factory=dict)
+
+    # `execution_roles` (proposer/critic/synthesizer/…) is deliberately NOT
+    # here yet, and was removed after being written. It belongs to the
+    # execution planner, which is not in this slice — and a role that nothing
+    # enforces is precisely the bug this codebase keeps shipping: embedding
+    # models were tagged `["embedding"]` correctly for months while the chat
+    # path never read the tag; `routing: "ensemble"` is accepted by the public
+    # API today and implemented nowhere. The field lands with its consumer.
+
     def to_dict(self) -> dict:
         d = {
             "name": self.name,
@@ -83,6 +120,14 @@ class ModelCapability:
             d["throughput_tok_s"] = self.throughput_tok_s
         if self.loaded_bytes > 0:
             d["loaded_bytes"] = self.loaded_bytes
+        # 0.8 fields — emitted only when set, so a 0.7 network sees the
+        # byte-identical announcement it saw before.
+        if self.deployment_id:
+            d["deployment_id"] = self.deployment_id
+        if self.serving_group_id:
+            d["serving_group_id"] = self.serving_group_id
+        if self.parallelism:
+            d["parallelism"] = self.parallelism
         return d
 
     @classmethod
@@ -100,7 +145,15 @@ class ModelCapability:
             features=d.get("features", []),
             throughput_tok_s=d.get("throughput_tok_s", 0.0),
             loaded_bytes=d.get("loaded_bytes", 0),
+            deployment_id=d.get("deployment_id", ""),
+            serving_group_id=d.get("serving_group_id", ""),
+            parallelism=d.get("parallelism", {}),
         )
+
+    @property
+    def is_grouped(self) -> bool:
+        """True if a ServingGroup serves this, not this peer's own backend."""
+        return bool(self.serving_group_id)
 
 
 @dataclass
@@ -111,16 +164,76 @@ class HardwareInfo:
     vram_gb: float = 0.0
     backend: str = "cpu"
 
+    # ── 0.8 additive telemetry ──────────────────────────────────────────
+    #
+    # A scheduler that sees only gpu/vram routes to a phone that is at 5% on
+    # battery and thermally throttled. iOS already computes all of this for
+    # its own `/v1/node/status` `device` block and already demotes itself to
+    # `consumer` — these fields let the *rest of the fleet* see the same
+    # facts instead of each node discovering them by failing a request.
+    ram_gb: float = 0.0
+    available_memory_gb: float = 0.0
+    architecture: str = ""       # "arm64", "x86_64"
+    device_class: str = ""       # "server" | "desktop" | "laptop" | "mobile"
+    #: True when the device is power-limited (Low Power Mode / low battery).
+    power_constrained: bool = False
+    #: True when the device is thermally throttled.
+    thermal_constrained: bool = False
+    #: True when the network costs money (cellular).
+    network_expensive: bool = False
+    #: True when the user asked the system to go easy (Low Data Mode).
+    network_constrained: bool = False
+
     def to_dict(self) -> dict:
-        return {"gpu": self.gpu, "vram_gb": self.vram_gb, "backend": self.backend}
+        d = {"gpu": self.gpu, "vram_gb": self.vram_gb, "backend": self.backend}
+        # Same rule as ModelCapability: absent unless set, so a 0.7 network
+        # sees an unchanged payload.
+        if self.ram_gb > 0:
+            d["ram_gb"] = self.ram_gb
+        if self.available_memory_gb > 0:
+            d["available_memory_gb"] = self.available_memory_gb
+        if self.architecture:
+            d["architecture"] = self.architecture
+        if self.device_class:
+            d["device_class"] = self.device_class
+        if self.power_constrained:
+            d["power"] = {"constrained": True}
+        if self.thermal_constrained:
+            d["thermal"] = {"constrained": True}
+        if self.network_expensive or self.network_constrained:
+            d["network"] = {
+                "expensive": self.network_expensive,
+                "constrained": self.network_constrained,
+            }
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> HardwareInfo:
+        power = d.get("power") or {}
+        thermal = d.get("thermal") or {}
+        network = d.get("network") or {}
         return cls(
             gpu=d.get("gpu", "none"),
             vram_gb=d.get("vram_gb", 0.0),
             backend=d.get("backend", "cpu"),
+            ram_gb=d.get("ram_gb", 0.0),
+            available_memory_gb=d.get("available_memory_gb", 0.0),
+            architecture=d.get("architecture", ""),
+            device_class=d.get("device_class", ""),
+            power_constrained=bool(power.get("constrained", False)),
+            thermal_constrained=bool(thermal.get("constrained", False)),
+            network_expensive=bool(network.get("expensive", False)),
+            network_constrained=bool(network.get("constrained", False)),
         )
+
+    @property
+    def is_constrained(self) -> bool:
+        """True when this device should not be handed discretionary work.
+
+        Mirrors the demotion rule iOS already applies to itself, so a
+        scheduler and the device agree about when it is in no state to serve.
+        """
+        return self.power_constrained or self.thermal_constrained
 
 
 @dataclass
