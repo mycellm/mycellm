@@ -269,3 +269,66 @@ class TestGroupIntrospection:
         assert st["model_count"] == 2, "still advertises what it last saw upstream"
         assert st["registered_count"] == 0, "but serves nothing"
         assert st["healthy"] is False
+
+
+class TestAdoptionAfterRestart:
+    """⚠️ REGRESSION found on a live node restart.
+
+    A relay-backed model auto-loads from its saved config at startup, before
+    relay discovery runs. The "already served by another backend" guard then
+    refused to claim it, so `registered` stayed empty and the group reported
+    **unhealthy with zero deployments while actually serving traffic** — health
+    that contradicts reality, which is the whole class of bug this file exists
+    to prevent.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_already_loaded_model_from_this_relay_is_adopted(self):
+        mgr, inf = make_manager()
+        relay = RelayEndpoint(url="http://box.lan", name="box", online=True)
+        mgr._relays[relay.url] = relay
+
+        # Simulate startup: the model is loaded, with a saved config pointing
+        # at this relay, but nothing owns it yet.
+        inf.names.append("relay:llama3")
+        inf._saved_configs = {"relay:llama3": {"api_base": "http://box.lan/v1"}}
+        inf._model_info = {}
+
+        assert mgr._is_ours(relay, "relay:llama3") is True
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_model_is_not_adopted(self):
+        mgr, inf = make_manager()
+        relay = RelayEndpoint(url="http://box.lan", name="box", online=True)
+        mgr._relays[relay.url] = relay
+        inf.names.append("relay:llama3")
+        inf._saved_configs = {"relay:llama3": {"api_base": "http://somewhere-else/v1"}}
+        inf._model_info = {}
+
+        assert mgr._is_ours(relay, "relay:llama3") is False
+
+    @pytest.mark.asyncio
+    async def test_group_identity_wins_when_available(self):
+        mgr, inf = make_manager()
+        relay = RelayEndpoint(url="http://box.lan", name="box", online=True)
+        mgr._relays[relay.url] = relay
+
+        class _Info:
+            serving_group_id = "grp_box"
+        inf._model_info = {"relay:llama3": _Info()}
+        inf._saved_configs = {}
+        assert mgr._is_ours(relay, "relay:llama3") is True
+
+        _Info.serving_group_id = "grp_other"
+        assert mgr._is_ours(relay, "relay:llama3") is False
+
+    @pytest.mark.asyncio
+    async def test_no_evidence_means_not_ours(self):
+        # Absent both signals, do NOT claim — displacing another backend's
+        # model is worse than showing an unowned one.
+        mgr, inf = make_manager()
+        relay = RelayEndpoint(url="http://box.lan", name="box")
+        mgr._relays[relay.url] = relay
+        inf._saved_configs = {}
+        inf._model_info = {}
+        assert mgr._is_ours(relay, "relay:llama3") is False
