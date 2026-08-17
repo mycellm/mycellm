@@ -135,8 +135,47 @@ class PeerRegistry:
                 continue
             if want is not None and entry.network_ids and not (want & set(entry.network_ids)):
                 continue  # no shared network — not reachable from this requester
+            if want is not None and not self._model_visible(
+                entry, model_name, want
+            ):
+                continue  # peer is reachable, but this MODEL is not offered here
             entries.append(entry)
         return entries
+
+    @staticmethod
+    def _model_visible(entry: PeerEntry, model_name: str, want: set[str]) -> bool:
+        """Is this specific model offered to a requester on `want` networks?
+
+        ⚠️ PER-MODEL SCOPE WAS ENFORCED NOWHERE. Peer-level filtering above
+        asks "can I talk to this peer at all"; it does not ask "does this peer
+        offer *this model* to me". A peer on both net-A and net-B advertising a
+        model scoped to net-A only was serving it to net-B requesters, because
+        the peer-level check passed and nothing looked at the model's scope.
+
+        `models_visible_to_network` had the correct rule the whole time and had
+        zero production callers — the same correct-but-unread shape as the
+        embedding tags and `routing: "ensemble"`. The rule is applied here
+        rather than duplicated, so the two cannot drift.
+
+        Only evaluated when the requester's networks are known. With `want`
+        None (an un-federated node routing its own traffic) there is nothing to
+        compare against, and refusing everything would break every
+        single-network deployment.
+        """
+        for m in entry.capabilities.models:
+            if m.name != model_name:
+                continue
+            scope = getattr(m, "scope", "home")
+            if scope == "public":
+                return True
+            if scope == "networks":
+                return bool(want & set(getattr(m, "visible_networks", []) or []))
+            # "home": offered only to peers sharing one of this peer's networks.
+            # An un-networked peer is legacy/public and stays reachable.
+            return not entry.network_ids or bool(want & set(entry.network_ids))
+        # Indexed for this model but no matching capability — the index is the
+        # authority for "has it", so don't second-guess it here.
+        return True
 
     def all_peers(self) -> list[PeerEntry]:
         return list(self._peers.values())

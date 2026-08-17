@@ -57,6 +57,13 @@ def _node(registry: PeerRegistry):
     n.ledger = None
     n.chain_builder = ChainBuilder(registry)
     n.model_resolver = ModelResolver(registry)
+    # Un-federated node: declares no networks, so its own routing is
+    # unrestricted — the behaviour these failover tests are about.
+    # `route_inference` scopes locally-originated requests to this node's
+    # networks (see MycellmNode._own_network_ids), so the double must supply
+    # both the accessor and what it reads.
+    n.federation = types.SimpleNamespace(network_ids=[])
+    n._own_network_ids = types.MethodType(MycellmNode._own_network_ids, n)
     inf = types.SimpleNamespace()
     inf.loaded_models = []
     inf.resolve_model_name = lambda m: ""  # nothing loaded locally (bootstrap)

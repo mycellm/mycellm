@@ -48,6 +48,16 @@ from mycellm.activity import ActivityTracker, EventType
 from mycellm.federation import FederationManager
 
 logger = logging.getLogger("mycellm")
+
+
+def _mycellm_version() -> str:
+    """The running package version, for capability advertisement.
+
+    Imported lazily because `mycellm/__init__.py` is imported by everything;
+    a module-level import here would put node.py inside that cycle.
+    """
+    from mycellm import __version__
+    return __version__
 console = Console()
 
 # Per-bootstrap HTTP announce backoff. A bootstrap that keeps failing is skipped
@@ -1494,7 +1504,9 @@ class MycellmNode:
             models=self.inference.loaded_models,
             hardware=hw,
             role="seeder" if self.inference.loaded_models else "consumer",
-            version="0.1.0",
+            # The real package version, not the "0.1.0" placeholder every
+            # Python node advertised through 0.7.1 — see Capabilities.version.
+            version=_mycellm_version(),
             network_ids=self.federation.network_ids if self.federation else [],
         )
 
@@ -2180,6 +2192,177 @@ class MycellmNode:
                 names.append(r.model_name)
         return names
 
+    def _own_network_ids(self) -> list[str] | None:
+        """This node's networks, for restricting its own outbound routing.
+
+        ⚠️ LOCALLY-ORIGINATED REQUESTS WERE NOT NETWORK-FILTERED. The
+        peer-relay path has always passed the requester's networks to
+        `chain_builder.route` (see `_handle_inference_relay`), but the two
+        paths that serve *this* node's own requests called `route(model)` with
+        no networks at all — so a request originating here could be served by
+        a peer that shares no network with us, which is precisely the
+        isolation the relay path exists to enforce.
+
+        Returns None when this node declares no networks, which
+        `peers_for_model` reads as "no restriction" — preserving behaviour for
+        single-network and un-federated deployments.
+        """
+        ids = self.federation.network_ids if self.federation else []
+        return ids or None
+
+    # ── 0.8 Adaptive Inference Fabric ───────────────────────────────────
+
+    def execution_targets(self, model: str = "") -> list:
+        """Everywhere a WorkUnit could run right now.
+
+        Built as a read-only projection over the three sources that already
+        exist — loaded models, QUIC peers, relay-backed serving groups —
+        rather than a fourth registry that would drift from all of them.
+
+        `Target` exists because `PeerEntry` cannot represent a group: routing
+        requires an open QUIC connection, so an HTTP-fronted gateway is
+        invisible to `peers_for_model`. Planning against peers directly is what
+        made groups unrepresentable.
+        """
+        from mycellm.execution.models import Target
+
+        own = self._own_network_ids()
+        targets: list[Target] = []
+
+        # 1. Models this process serves, which includes relay-fronted serving
+        #    groups. A group-served model executes *through* this process but
+        #    the prompt leaves the machine over HTTP, so it is NOT local for
+        #    privacy purposes.
+        #
+        #    ⚠️ REMOTENESS IS DERIVED FROM THE BACKEND, NOT FROM
+        #    `serving_group_id`. Using the group id looked equivalent and was a
+        #    security hole: `model_configs.json` does not persist that field, so
+        #    after a restart an auto-loaded relay model came back with no group
+        #    id, was classified `local`, and the egress policy therefore rated a
+        #    remote HTTP endpoint as "local" — a credential-bearing prompt was
+        #    NOT blocked from leaving the machine. Found by restarting a live
+        #    node and re-running the block test, not by any unit test.
+        #
+        #    `LOCAL_BACKENDS` is the existing authority for "runs in this
+        #    process"; anything else (openai/relay/api) is remote by nature and
+        #    cannot lose that property in a config round-trip.
+        from mycellm.inference.manager import LOCAL_BACKENDS
+        from mycellm.router.model_resolver import estimate_param_count
+
+        for m in self.inference.loaded_models:
+            group_id = getattr(m, "serving_group_id", "") or ""
+            backend = getattr(m, "backend", "") or ""
+            is_local = backend in LOCAL_BACKENDS
+            targets.append(Target(
+                model=m.name,
+                kind="local" if is_local else "group",
+                serving_group_id=group_id,
+                tok_s=getattr(m, "throughput_tok_s", 0.0) or 0.0,
+                roles=tuple(getattr(m, "execution_roles", ()) or ()),
+                params_b=(getattr(m, "param_count_b", 0.0) or
+                          estimate_param_count(m.name) or 0.0),
+            ))
+
+        # 2. QUIC peers. Reuse the registry filter so network isolation and
+        #    per-model scope apply here exactly as they do to direct routing —
+        #    a second implementation would be a second thing to get wrong.
+        seen_models = {t.model for t in targets}
+        model_names = [model] if model else []
+        if not model_names:
+            model_names = list(self.registry._model_index.keys())
+        for name in model_names:
+            if name in (None, "", "auto") or name.startswith("mycellm/"):
+                continue
+            for entry in self.registry.peers_for_model(name, network_ids=own):
+                targets.append(Target(
+                    model=name,
+                    kind="peer",
+                    peer_id=entry.peer_id,
+                    network_ids=tuple(entry.network_ids or ()),
+                    tok_s=getattr(entry.capabilities, "est_tok_s", 0.0) or 0.0,
+                    roles=tuple(
+                        next((mc.execution_roles for mc in entry.capabilities.models
+                              if mc.name == name), ()) or ()
+                    ),
+                    params_b=(
+                        next((mc.param_count_b for mc in entry.capabilities.models
+                              if mc.name == name), 0.0)
+                        or estimate_param_count(name) or 0.0
+                    ),
+                ))
+                seen_models.add(name)
+        return targets
+
+    async def run_work_unit(self, unit):
+        """Execute one WorkUnit and report what happened.
+
+        Deliberately reuses the same local/peer dispatch as direct routing,
+        including the credit debit, so a swarm proposer is accounted for exactly
+        like an ordinary request. Per-WorkUnit micro-receipts are deferred; each
+        unit already produces a real signed receipt on the serving side.
+        """
+        from mycellm.execution.models import WorkUnitResult
+        from mycellm.inference.base import InferenceRequest
+        from mycellm.transport.messages import inference_request
+
+        t = unit.target
+        res = WorkUnitResult(unit.unit_id, unit.role, t)
+
+        # Local or group-fronted: both execute through InferenceManager.
+        if t.kind in ("local", "group"):
+            name = self.inference.resolve_model_name(t.model) or t.model
+            out = await self.inference.generate(InferenceRequest(
+                messages=unit.messages,
+                model=name,
+                temperature=unit.temperature,
+                max_tokens=unit.max_tokens,
+            ))
+            res.text = (out or {}).get("text", "") if isinstance(out, dict) else getattr(out, "text", "")
+            payload = out if isinstance(out, dict) else {}
+            res.prompt_tokens = payload.get("prompt_tokens", 0)
+            res.completion_tokens = payload.get("completion_tokens", 0)
+            return res
+
+        # QUIC peer.
+        entry = self.registry.get(t.peer_id)
+        if entry is None or entry.connection is None:
+            res.error = "peer has no live connection"
+            return res
+        resp = await entry.connection.request(inference_request(
+            self.peer_id, t.model, unit.messages,
+            temperature=unit.temperature, max_tokens=unit.max_tokens,
+        ))
+        if resp.type == MessageType.ERROR:
+            entry.failure_count += 1
+            res.error = str(resp.payload.get("message", "peer returned an error"))
+            return res
+        entry.failure_count = max(0, entry.failure_count - 1)
+        res.text = resp.payload.get("text", "")
+        res.prompt_tokens = resp.payload.get("prompt_tokens", 0)
+        res.completion_tokens = resp.payload.get("completion_tokens", 0)
+        if self.ledger:
+            from mycellm.accounting.pricing import compute_cost
+            await self.ledger.debit(
+                self.peer_id, compute_cost(max(res.completion_tokens, 1)),
+                "inference_consumed", counterparty_id=t.peer_id)
+        return res
+
+    async def execute_job(self, job, override_privacy: bool = False) -> dict:
+        """Plan and run a Job. The 0.8 entry point.
+
+        Direct requests still go through `route_inference`; this path is for
+        jobs whose *strategy* is the point (`mycellm/swarm`).
+        """
+        from mycellm.execution.coordinator import ExecutionCoordinator
+        from mycellm.execution.planner import ExecutionPlanner
+
+        if job.network_ids is None:
+            job.network_ids = self._own_network_ids()
+        targets = self.execution_targets()
+        plan = ExecutionPlanner().plan(job, targets, override_privacy=override_privacy)
+        coordinator = ExecutionCoordinator(self.run_work_unit)
+        return await coordinator.execute(job, plan)
+
     async def route_inference(self, model: str, messages: list[dict], **kwargs):
         """Route inference — local if model loaded, otherwise to peer.
 
@@ -2217,7 +2400,8 @@ class MycellmNode:
                     continue
 
             # Peer routing with per-peer failover for this candidate model.
-            targets = self.chain_builder.route(effective_model)
+            targets = self.chain_builder.route(
+                effective_model, network_ids=self._own_network_ids())
             for target in targets:
                 if target.entry.connection is None:
                     continue
@@ -2269,7 +2453,8 @@ class MycellmNode:
         candidates = self._candidate_models(model)
 
         for effective_model in candidates:
-            targets = self.chain_builder.route(effective_model)
+            targets = self.chain_builder.route(
+                effective_model, network_ids=self._own_network_ids())
 
             for target in targets:
                 if target.entry.connection is None:

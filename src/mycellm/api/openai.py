@@ -9,7 +9,7 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger("mycellm.api")
@@ -144,13 +144,60 @@ class ChatMessage(BaseModel):
     reasoning_content: Optional[str] = None  # extracted <think>...</think>, OpenAI-o1 style
 
 
+#: Routing options this node actually implements. Anything else is refused
+#: rather than accepted and ignored — see `unsupported_routing_options`.
+SUPPORTED_ROUTING = {"best"}
+
+#: Constraint fields that are declared but not enforced anywhere.
+#:
+#: ⚠️ THESE WERE ACCEPTED SILENTLY AND HAD NO EFFECT. `routing` was consulted
+#: nowhere at all — not "best", not "fastest", not "ensemble" — so a client
+#: asking for an ensemble got ordinary single-model routing and HTTP 200.
+#: `min_context` reached a branch whose body is `pass`, and `max_cost` was
+#: carried into QualityConstraints and never read, so a caller who set a
+#: credit ceiling had none.
+#:
+#: Silently ignoring a constraint is worse than refusing it: the caller
+#: believes a limit is in force. Until each is implemented, asking for one
+#: is an error naming exactly what happened.
+UNENFORCED_CONSTRAINTS = {
+    "min_context": "not enforced — candidate context length is not yet "
+                   "available at resolution time",
+    "max_cost": "not enforced — no per-request credit ceiling exists yet",
+}
+
+
+def unsupported_routing_options(m: MycellmRouting | None) -> list[str]:
+    """Problems with a `mycellm` routing block, as human-readable strings."""
+    if m is None:
+        return []
+    problems = []
+    if m.routing and m.routing not in SUPPORTED_ROUTING:
+        hint = ""
+        if m.routing == "ensemble":
+            # The capability now exists, but as a model rather than a routing
+            # flag — so the flag stays refused instead of quietly aliasing to
+            # it. Two spellings for one behaviour is how one of them rots.
+            hint = ' — use model "mycellm/swarm" instead'
+        problems.append(
+            f"routing={m.routing!r} is not implemented "
+            f"(supported: {', '.join(sorted(SUPPORTED_ROUTING))}){hint}"
+        )
+    for field_name, why in UNENFORCED_CONSTRAINTS.items():
+        if getattr(m, field_name, 0):
+            problems.append(f"{field_name} is {why}")
+    return problems
+
+
 class MycellmRouting(BaseModel):
     min_tier: str = ""          # "frontier", "capable", "fast", "tiny"
     min_params: float = 0       # minimum param count in billions
-    min_context: int = 0        # minimum context window
+    min_context: int = 0        # NOT ENFORCED — see UNENFORCED_CONSTRAINTS
     required_tags: list[str] = []  # must have these tags
-    max_cost: float = 0         # max credits per request (0 = unlimited)
-    routing: str = "best"       # "best", "fastest", "ensemble"
+    max_cost: float = 0         # NOT ENFORCED — see UNENFORCED_CONSTRAINTS
+    routing: str = "best"       # only "best" is implemented
+    token_budget: int = 0       # ceiling on generated tokens for the whole job
+    fanout: int = 0             # swarm proposers; 0 = planner decides
     fallback: str = "downgrade" # "reject" or "downgrade"
     trust: str = ""             # "local", "trusted", "any" — route only to peers at this trust level or higher
 
@@ -222,6 +269,25 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     from mycellm.activity import EventType
 
     node = request.app.state.node
+
+    # ⚠️ BEFORE THE STREAM BRANCH, DELIBERATELY. The streaming path never read
+    # `body.mycellm` at all, so a guard placed with the non-streaming
+    # constraint handling would silently exempt every streaming request —
+    # which is how the original problem (options accepted, never applied)
+    # would have survived its own fix.
+    problems = unsupported_routing_options(body.mycellm)
+    if problems:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": "; ".join(problems),
+                    "type": "invalid_request_error",
+                    "code": "unsupported_routing_option",
+                }
+            },
+        )
+
     messages = []
     for m in body.messages:
         msg: dict = {"role": m.role}
@@ -240,6 +306,64 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
 
     if body.stream:
         return await _stream_response(node, body, messages)
+
+    # ── mycellm/swarm ───────────────────────────────────────────────────
+    # A synthetic model that selects a STRATEGY rather than a model: fan out to
+    # several models, then synthesise. Intercepted before resolve_model_name
+    # because no backend serves this name and resolution would 404 it.
+    from mycellm.execution.planner import is_swarm_request
+
+    if is_swarm_request(body.model):
+        from mycellm.execution.models import Job
+
+        job = Job(
+            job_id=Job.new_id(),
+            model=body.model,
+            messages=messages,
+            temperature=body.temperature,
+            max_tokens=body.max_tokens or 2048,
+            trust=(body.mycellm.trust if body.mycellm else ""),
+            token_budget=int((body.mycellm.token_budget if body.mycellm else 0) or 0),
+            fanout=int((body.mycellm.fanout if body.mycellm else 0) or 0),
+        )
+        override = request.headers.get("X-Privacy-Override", "") == "acknowledged"
+        result = await node.execute_job(job, override_privacy=override)
+
+        if result.get("error"):
+            # A refusal is reported as a refusal. Falling back to an ordinary
+            # single-model answer would hide an egress block, which is the one
+            # thing that must never be silent.
+            return JSONResponse(status_code=422, content={
+                "error": {
+                    "message": result["error"],
+                    "type": "swarm_execution_error",
+                    "code": "swarm_failed",
+                    "plan": result.get("meta", {}),
+                }
+            })
+
+        created = int(time.time())
+        usage = {
+            "prompt_tokens": result.get("prompt_tokens", 0),
+            "completion_tokens": result.get("completion_tokens", 0),
+            "total_tokens": result.get("prompt_tokens", 0) + result.get("completion_tokens", 0),
+        }
+        return JSONResponse(content={
+            "id": f"chatcmpl-{job.job_id}",
+            "object": "chat.completion",
+            "created": created,
+            "model": body.model,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": result.get("text", "")},
+                "finish_reason": "stop",
+            }],
+            "usage": usage,
+            # The plan is part of the response, not a debug-only extra: a
+            # caller paying for N proposers is entitled to see what ran, what
+            # was refused, and whether the job degraded.
+            "mycellm": result.get("meta", {}),
+        })
 
     # Use ModelResolver when model is empty, "auto", or not found locally
     requested_model = body.model if body.model != "auto" else ""
@@ -1395,6 +1519,28 @@ async def list_models(request: Request):
         "created": int(time.time()),
         "owned_by": "mycellm",
     })
+
+    # Virtual "mycellm/swarm" — selects a strategy, not a model. Advertised
+    # only when the node can actually form a swarm, because listing a model
+    # that always refuses is the advertised-but-unavailable shape this
+    # codebase keeps fixing.
+    try:
+        from mycellm.execution.planner import DEFAULT_FANOUT, SWARM_MODEL
+        _targets = node.execution_targets()
+        if len({t.model for t in _targets}) >= 2:
+            models.append({
+                "id": SWARM_MODEL,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "mycellm",
+                "tags": ["swarm", "chat"],
+                "description": (
+                    f"Fan out to up to {DEFAULT_FANOUT} models, then synthesise. "
+                    f"Returns the execution plan in the `mycellm` field."
+                ),
+            })
+    except Exception as e:  # never let the strategy model break the model list
+        logger.debug(f"swarm advertisement skipped: {e}")
 
     # Local models
     for m in node.inference.loaded_models:
