@@ -1,4 +1,24 @@
-"""Capability advertisement schema — signed by device key, exchanged over authenticated transport."""
+"""Capability advertisement schema, exchanged over authenticated transport.
+
+⚠️ CAPABILITIES ARE **NOT** SIGNED, despite what this docstring claimed until
+0.8. `NodeHello.signable_data()` covers `nonce`, `timestamp` and `peer_id` only
+(`node_hello.py`) — the capability payload sits outside the signature, and
+`PEER_ANNOUNCE` updates carry no capability signature at all.
+
+What that does and does not buy you:
+
+- The QUIC+TLS session is authenticated, so a *third party* cannot forge or
+  tamper with a peer's advertisement in flight.
+- The peer itself can claim anything — models it lacks, throughput it cannot
+  reach, hardware it does not have. Treat capabilities as a peer's own
+  self-report, never as an attested fact, and never as an authorisation.
+
+Fixing this properly means changing the signed byte range, which every 0.7.1
+peer computes differently, so it cannot be done additively — it needs the
+version field to become trustworthy first (see `Capabilities.version`). The
+claim is corrected here rather than left standing, because a security property
+that exists only in a docstring is worse than a documented gap.
+"""
 
 from __future__ import annotations
 
@@ -245,6 +265,19 @@ class Capabilities:
     max_concurrent: int = 2
     est_tok_s: float = 0.0
     role: str = "seeder"
+    #: The advertising node's mycellm version.
+    #:
+    #: ⚠️ THIS WAS HARDCODED "0.1.0" ON EVERY PYTHON NODE UNTIL 0.8, WHILE iOS
+    #: CORRECTLY SENT ITS REAL VERSION. Nothing consumed it, so nothing broke
+    #: — but it meant the field could not be used to gate anything, because a
+    #: peer claiming "0.1.0" might be any release ever shipped. That blocks
+    #: the only safe way to introduce a new `MessageType`: send it solely to
+    #: peers known new enough to decode it, since an unknown type is silently
+    #: dropped rather than refused (see the note on ModelCapability).
+    #:
+    #: Feature-gating on this becomes possible only once truthful versions
+    #: have been in the wild long enough that "0.1.0" is rare. The clock
+    #: starts here.
     version: str = "0.1.0"
     network_ids: list[str] = field(default_factory=list)
 

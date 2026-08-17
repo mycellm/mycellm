@@ -48,6 +48,16 @@ from mycellm.activity import ActivityTracker, EventType
 from mycellm.federation import FederationManager
 
 logger = logging.getLogger("mycellm")
+
+
+def _mycellm_version() -> str:
+    """The running package version, for capability advertisement.
+
+    Imported lazily because `mycellm/__init__.py` is imported by everything;
+    a module-level import here would put node.py inside that cycle.
+    """
+    from mycellm import __version__
+    return __version__
 console = Console()
 
 # Per-bootstrap HTTP announce backoff. A bootstrap that keeps failing is skipped
@@ -1494,7 +1504,9 @@ class MycellmNode:
             models=self.inference.loaded_models,
             hardware=hw,
             role="seeder" if self.inference.loaded_models else "consumer",
-            version="0.1.0",
+            # The real package version, not the "0.1.0" placeholder every
+            # Python node advertised through 0.7.1 — see Capabilities.version.
+            version=_mycellm_version(),
             network_ids=self.federation.network_ids if self.federation else [],
         )
 
