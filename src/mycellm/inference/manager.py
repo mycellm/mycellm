@@ -881,6 +881,17 @@ class InferenceManager:
                     auth = remote.client.headers.get("authorization", "")
                     if auth.startswith("Bearer "):
                         config["api_key"] = auth[7:]
+            # Persist 0.8 serving-group identity so `/v1/node/groups` and plan
+            # attribution survive a restart. Remoteness is derived from the
+            # backend, NOT from these — a missing group id must never make a
+            # remote endpoint look local (it did, and a credential-bearing
+            # prompt went unblocked until that was fixed).
+            info = self._model_info.get(name)
+            if info is not None:
+                if getattr(info, "serving_group_id", ""):
+                    config["serving_group_id"] = info.serving_group_id
+                if getattr(info, "deployment_id", ""):
+                    config["deployment_id"] = info.deployment_id
             self._saved_configs[name] = config
 
         configs = list(self._saved_configs.values())
@@ -953,6 +964,8 @@ class InferenceManager:
                         api_base=config.get("api_base", ""),
                         api_key=config.get("api_key", ""),
                         api_model=config.get("api_model", ""),
+                        serving_group_id=config.get("serving_group_id", ""),
+                        deployment_id=config.get("deployment_id", ""),
                         ctx_len=config.get("ctx_len", _default_ctx),
                     )
                 elif config.get("model_path"):

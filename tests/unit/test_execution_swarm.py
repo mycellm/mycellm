@@ -32,12 +32,14 @@ def job(model=SWARM, content="hello", **kw):
                messages=[{"role": "user", "content": content}], **kw)
 
 
-def peer(model, name="p", tok_s=10.0, roles=()):
-    return Target(model=model, kind="peer", peer_id=name * 32, tok_s=tok_s, roles=roles)
+def peer(model, name="p", tok_s=10.0, roles=(), params_b=7.0):
+    return Target(model=model, kind="peer", peer_id=name * 32, tok_s=tok_s,
+                  roles=roles, params_b=params_b)
 
 
-def local(model, roles=()):
-    return Target(model=model, kind="local", roles=roles)
+def local(model, roles=(), params_b=7.0, tok_s=0.0):
+    return Target(model=model, kind="local", roles=roles, params_b=params_b,
+                  tok_s=tok_s)
 
 
 # ── Planning ────────────────────────────────────────────────────────────
@@ -80,10 +82,40 @@ class TestSwarmFormation:
         plan = ExecutionPlanner().plan(job(), [peer("a"), peer("b", "q")])
         assert plan.synthesizer.temperature < 0.5
 
-    def test_synthesis_prefers_a_local_target(self):
-        # Synthesis sees every proposal at once — most context, most to leak.
-        plan = ExecutionPlanner().plan(job(), [peer("a"), peer("b", "q"), local("c")])
+    def test_synthesis_stays_local_when_every_proposer_is_local(self):
+        # Nothing has left the machine; keep it that way.
+        plan = ExecutionPlanner().plan(job(), [local("a"), local("b")])
         assert plan.synthesizer.target.is_remote is False
+
+    def test_unmeasured_throughput_does_not_decide_synthesis(self):
+        """tok_s is 0 on most real targets, so it cannot be the ranking key."""
+        plan = ExecutionPlanner().plan(
+            job(), [local("small", params_b=0.5, tok_s=0.0),
+                    peer("large", "q", params_b=70.0, tok_s=0.0)])
+        assert plan.synthesizer.target.model == "large"
+
+    def test_synthesis_does_not_insist_on_a_weak_local_model(self):
+        """⚠️ REGRESSION from a live run.
+
+        "Always prefer local" looked like the obvious privacy default. In a real
+        two-model run a 0.5B local model and a 35B remote one both proposed; the
+        35B was correct, the local model produced gibberish, and because it was
+        also chosen to synthesise, the whole swarm returned gibberish while
+        reporting success.
+
+        Once ANY proposer is remote the prompt has already left the machine, so
+        local synthesis buys almost no privacy and can cost all the quality.
+        """
+        # BOTH report tok_s 0.0 — the common case, since nothing has measured
+        # them. The first fix ranked by tok_s and fell back to "prefer local",
+        # which picked the 0.5B again in a live run. Parameter count is the
+        # signal that actually separates them.
+        weak_local = local("qwen2.5-0.5b", params_b=0.5, tok_s=0.0)
+        strong_peer = peer("big-35b", "q", tok_s=0.0, params_b=35.0)
+        plan = ExecutionPlanner().plan(job(), [weak_local, strong_peer])
+        assert plan.strategy is Strategy.SWARM
+        assert plan.synthesizer.target.model == "big-35b", \
+            "a remote proposer already saw the prompt; pick the stronger synthesiser"
 
     def test_synthesis_depends_on_every_proposer(self):
         plan = ExecutionPlanner().plan(job(), [peer("a"), peer("b", "q"), peer("c", "r")])

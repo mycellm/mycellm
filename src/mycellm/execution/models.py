@@ -68,6 +68,11 @@ class Target:
     #: Roles this target's model declares (`ModelCapability.execution_roles`).
     #: Empty = 0.7 semantics: direct serving only.
     roles: tuple[str, ...] = ()
+    #: Parameter count in billions. The only usable *capability* signal we have
+    #: — `tok_s` is 0 on most targets because nothing has measured them yet, so
+    #: it cannot order a 0.5B against a 35B. Derived from the advertised count
+    #: when present, otherwise parsed from the model name.
+    params_b: float = 0.0
 
     def can(self, role: str) -> bool:
         """Mirrors `ModelCapability.can` so both sides answer identically."""
@@ -84,7 +89,10 @@ class Target:
         if self.kind == "local":
             return f"local:{self.model}"
         if self.kind == "group":
-            return f"group:{self.serving_group_id}:{self.model}"
+            # The group id may be absent (it is not persisted across restarts);
+            # remoteness does not depend on it, so don't render an empty field.
+            gid = self.serving_group_id or "external"
+            return f"group:{gid}:{self.model}"
         return f"peer:{self.peer_id[:8]}:{self.model}"
 
 

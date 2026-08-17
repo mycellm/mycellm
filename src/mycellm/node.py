@@ -2229,18 +2229,38 @@ class MycellmNode:
         own = self._own_network_ids()
         targets: list[Target] = []
 
-        # 1. Local backends, including relay-fronted serving groups. A model
-        #    served by a group is still executed through this process, so it is
-        #    reachable — but it is NOT local for privacy purposes, because the
-        #    prompt leaves the machine over HTTP. `kind` reflects that.
+        # 1. Models this process serves, which includes relay-fronted serving
+        #    groups. A group-served model executes *through* this process but
+        #    the prompt leaves the machine over HTTP, so it is NOT local for
+        #    privacy purposes.
+        #
+        #    ⚠️ REMOTENESS IS DERIVED FROM THE BACKEND, NOT FROM
+        #    `serving_group_id`. Using the group id looked equivalent and was a
+        #    security hole: `model_configs.json` does not persist that field, so
+        #    after a restart an auto-loaded relay model came back with no group
+        #    id, was classified `local`, and the egress policy therefore rated a
+        #    remote HTTP endpoint as "local" — a credential-bearing prompt was
+        #    NOT blocked from leaving the machine. Found by restarting a live
+        #    node and re-running the block test, not by any unit test.
+        #
+        #    `LOCAL_BACKENDS` is the existing authority for "runs in this
+        #    process"; anything else (openai/relay/api) is remote by nature and
+        #    cannot lose that property in a config round-trip.
+        from mycellm.inference.manager import LOCAL_BACKENDS
+        from mycellm.router.model_resolver import estimate_param_count
+
         for m in self.inference.loaded_models:
             group_id = getattr(m, "serving_group_id", "") or ""
+            backend = getattr(m, "backend", "") or ""
+            is_local = backend in LOCAL_BACKENDS
             targets.append(Target(
                 model=m.name,
-                kind="group" if group_id else "local",
+                kind="local" if is_local else "group",
                 serving_group_id=group_id,
                 tok_s=getattr(m, "throughput_tok_s", 0.0) or 0.0,
                 roles=tuple(getattr(m, "execution_roles", ()) or ()),
+                params_b=(getattr(m, "param_count_b", 0.0) or
+                          estimate_param_count(m.name) or 0.0),
             ))
 
         # 2. QUIC peers. Reuse the registry filter so network isolation and
@@ -2263,6 +2283,11 @@ class MycellmNode:
                     roles=tuple(
                         next((mc.execution_roles for mc in entry.capabilities.models
                               if mc.name == name), ()) or ()
+                    ),
+                    params_b=(
+                        next((mc.param_count_b for mc in entry.capabilities.models
+                              if mc.name == name), 0.0)
+                        or estimate_param_count(name) or 0.0
                     ),
                 ))
                 seen_models.add(name)

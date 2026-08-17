@@ -238,11 +238,41 @@ class ExecutionPlanner:
     ) -> Target:
         """Pick who merges the proposals.
 
-        Prefer a local target: synthesis sees every proposal at once, so it is
-        the unit with the most context and the most to leak. Otherwise the
-        fastest, since it is on the critical path — everything waits for it.
+        ⚠️ "ALWAYS PREFER LOCAL" WAS WRONG, AND A LIVE RUN PROVED IT. Synthesis
+        sees every proposal at once, so preferring a local target looks like the
+        obvious privacy default. But **synthesis quality gates the entire
+        swarm**: in a real two-model run (a 0.5B local model plus a 35B remote
+        one) the 35B produced a correct answer, the local model produced
+        gibberish, and because the local model was also chosen to synthesise,
+        the *whole swarm* returned gibberish. Two proposers succeeded and the
+        job reported success while destroying the good answer.
+
+        The privacy argument also does not hold once any proposer is remote: the
+        prompt has already left the machine, so synthesising locally buys almost
+        nothing while risking all of the quality.
+
+        So:
+        - every proposer local  → synthesise locally (nothing has left; keep it
+          that way, and no remote target can do better on privacy)
+        - any proposer remote   → the prompt is already out; pick the strongest
+          synthesiser available, preferring one that actually produced a
+          proposal, since it is demonstrably alive and warm
         """
-        locals_ = [t for t in eligible if not t.is_remote]
-        if locals_:
-            return locals_[0]
-        return max(eligible, key=lambda t: t.tok_s)
+        all_local = all(not t.is_remote for t in proposers)
+        if all_local:
+            locals_ = [t for t in eligible if not t.is_remote]
+            if locals_:
+                return max(locals_, key=lambda t: t.tok_s)
+
+        # Prefer a target that already proposed — proven reachable this job —
+        # then fall back to any eligible target.
+        #
+        # ⚠️ ORDER BY PARAMETER COUNT, NOT `tok_s`. The first attempt at this fix
+        # ranked by `tok_s` with "prefer local" as the tie-break, which looked
+        # reasonable and failed live: nothing had measured either target, so both
+        # reported tok_s 0.0, the tie-break chose the 0.5B local model, and the
+        # swarm returned gibberish again. `tok_s` is unmeasured in the common
+        # case and therefore cannot order a 0.5B against a 35B; parameter count
+        # can, and is available for free from the advertised value or the name.
+        pool = [t for t in eligible if t in proposers] or eligible
+        return max(pool, key=lambda t: (t.params_b, t.tok_s))

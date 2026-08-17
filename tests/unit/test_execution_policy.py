@@ -193,3 +193,39 @@ class TestSeverityTiers:
                   messages=[{"role": "user", "content": "my password is hunter2please"}])
         plan = ExecutionPlanner().plan(job, [PUBLIC_PEER])
         assert any("warning" in r for r in plan.reasons), plan.reasons
+
+
+class TestRemotenessCannotBeLost:
+    """⚠️ REGRESSION — a real security hole, found by restarting a live node.
+
+    `Target.kind` was originally derived from `serving_group_id`. That field is
+    NOT persisted in `model_configs.json`, so after a node restart an
+    auto-loaded relay model came back with no group id, was classified `local`,
+    and `trust_for` therefore rated a remote HTTP endpoint as "local". A
+    credential-bearing prompt was **not blocked** from leaving the machine.
+
+    Remoteness is now derived from the backend, which cannot go missing in a
+    config round-trip. These tests pin that: a relay-backed model with NO group
+    identity must still be treated as remote.
+    """
+
+    def test_a_relay_model_without_group_identity_is_still_remote(self):
+        orphan = Target(model="relay:big", kind="group", serving_group_id="")
+        assert orphan.is_remote is True
+        assert trust_for(orphan, ["net-A"]) == "untrusted"
+
+    def test_a_credential_is_blocked_from_an_orphaned_relay_model(self):
+        orphan = Target(model="relay:big", kind="group", serving_group_id="")
+        assert not EgressPolicy(SECRET_PROMPT).decide(orphan).allowed
+
+    def test_backend_classification_matches_the_manager(self):
+        """`kind` must follow LOCAL_BACKENDS, the existing authority."""
+        from mycellm.inference.manager import LOCAL_BACKENDS
+        assert "llama.cpp" in LOCAL_BACKENDS
+        assert "openai" not in LOCAL_BACKENDS, \
+            "an openai-backed model is an HTTP call off this machine"
+
+    def test_only_kind_local_is_treated_as_local(self):
+        for kind in ("peer", "group", "fleet", "anything-else"):
+            assert Target(model="m", kind=kind).is_remote is True
+        assert Target(model="m", kind="local").is_remote is False
