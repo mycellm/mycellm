@@ -304,6 +304,13 @@ class RelayManager:
                     api_model=model_id,
                     ctx_len=model.get("context_length", 4096) if isinstance(model, dict) else 4096,
                     max_concurrent=relay.max_concurrent,
+                    # Identity for the 0.8 fabric: this model is served by a
+                    # group, not by this process. Consumed by
+                    # GET /v1/node/groups and carried in the announcement so
+                    # peers can tell a grouped deployment from a local model.
+                    serving_group_id=relay.group_id,
+                    deployment_id=relay.deployment_id(relay_name),
+                    parallelism={"type": "external"},
                 )
                 relay.registered[relay_name] = model_id
                 registered += 1
@@ -346,6 +353,46 @@ class RelayManager:
                     for m in r.models
                 ],
                 "model_count": len(r.models),
+                # What this relay is actually *serving* right now, as opposed
+                # to what it advertised upstream. These differ whenever a
+                # model was withdrawn, collided, or the endpoint is down —
+                # and that difference used to be invisible.
+                "registered_count": len(r.registered),
+                "healthy": r.healthy,
+            }
+            for r in self._relays.values()
+        ]
+
+    def get_groups(self) -> list[dict]:
+        """Serving groups and their deployments — the 0.8 view of the same state.
+
+        A relay endpoint is a ServingGroup: a gateway-owned serving service.
+        Each model it currently serves is a Deployment with a stable id.
+
+        This is the consumer for the `serving_group_id` / `deployment_id`
+        capability fields. They were added in the same change as this endpoint
+        deliberately: a field with no reader is the bug this codebase keeps
+        shipping, so nothing here is advertised before something reads it.
+        """
+        return [
+            {
+                "group_id": r.group_id,
+                "name": r.name,
+                "endpoint": r.url,
+                "runtime": "external",
+                "endpoint_mode": "gateway",
+                "healthy": r.healthy,
+                "online": r.online,
+                "error": r.error,
+                "deployments": [
+                    {
+                        "deployment_id": r.deployment_id(registered),
+                        "model": registered,
+                        "upstream_model": upstream,
+                        "parallelism": {"type": "external"},
+                    }
+                    for registered, upstream in sorted(r.registered.items())
+                ],
             }
             for r in self._relays.values()
         ]

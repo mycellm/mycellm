@@ -1146,6 +1146,31 @@ async def list_relays(request: Request):
     return {"relays": node.relay_manager.get_status()}
 
 
+@router.get("/groups")
+async def list_serving_groups(request: Request):
+    """Serving groups and their deployments (0.8 Adaptive Inference Fabric).
+
+    A ServingGroup is a gateway-owned serving service — an external
+    OpenAI-compatible endpoint, which may itself front a distributed cluster
+    (oMLX, vLLM, Ollama). Each model it serves is a Deployment with a stable
+    id, so two groups serving the same model name remain distinguishable.
+
+    Read-only. This is the consumer for the `serving_group_id` /
+    `deployment_id` capability fields — they and this endpoint shipped
+    together on purpose.
+    """
+    node = request.app.state.node
+    if not hasattr(node, "relay_manager") or not node.relay_manager:
+        return {"groups": [], "count": 0}
+    groups = node.relay_manager.get_groups()
+    return {
+        "groups": groups,
+        "count": len(groups),
+        "healthy_count": sum(1 for g in groups if g["healthy"]),
+        "deployment_count": sum(len(g["deployments"]) for g in groups),
+    }
+
+
 @router.post("/relay/add")
 async def add_relay(request: Request):
     """Add a relay backend (OpenAI-compatible API endpoint).

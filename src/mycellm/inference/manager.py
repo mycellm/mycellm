@@ -551,6 +551,13 @@ class InferenceManager:
                 ctx_len=kwargs.get("ctx_len", kwargs.get("n_ctx", _default_ctx)),
                 backend=backend_type,
                 loaded_bytes=file_size,
+                # 0.8: who actually serves this. Set by RelayManager for models
+                # fronted by an external serving group (an oMLX cluster, an
+                # Ollama box); empty for models this process holds itself,
+                # which keeps the advertisement byte-identical for local models.
+                serving_group_id=kwargs.get("serving_group_id", ""),
+                deployment_id=kwargs.get("deployment_id", ""),
+                parallelism=kwargs.get("parallelism") or {},
             )
             _mk = int(kwargs.get("max_kv_size") or 0)
             if _mk:

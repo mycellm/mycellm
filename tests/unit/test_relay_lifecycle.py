@@ -206,3 +206,66 @@ class TestIdentity:
     def test_group_id_falls_back_to_the_url_label(self):
         r = RelayEndpoint(url="http://box.lan:11434")
         assert r.group_id.startswith("grp_")
+
+
+class TestGroupIntrospection:
+    """The consumer for the new capability fields.
+
+    Added in the same change as the fields themselves. A field with no
+    reader is the failure mode this codebase keeps repeating.
+    """
+
+    @pytest.mark.asyncio
+    async def test_groups_report_their_deployments(self):
+        mgr, _ = make_manager()
+        a = RelayEndpoint(url="http://a.lan", name="alpha", online=True)
+        mgr._relays[a.url] = a
+        await register(mgr, a, ["llama3", "qwen3"])
+
+        groups = mgr.get_groups()
+        assert len(groups) == 1
+        g = groups[0]
+        assert g["group_id"] == "grp_alpha"
+        assert g["healthy"] is True
+        assert [d["model"] for d in g["deployments"]] == ["relay:llama3", "relay:qwen3"]
+        assert all(d["deployment_id"].startswith("dep_") for d in g["deployments"])
+
+    @pytest.mark.asyncio
+    async def test_two_groups_serving_one_model_stay_distinguishable(self):
+        mgr, _ = make_manager()
+        a = RelayEndpoint(url="http://a.lan", name="alpha", online=True)
+        b = RelayEndpoint(url="http://b.lan", name="bravo", online=True)
+        mgr._relays[a.url] = a
+        mgr._relays[b.url] = b
+        await register(mgr, a, ["llama3"])
+        await register(mgr, b, ["llama3"])
+
+        dep_ids = [d["deployment_id"] for g in mgr.get_groups() for d in g["deployments"]]
+        assert len(dep_ids) == 2
+        assert len(set(dep_ids)) == 2, "identical deployment ids would erase the distinction"
+
+    @pytest.mark.asyncio
+    async def test_a_dead_group_reports_unhealthy_with_no_deployments(self):
+        mgr, _ = make_manager()
+        a = RelayEndpoint(url="http://a.lan", name="alpha", online=True)
+        mgr._relays[a.url] = a
+        await register(mgr, a, ["llama3"])
+        await mgr._deregister(a, reason="died")
+        a.online = False
+
+        g = mgr.get_groups()[0]
+        assert g["healthy"] is False
+        assert g["deployments"] == []
+
+    @pytest.mark.asyncio
+    async def test_status_distinguishes_advertised_from_served(self):
+        mgr, _ = make_manager()
+        a = RelayEndpoint(url="http://a.lan", name="alpha", online=True)
+        mgr._relays[a.url] = a
+        await register(mgr, a, ["llama3", "qwen3"])
+        await mgr._deregister(a, reason="died")
+
+        st = mgr.get_status()[0]
+        assert st["model_count"] == 2, "still advertises what it last saw upstream"
+        assert st["registered_count"] == 0, "but serves nothing"
+        assert st["healthy"] is False
