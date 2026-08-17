@@ -2192,6 +2192,24 @@ class MycellmNode:
                 names.append(r.model_name)
         return names
 
+    def _own_network_ids(self) -> list[str] | None:
+        """This node's networks, for restricting its own outbound routing.
+
+        ⚠️ LOCALLY-ORIGINATED REQUESTS WERE NOT NETWORK-FILTERED. The
+        peer-relay path has always passed the requester's networks to
+        `chain_builder.route` (see `_handle_inference_relay`), but the two
+        paths that serve *this* node's own requests called `route(model)` with
+        no networks at all — so a request originating here could be served by
+        a peer that shares no network with us, which is precisely the
+        isolation the relay path exists to enforce.
+
+        Returns None when this node declares no networks, which
+        `peers_for_model` reads as "no restriction" — preserving behaviour for
+        single-network and un-federated deployments.
+        """
+        ids = self.federation.network_ids if self.federation else []
+        return ids or None
+
     async def route_inference(self, model: str, messages: list[dict], **kwargs):
         """Route inference — local if model loaded, otherwise to peer.
 
@@ -2229,7 +2247,8 @@ class MycellmNode:
                     continue
 
             # Peer routing with per-peer failover for this candidate model.
-            targets = self.chain_builder.route(effective_model)
+            targets = self.chain_builder.route(
+                effective_model, network_ids=self._own_network_ids())
             for target in targets:
                 if target.entry.connection is None:
                     continue
@@ -2281,7 +2300,8 @@ class MycellmNode:
         candidates = self._candidate_models(model)
 
         for effective_model in candidates:
-            targets = self.chain_builder.route(effective_model)
+            targets = self.chain_builder.route(
+                effective_model, network_ids=self._own_network_ids())
 
             for target in targets:
                 if target.entry.connection is None:
