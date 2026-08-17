@@ -1146,6 +1146,49 @@ async def list_relays(request: Request):
     return {"relays": node.relay_manager.get_status()}
 
 
+@router.post("/plan")
+async def explain_plan(request: Request):
+    """Explain how a request WOULD be executed, without executing it.
+
+    Body: {"model": "mycellm/swarm", "messages": [...], "trust": "", "fanout": 0}
+
+    The planner is a pure function, so this is the same decision the real
+    request would make — including which targets the egress policy refuses and
+    why. That matters more than the selections: a silently-blocked target is
+    indistinguishable from one that was never there.
+    """
+    from mycellm.execution.models import Job
+    from mycellm.execution.planner import ExecutionPlanner
+
+    node = request.app.state.node
+    body = await request.json()
+    job = Job(
+        job_id=Job.new_id("plan"),
+        model=body.get("model", ""),
+        messages=body.get("messages") or [{"role": "user", "content": ""}],
+        temperature=float(body.get("temperature", 0.7)),
+        max_tokens=int(body.get("max_tokens", 2048)),
+        trust=body.get("trust", ""),
+        token_budget=int(body.get("token_budget", 0) or 0),
+        fanout=int(body.get("fanout", 0) or 0),
+    )
+    if job.network_ids is None:
+        job.network_ids = node._own_network_ids()
+    targets = node.execution_targets()
+    plan = ExecutionPlanner().plan(
+        job, targets,
+        override_privacy=request.headers.get("X-Privacy-Override") == "acknowledged",
+    )
+    return {
+        "plan": plan.to_dict(),
+        "candidates": [
+            {"target": str(t), "model": t.model, "kind": t.kind,
+             "remote": t.is_remote, "tok_s": t.tok_s}
+            for t in targets
+        ],
+    }
+
+
 @router.get("/groups")
 async def list_serving_groups(request: Request):
     """Serving groups and their deployments (0.8 Adaptive Inference Fabric).

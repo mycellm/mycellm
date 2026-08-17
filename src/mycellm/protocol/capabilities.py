@@ -109,13 +109,19 @@ class ModelCapability:
     #: {"type": "standalone"|"tensor"|"pipeline"|"external", "world_size": int}
     parallelism: dict = field(default_factory=dict)
 
-    # `execution_roles` (proposer/critic/synthesizer/…) is deliberately NOT
-    # here yet, and was removed after being written. It belongs to the
-    # execution planner, which is not in this slice — and a role that nothing
-    # enforces is precisely the bug this codebase keeps shipping: embedding
-    # models were tagged `["embedding"]` correctly for months while the chat
-    # path never read the tag; `routing: "ensemble"` is accepted by the public
-    # API today and implemented nowhere. The field lands with its consumer.
+    #: What this model may be asked to do in a multi-stage job:
+    #: "direct", "proposer", "critic", "synthesizer", "verifier", "embed".
+    #: Empty means "direct only" — 0.7 semantics.
+    #:
+    #: This field was written, DELETED for having no consumer, and restored in
+    #: the same release once the execution planner existed to read it. That
+    #: sequence is the point: an advertised capability nothing enforces is the
+    #: bug this codebase keeps shipping (embedding models tagged
+    #: `["embedding"]` while the chat path ignored the tag; `routing:
+    #: "ensemble"` accepted by the public API and implemented nowhere).
+    #: `ExecutionPlanner._eligible_for` is the reader — if you add a role,
+    #: teach it there in the same change.
+    execution_roles: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = {
@@ -146,6 +152,8 @@ class ModelCapability:
             d["deployment_id"] = self.deployment_id
         if self.serving_group_id:
             d["serving_group_id"] = self.serving_group_id
+        if self.execution_roles:
+            d["execution_roles"] = self.execution_roles
         if self.parallelism:
             d["parallelism"] = self.parallelism
         return d
@@ -167,8 +175,20 @@ class ModelCapability:
             loaded_bytes=d.get("loaded_bytes", 0),
             deployment_id=d.get("deployment_id", ""),
             serving_group_id=d.get("serving_group_id", ""),
+            execution_roles=d.get("execution_roles", []),
             parallelism=d.get("parallelism", {}),
         )
+
+    def can(self, role: str) -> bool:
+        """True if this model may be used for `role`.
+
+        Empty `execution_roles` means 0.7 semantics: direct serving only. Use
+        this rather than re-deriving the rule at each call site — the embedding
+        bug happened because two places disagreed about what a tag meant.
+        """
+        if not self.execution_roles:
+            return role == "direct"
+        return role in self.execution_roles
 
     @property
     def is_grouped(self) -> bool:
