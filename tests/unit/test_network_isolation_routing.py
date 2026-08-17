@@ -134,3 +134,60 @@ class TestTheLeakIsClosed:
         node = TestOwnNetworkIds._Node(TestOwnNetworkIds._Fed([]))
         targets = cb.route("llama3", network_ids=node._own_network_ids())
         assert [t.peer_id for t in targets] == ["peer_b"]
+
+
+class TestPerModelScope:
+    """Peer-level reachability is not the same question as model visibility.
+
+    ⚠️ A peer on both net-A and net-B advertising a model scoped to net-A only
+    was serving it to net-B requesters: the peer-level check passed and
+    nothing consulted the model's scope. `models_visible_to_network` held the
+    correct rule and had zero production callers.
+    """
+
+    def _peer_with(self, reg, peer_id, model, scope, visible, peer_nets):
+        caps = Capabilities(models=[
+            ModelCapability(name=model, scope=scope, visible_networks=visible)])
+        reg.register(peer_id, connection=FakeConn(), capabilities=caps,
+                     network_ids=peer_nets)
+        reg.get(peer_id).state = PeerState.ROUTABLE
+
+    def test_networks_scoped_model_is_hidden_from_other_networks(self, registry):
+        # Peer is reachable from net-B, but the model is offered to net-A only.
+        self._peer_with(registry, "p", "secret-model", "networks",
+                        ["net-A"], ["net-A", "net-B"])
+        assert registry.peers_for_model("secret-model", network_ids=["net-B"]) == []
+
+    def test_networks_scoped_model_is_visible_to_its_network(self, registry):
+        self._peer_with(registry, "p", "secret-model", "networks",
+                        ["net-A"], ["net-A", "net-B"])
+        got = registry.peers_for_model("secret-model", network_ids=["net-A"])
+        assert [e.peer_id for e in got] == ["p"]
+
+    def test_public_model_is_visible_to_anyone_sharing_the_peer(self, registry):
+        self._peer_with(registry, "p", "open-model", "public", [], ["net-A"])
+        got = registry.peers_for_model("open-model", network_ids=["net-A"])
+        assert [e.peer_id for e in got] == ["p"]
+
+    def test_home_model_needs_a_shared_peer_network(self, registry):
+        self._peer_with(registry, "p", "home-model", "home", [], ["net-A"])
+        assert registry.peers_for_model("home-model", network_ids=["net-A"])
+        # A requester on net-B cannot reach the peer at all, let alone the model.
+        assert registry.peers_for_model("home-model", network_ids=["net-B"]) == []
+
+    def test_unrestricted_requester_is_unaffected(self, registry):
+        # `want=None` — an un-federated node. Refusing here would break every
+        # single-network deployment.
+        self._peer_with(registry, "p", "secret-model", "networks",
+                        ["net-A"], ["net-A"])
+        got = registry.peers_for_model("secret-model", network_ids=None)
+        assert [e.peer_id for e in got] == ["p"]
+
+    def test_agrees_with_models_visible_to_network(self, registry):
+        """The two paths must not drift — they answer the same question."""
+        self._peer_with(registry, "p", "secret-model", "networks",
+                        ["net-A"], ["net-A", "net-B"])
+        for net, expected in (("net-A", True), ("net-B", False)):
+            via_index = bool(registry.peers_for_model("secret-model", network_ids=[net]))
+            via_scope = ("secret-model", "p") in registry.models_visible_to_network(net)
+            assert via_index == via_scope == expected, f"{net}: {via_index} vs {via_scope}"
