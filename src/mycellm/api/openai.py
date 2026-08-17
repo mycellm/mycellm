@@ -9,7 +9,7 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger("mycellm.api")
@@ -144,13 +144,52 @@ class ChatMessage(BaseModel):
     reasoning_content: Optional[str] = None  # extracted <think>...</think>, OpenAI-o1 style
 
 
+#: Routing options this node actually implements. Anything else is refused
+#: rather than accepted and ignored — see `unsupported_routing_options`.
+SUPPORTED_ROUTING = {"best"}
+
+#: Constraint fields that are declared but not enforced anywhere.
+#:
+#: ⚠️ THESE WERE ACCEPTED SILENTLY AND HAD NO EFFECT. `routing` was consulted
+#: nowhere at all — not "best", not "fastest", not "ensemble" — so a client
+#: asking for an ensemble got ordinary single-model routing and HTTP 200.
+#: `min_context` reached a branch whose body is `pass`, and `max_cost` was
+#: carried into QualityConstraints and never read, so a caller who set a
+#: credit ceiling had none.
+#:
+#: Silently ignoring a constraint is worse than refusing it: the caller
+#: believes a limit is in force. Until each is implemented, asking for one
+#: is an error naming exactly what happened.
+UNENFORCED_CONSTRAINTS = {
+    "min_context": "not enforced — candidate context length is not yet "
+                   "available at resolution time",
+    "max_cost": "not enforced — no per-request credit ceiling exists yet",
+}
+
+
+def unsupported_routing_options(m: MycellmRouting | None) -> list[str]:
+    """Problems with a `mycellm` routing block, as human-readable strings."""
+    if m is None:
+        return []
+    problems = []
+    if m.routing and m.routing not in SUPPORTED_ROUTING:
+        problems.append(
+            f"routing={m.routing!r} is not implemented "
+            f"(supported: {', '.join(sorted(SUPPORTED_ROUTING))})"
+        )
+    for field_name, why in UNENFORCED_CONSTRAINTS.items():
+        if getattr(m, field_name, 0):
+            problems.append(f"{field_name} is {why}")
+    return problems
+
+
 class MycellmRouting(BaseModel):
     min_tier: str = ""          # "frontier", "capable", "fast", "tiny"
     min_params: float = 0       # minimum param count in billions
-    min_context: int = 0        # minimum context window
+    min_context: int = 0        # NOT ENFORCED — see UNENFORCED_CONSTRAINTS
     required_tags: list[str] = []  # must have these tags
-    max_cost: float = 0         # max credits per request (0 = unlimited)
-    routing: str = "best"       # "best", "fastest", "ensemble"
+    max_cost: float = 0         # NOT ENFORCED — see UNENFORCED_CONSTRAINTS
+    routing: str = "best"       # only "best" is implemented
     fallback: str = "downgrade" # "reject" or "downgrade"
     trust: str = ""             # "local", "trusted", "any" — route only to peers at this trust level or higher
 
@@ -222,6 +261,25 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     from mycellm.activity import EventType
 
     node = request.app.state.node
+
+    # ⚠️ BEFORE THE STREAM BRANCH, DELIBERATELY. The streaming path never read
+    # `body.mycellm` at all, so a guard placed with the non-streaming
+    # constraint handling would silently exempt every streaming request —
+    # which is how the original problem (options accepted, never applied)
+    # would have survived its own fix.
+    problems = unsupported_routing_options(body.mycellm)
+    if problems:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": "; ".join(problems),
+                    "type": "invalid_request_error",
+                    "code": "unsupported_routing_option",
+                }
+            },
+        )
+
     messages = []
     for m in body.messages:
         msg: dict = {"role": m.role}
