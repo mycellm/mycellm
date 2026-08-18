@@ -148,6 +148,36 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
         self.transmit()
         return stream_id
 
+    async def open_frame_stream(self, bidirectional: bool = True) -> int:
+        """Open a stream that will carry SEVERAL length-prefixed messages.
+
+        ⚠️ ONE MESSAGE PER STREAM DOES NOT WORK FOR STREAMING. `send_message`
+        opens a new stream and ends it per message, which is fine for
+        request/response but wrong for a token stream: a 40-frame reply became
+        40 streams, QUIC orders only WITHIN a stream so they raced, and iOS's
+        NWMultiplexGroup delivered 7 of them. The client saw a truncated,
+        scrambled answer and then waited out its idle timeout for frames that
+        had already been sent.
+
+        A streamed reply is ONE stream carrying framed messages, ended once at
+        the end — ordering and delivery then come from QUIC itself rather than
+        from luck.
+        """
+        await self._handshake_complete.wait()
+        return self._quic.get_next_available_stream_id(
+            is_unidirectional=not bidirectional
+        )
+
+    def send_frame(self, stream_id: int, msg: MessageEnvelope) -> None:
+        """Write one length-prefixed message to an open frame stream."""
+        self._quic.send_stream_data(stream_id, msg.to_framed(), end_stream=False)
+        self.transmit()
+
+    def end_frame_stream(self, stream_id: int) -> None:
+        """Close the sending side, which is the client's end-of-stream signal."""
+        self._quic.send_stream_data(stream_id, b"", end_stream=True)
+        self.transmit()
+
     def close_stream(self, stream_id: int) -> None:
         """Free a bidirectional request stream's receive side after the reply
         (which arrives by id on a separate stream), so half-open streams don't

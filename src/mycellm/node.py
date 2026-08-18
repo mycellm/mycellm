@@ -913,12 +913,21 @@ class MycellmNode:
         _infer_start = time.time()
 
         model_name = self.inference.resolve_model_name(model)
+        # Peer inference is the one path with no HTTP access log, so a request
+        # that never arrives and one that arrives and routes nowhere look
+        # identical from the client. Log both facts at the boundary.
+        logger.info(
+            f"{styled_tag('INFER')} peer={msg.from_peer[:12]} model={model!r} "
+            f"stream={stream} resolved={model_name!r} local={bool(model_name)}"
+        )
         if not model_name:
             # Model not loaded locally — try relaying to a peer that has it
             if stream:
                 try:
                     relayed = False
                     seq = 0
+                    # One stream for the whole reply — see `open_frame_stream`.
+                    frame_stream = await protocol.open_frame_stream()
                     async for chunk in self.route_inference_stream(model, messages, **{
                         "temperature": payload.get("temperature", 0.7),
                         "max_tokens": payload.get("max_tokens", 2048),
@@ -931,14 +940,23 @@ class MycellmNode:
                                 self.peer_id, msg.id, text or "",
                                 chunk.get("finish_reason"), tool_calls=tc, seq=seq)
                             seq += 1
-                            await protocol.send_message(chunk_msg)
+                            protocol.send_frame(frame_stream, chunk_msg)
                             relayed = True
+                    logger.info(
+                        f"{styled_tag('INFER')} relay stream for {msg.from_peer[:12]}: "
+                        f"{seq} frame(s) sent"
+                    )
                     if relayed:
                         done_msg = inference_done(self.peer_id, msg.id)
-                        await protocol.send_message(done_msg)
+                        protocol.send_frame(frame_stream, done_msg)
+                        protocol.end_frame_stream(frame_stream)
                         return
+                    protocol.end_frame_stream(frame_stream)
                 except Exception as e:
-                    logger.debug(f"Relay stream failed: {e}")
+                    logger.warning(
+                        f"{styled_tag('INFER')} relay stream failed for "
+                        f"{msg.from_peer[:12]} model={model!r}: {type(e).__name__}: {e}"
+                    )
             else:
                 result = await self.route_inference(model, messages,
                     temperature=payload.get("temperature", 0.7),
@@ -954,6 +972,10 @@ class MycellmNode:
                     await protocol.reply_on_stream(stream_id, resp)
                     return
 
+            logger.warning(
+                f"{styled_tag('INFER')} MODEL_UNAVAILABLE for {msg.from_peer[:12]} "
+                f"model={model!r} candidates={self._candidate_models(model)}"
+            )
             err = error_message(self.peer_id, msg.id, ErrorCode.MODEL_UNAVAILABLE)
             await protocol.reply_on_stream(stream_id, err)
             return
@@ -997,17 +1019,19 @@ class MycellmNode:
             completion_tokens = 0
             if stream and not tools:
                 seq = 0
+                frame_stream = await protocol.open_frame_stream()
                 async for chunk in self.inference.generate_stream(req):
                     chunk_msg = inference_stream_chunk(
                         self.peer_id, msg.id, chunk.text, chunk.finish_reason,
                         tool_calls=chunk.tool_calls, seq=seq,
                     )
                     seq += 1
-                    await protocol.send_message(chunk_msg)
+                    protocol.send_frame(frame_stream, chunk_msg)
                     if chunk.text:
                         completion_tokens += 1  # ~1 token per streamed chunk
                 done_msg = inference_done(self.peer_id, msg.id)
-                await protocol.send_message(done_msg)
+                protocol.send_frame(frame_stream, done_msg)
+                protocol.end_frame_stream(frame_stream)
             elif stream and tools:
                 # Use non-streaming generate() for tool requests — streaming tool_call
                 # deltas are unreliable; emit the full result as a single stream chunk.
