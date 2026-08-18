@@ -168,3 +168,49 @@ async def test_route_inference_stream_fails_over_to_next_model():
 
     assert "".join(chunks) == "hello"
     assert reg.get("big").failure_count >= 1
+
+
+class TestPlaceholderModelNames:
+    """"default" must mean "you pick", exactly as "" and "auto" do.
+
+    ⚠️ THIS WAS A FOUR-ROUND BUG. The iOS app sends the literal string
+    "default" when no remote model is configured. `_candidate_models` handled
+    "" and "auto" but not "default", so the name fell through as a concrete
+    model, matched no peer, and the streaming relay replied MODEL_UNAVAILABLE.
+    On the device that presented as "network chat never streams", and three
+    transport-level fixes were made before anyone looked at the model name.
+    """
+
+    def _node(self, resolved_names):
+        from types import SimpleNamespace
+        node = SimpleNamespace()
+        node.model_resolver = SimpleNamespace(
+            resolve=lambda *a, **k: [SimpleNamespace(model_name=n) for n in resolved_names]
+        )
+        node.inference = SimpleNamespace(loaded_models=[])
+        node.node_registry = {}
+        from mycellm.node import MycellmNode
+        import types as _t
+        node._candidate_models = _t.MethodType(MycellmNode._candidate_models, node)
+        return node
+
+    def test_default_resolves_like_auto(self):
+        node = self._node(["big", "small"])
+        assert node._candidate_models("default") == ["big", "small"]
+
+    def test_empty_and_auto_still_resolve(self):
+        node = self._node(["big", "small"])
+        assert node._candidate_models("") == ["big", "small"]
+        assert node._candidate_models("auto") == ["big", "small"]
+
+    def test_a_concrete_name_is_never_expanded(self):
+        # Asking for a specific model must not silently route elsewhere.
+        node = self._node(["big", "small"])
+        assert node._candidate_models("llama3") == ["llama3"]
+
+    def test_placeholders_do_not_collide_with_a_real_model_named_default(self):
+        # If someone genuinely loads a model called "default", auto-select
+        # returns the ranked list — which will contain it. The request still
+        # gets served; it just is not pinned. Documented, not accidental.
+        node = self._node(["default", "other"])
+        assert "default" in node._candidate_models("default")

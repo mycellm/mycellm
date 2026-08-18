@@ -2320,7 +2320,16 @@ class MycellmNode:
         request. The resolver already excludes peers without a live connection,
         so dead/zombie seeders never appear here.
         """
-        if model not in ("", "auto") or not self.model_resolver:
+        # ⚠️ "default" BELONGS IN THIS SET, AND LEAVING IT OUT BROKE EVERY
+        # NETWORK CHAT FROM THE iOS APP. The app sends the literal string
+        # "default" when no remote model has been chosen; it reached
+        # `chain_builder.route("default")`, matched no peer, and the streaming
+        # relay answered MODEL_UNAVAILABLE. From the phone that looked like
+        # "streaming does not work" — a typing indicator, then a timeout — and
+        # three separate transport fixes went past it because the transport was
+        # never the problem. Any client's placeholder for "you pick" has to mean
+        # the same thing here as it does on the HTTP API.
+        if model not in ("", "auto", "default", None) or not self.model_resolver:
             return [model]
         resolved = self.model_resolver.resolve(
             "", self.inference.loaded_models,
