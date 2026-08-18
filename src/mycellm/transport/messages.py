@@ -83,8 +83,23 @@ def inference_stream_chunk(
     text: str,
     finish_reason: str | None = None,
     tool_calls: list | None = None,
+    seq: int | None = None,
 ) -> MessageEnvelope:
+    """One frame of a streamed reply.
+
+    ⚠️ `seq` EXISTS BECAUSE QUIC DOES NOT ORDER THESE FOR US. `send_message`
+    opens a NEW stream per message (`quic.py`), and QUIC only guarantees
+    ordering *within* a stream — so frames of one reply race each other. On a
+    real device this produced "End-to encryption (-endE2" instead of "End-to-end
+    encryption (E2EE)": every token arrived, shuffled. It reads as a corrupt
+    model rather than a transport bug, which is what made it hard to see.
+
+    Additive: a peer that does not send `seq` is reassembled in arrival order,
+    exactly as before, so old and new nodes interoperate.
+    """
     payload: dict[str, Any] = {"text": text, "finish_reason": finish_reason}
+    if seq is not None:
+        payload["seq"] = seq
     if tool_calls:
         payload["tool_calls"] = tool_calls
     return MessageEnvelope(

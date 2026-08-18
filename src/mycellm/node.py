@@ -918,6 +918,7 @@ class MycellmNode:
             if stream:
                 try:
                     relayed = False
+                    seq = 0
                     async for chunk in self.route_inference_stream(model, messages, **{
                         "temperature": payload.get("temperature", 0.7),
                         "max_tokens": payload.get("max_tokens", 2048),
@@ -926,7 +927,10 @@ class MycellmNode:
                         text = chunk.get("text", "")
                         tc = chunk.get("tool_calls")
                         if text or tc:
-                            chunk_msg = inference_stream_chunk(self.peer_id, msg.id, text or "", chunk.get("finish_reason"), tool_calls=tc)
+                            chunk_msg = inference_stream_chunk(
+                                self.peer_id, msg.id, text or "",
+                                chunk.get("finish_reason"), tool_calls=tc, seq=seq)
+                            seq += 1
                             await protocol.send_message(chunk_msg)
                             relayed = True
                     if relayed:
@@ -992,11 +996,13 @@ class MycellmNode:
         try:
             completion_tokens = 0
             if stream and not tools:
+                seq = 0
                 async for chunk in self.inference.generate_stream(req):
                     chunk_msg = inference_stream_chunk(
                         self.peer_id, msg.id, chunk.text, chunk.finish_reason,
-                        tool_calls=chunk.tool_calls,
+                        tool_calls=chunk.tool_calls, seq=seq,
                     )
+                    seq += 1
                     await protocol.send_message(chunk_msg)
                     if chunk.text:
                         completion_tokens += 1  # ~1 token per streamed chunk
@@ -1015,7 +1021,7 @@ class MycellmNode:
                         result.finish_reason = "tool_calls"
                 chunk_msg = inference_stream_chunk(
                     self.peer_id, msg.id, result.text, result.finish_reason,
-                    tool_calls=result.tool_calls,
+                    tool_calls=result.tool_calls, seq=0,
                 )
                 await protocol.send_message(chunk_msg)
                 done_msg = inference_done(self.peer_id, msg.id)
