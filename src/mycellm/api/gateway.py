@@ -149,9 +149,30 @@ def _get_candidates(node, require_vision: bool = False) -> list[tuple[str, str |
 
     # Group by tier, rotate within each tier via round-robin
     from itertools import groupby
-    candidates.sort(key=lambda c: (c[2], 0 if c[1] is None else 1))
+    # Order within a tier: local, then QUIC, then HTTP proxy.
+    #
+    # ⚠️ THE OLD KEY WAS `0 if c[1] is None else 1`, WHICH ONLY PROMOTED LOCAL
+    # MODELS. A `quic:<peer>` candidate has a non-None fleet_addr, so it sorted
+    # level with the HTTP-proxy candidates and round-robin could put the proxy
+    # first — even though the comments above call QUIC the NAT-friendly path and
+    # the HTTP path explicitly "requires reachable api_addr". On a bootstrap
+    # whose peers are all behind NAT that address can never be reachable, so the
+    # proxy attempt only ever buys a 30s connect timeout before failover.
+    def _hop_cost(addr) -> int:
+        if addr is None:
+            return 0            # local — no network hop
+        if str(addr).startswith("quic:"):
+            return 1            # existing connection, NAT-friendly
+        return 2                # HTTP proxy — needs a routable api_addr
+
+    candidates.sort(key=lambda c: (c[2], _hop_cost(c[1])))
     rotated = []
-    for _tier, group in groupby(candidates, key=lambda c: c[2]):
+    # Rotate within (tier, hop cost), NOT within tier alone. Grouping by tier
+    # only would let the round-robin offset lift an HTTP-proxy candidate back
+    # above the QUIC one the sort just placed ahead of it — undoing the
+    # ordering on roughly half of all requests. Load is still spread across
+    # peers; it is spread among equally-good ones.
+    for _key, group in groupby(candidates, key=lambda c: (c[2], _hop_cost(c[1]))):
         items = list(group)
         if len(items) > 1:
             offset = _round_robin_counter % len(items)
@@ -445,10 +466,11 @@ async def public_chat(request: Request):
                                    result.completion_tokens, latency_ms,
                                    reasoning_exclude=reasoning_exclude)
 
-        except (RuntimeError, _FleetBusyError) as e:
-            # Model busy (local queue timeout or fleet 503) — try next candidate
+        except (RuntimeError, _FleetBusyError, _FleetUnavailableError) as e:
+            # Busy (local queue timeout or fleet 503) or unreachable — next one.
             last_error = str(e)
-            logger.info(f"Gateway failover: {model_name}{'@'+fleet_addr if fleet_addr else ''} busy, trying next")
+            why = "unreachable" if isinstance(e, _FleetUnavailableError) else "busy"
+            logger.info(f"Gateway failover: {model_name}{'@'+fleet_addr if fleet_addr else ''} {why}, trying next")
             continue
         except Exception as e:
             last_error = str(e)
@@ -508,6 +530,16 @@ class _FleetBusyError(Exception):
     pass
 
 
+class _FleetUnavailableError(Exception):
+    """Raised when a fleet node cannot be reached at all — triggers failover.
+
+    Distinct from `_FleetBusyError` only for log legibility: busy means the node
+    answered and declined, unreachable means the address is wrong or dead. Both
+    mean "try the next candidate", which is the part that matters.
+    """
+    pass
+
+
 async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, temperature, max_tokens, client_ip, start_time):
     """Proxy a non-streaming request to a fleet node."""
     import httpx
@@ -564,12 +596,27 @@ async def _proxy_fleet(node, request_id, model_name, fleet_addr, messages, tempe
             reasoning_exclude=True,
         )
 
+    except _FleetBusyError:
+        # Busy is already a failover signal — let it through untouched.
+        raise
     except Exception as e:
+        # ⚠️ THIS USED TO `return JSONResponse(503)` AND THAT ENDED THE REQUEST.
+        # The gateway builds a candidate list and loops over it, failing over on
+        # any exception — but returning a response from here instead of raising
+        # exits the loop with a 503 while working candidates were still queued
+        # behind this one. `_stream_fleet` has always raised; only this
+        # non-streaming twin swallowed the failure, so streaming requests failed
+        # over correctly and non-streaming ones did not.
+        #
+        # It took a production outage to surface: every node announcing to a
+        # Dockerised bootstrap is recorded with the bridge-gateway address
+        # (`/v1/admin/nodes/announce` substitutes the request's client IP for an
+        # `0.0.0.0` api_addr, and inside Docker that is the bridge), so the HTTP
+        # candidate is unreachable by construction — and it killed the request
+        # instead of deferring to the QUIC candidate for the very same model.
         logger.warning(f"Fleet proxy to {fleet_addr} failed: {e}")
         node.activity.record(EventType.INFERENCE_FAILED, model=model_name, source="public_gateway_fleet")
-        return JSONResponse(status_code=503, content={
-            "error": {"message": "Fleet node unavailable. Try again."}
-        })
+        raise _FleetUnavailableError(f"fleet {fleet_addr} unreachable: {e}") from e
 
 
 async def _stream_fleet(node, request_id, model_name, fleet_addr, messages, temperature, max_tokens, client_ip, start_time):
