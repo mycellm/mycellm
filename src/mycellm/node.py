@@ -499,10 +499,20 @@ class MycellmNode:
     # ── Fleet admin command handling ──
 
     # Allowlisted fleet commands (restricted scope — no secrets, no key changes)
+    #
+    # The `node.groups` / `node.targets` / `node.plan` / `relay.*` family is the
+    # 0.8 management surface. Until it existed, every 0.8 concept was reachable
+    # only on the node's own loopback API: an operator could see that a peer
+    # advertised a model but not which serving group backed it, and could not
+    # attach or detach a gateway without shelling into the host. Advertising a
+    # fabric the fleet cannot administer is the same advertised-but-unreachable
+    # shape 0.8 spent its defect budget removing.
     _FLEET_COMMANDS = {
         "node.status", "node.config",
         "model.list", "model.load", "model.unload", "model.scope",
         "train.status",
+        "node.groups", "node.targets", "node.plan",
+        "relay.list", "relay.add", "relay.remove", "relay.refresh",
     }
 
     async def _handle_fleet_command(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
@@ -628,6 +638,138 @@ class MycellmNode:
             # to. Round execution + QUIC broadcast are a later phase — this is
             # the discovery surface so a coordinator knows who can join.
             return self._training_status()
+
+        # ── 0.8 fabric: serving groups, execution targets, planning ──
+
+        elif command == "node.groups":
+            # Read-only. The fleet view of what `GET /v1/node/groups` returns
+            # locally: which gateways this node fronts, and which deployments
+            # each one actually serves right now.
+            if not getattr(self, "relay_manager", None):
+                return {"groups": [], "count": 0, "healthy_count": 0,
+                        "deployment_count": 0}
+            groups = self.relay_manager.get_groups()
+            return {
+                "groups": groups,
+                "count": len(groups),
+                "healthy_count": sum(1 for g in groups if g["healthy"]),
+                "deployment_count": sum(len(g["deployments"]) for g in groups),
+            }
+
+        elif command == "node.targets":
+            # Everywhere a WorkUnit could run on this node — the planner's own
+            # input, exposed so a fleet operator can see why a peer chose what
+            # it chose without guessing from the model list.
+            targets = self.execution_targets(params.get("model", ""))
+            return {
+                "targets": [
+                    {"target": str(t), "model": t.model, "kind": t.kind,
+                     "remote": t.is_remote, "tok_s": t.tok_s,
+                     "params_b": t.params_b, "roles": list(t.roles)}
+                    for t in targets
+                ],
+                "count": len(targets),
+            }
+
+        elif command == "node.plan":
+            # Dry-run: what WOULD this peer do with this request. Executes
+            # nothing, so a fleet operator can inspect egress refusals — the
+            # thing that is otherwise invisible, because a target blocked by
+            # policy looks identical to one that was never there.
+            from mycellm.execution.models import Job
+            from mycellm.execution.planner import ExecutionPlanner
+
+            job = Job(
+                job_id=Job.new_id("fleet"),
+                model=params.get("model", ""),
+                messages=params.get("messages") or [{"role": "user", "content": ""}],
+                temperature=float(params.get("temperature", 0.7)),
+                max_tokens=int(params.get("max_tokens", 2048)),
+                trust=params.get("trust", ""),
+                token_budget=int(params.get("token_budget", 0) or 0),
+                fanout=int(params.get("fanout", 0) or 0),
+            )
+            if job.network_ids is None:
+                job.network_ids = self._own_network_ids()
+            targets = self.execution_targets()
+            # No privacy override over the fleet channel. An operator holding
+            # the admin key can already load models here; letting them silently
+            # disable this node's egress scanning for a prompt they supply is a
+            # different power, and not one the plan surface needs.
+            plan = ExecutionPlanner().plan(job, targets, override_privacy=False)
+            return {"plan": plan.to_dict(), "candidate_count": len(targets)}
+
+        elif command == "relay.list":
+            if not getattr(self, "relay_manager", None):
+                return {"relays": []}
+            return {"relays": self.relay_manager.get_status()}
+
+        elif command == "relay.add":
+            if not getattr(self, "relay_manager", None):
+                raise ValueError("Relay manager not initialized")
+            url = params.get("url", "")
+            if not url:
+                raise ValueError("url required")
+            api_key = params.get("api_key", "")
+            # Same secret-store indirection the HTTP path uses, so a fleet
+            # command can name a secret already on the target node instead of
+            # putting the literal credential on the wire.
+            if api_key and getattr(self, "secret_store", None):
+                api_key = self.secret_store.resolve(api_key)
+            relay = await self.relay_manager.add(
+                url=url,
+                api_key=api_key,
+                name=params.get("name", ""),
+                max_concurrent=params.get("max_concurrent", 32),
+            )
+            self.capabilities.models = self.inference.loaded_models
+            self.capabilities.role = (
+                "seeder" if self.inference.loaded_models else "consumer"
+            )
+            await self.announce_capabilities()
+            return {
+                "status": "added",
+                "relay": {
+                    "url": relay.url, "name": relay.name,
+                    "group_id": relay.group_id, "online": relay.online,
+                    "error": relay.error,
+                    "models": list(relay.registered.values()),
+                },
+            }
+
+        elif command == "relay.remove":
+            if not getattr(self, "relay_manager", None):
+                raise ValueError("Relay manager not initialized")
+            url = params.get("url", "")
+            if not url:
+                raise ValueError("url required")
+            removed = await self.relay_manager.remove(url)
+            if removed:
+                self.capabilities.models = self.inference.loaded_models
+                self.capabilities.role = (
+                    "seeder" if self.inference.loaded_models else "consumer"
+                )
+                await self.announce_capabilities()
+            return {"status": "removed" if removed else "not_found", "url": url}
+
+        elif command == "relay.refresh":
+            if not getattr(self, "relay_manager", None):
+                raise ValueError("Relay manager not initialized")
+            url = params.get("url", "")
+            total = (
+                await self.relay_manager.refresh(url) if url
+                else await self.relay_manager.refresh_all()
+            )
+            if total > 0:
+                self.capabilities.models = self.inference.loaded_models
+                self.capabilities.role = (
+                    "seeder" if self.inference.loaded_models else "consumer"
+                )
+                await self.announce_capabilities()
+            return {
+                "models_discovered": total,
+                "relays": self.relay_manager.get_status(),
+            }
 
         raise ValueError(f"Unknown command: {command}")
 

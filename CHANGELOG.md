@@ -4,6 +4,101 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [0.8.0] — unreleased
+
+**The adaptive inference fabric.** A request stops being "pick a node and send
+it there" and becomes a plan: a job, a set of work units, and targets chosen
+before anything is dispatched. The planner is a pure function over (job,
+candidates), which is what makes "why did this request go there" answerable in
+a unit test rather than only in production.
+
+### Added
+
+- **`mycellm/swarm`** — a synthetic model that selects a strategy, not a model.
+  N proposers answer in parallel, then a synthesis pass merges them. It is
+  advertised on `/v1/models` only when the node can actually form a swarm,
+  because listing a model that always refuses is the advertised-but-unavailable
+  shape this release exists to remove. Honesty properties, each tested: a swarm
+  that cannot form degrades to direct **and says so**; a single-model swarm is
+  labelled self-consistency sampling rather than heterogeneity; a proposer
+  dying does not fail the job; synthesis failure returns the best proposal
+  instead of discarding work already paid for; `token_budget` is a ceiling, and
+  cancelled units do not outlive the job.
+
+- **`POST /v1/node/plan`** — explain how a request *would* execute, running
+  nothing. Returns the refusals as well as the selections, because a target
+  blocked by egress policy is otherwise indistinguishable from one that was
+  never there.
+
+- **`GET /v1/node/groups`** — serving groups and their deployments. Two groups
+  serving the same model name stay distinguishable, which is why deployments
+  have ids rather than being keyed by model.
+
+- **Fleet management for the fabric** — `node.groups`, `node.targets`,
+  `node.plan`, `relay.list`, `relay.add`, `relay.remove`, `relay.refresh`.
+  Until these existed, every 0.8 concept was reachable only on a node's own
+  loopback API: an operator could see that a peer advertised a model but not
+  which group backed it, and could not attach or detach a gateway without
+  shelling into the host. `relay.add` resolves a secret reference on the target
+  node, so a fleet command can name a credential instead of carrying one.
+  `node.plan` deliberately has **no** privacy override: the fleet key manages
+  models, and letting it silently disable egress scanning for arbitrary text on
+  someone else's machine is a different power.
+
+- **Additive capability fields** — `deployment_id`, `serving_group_id`,
+  `parallelism`, `execution_roles`, and device telemetry (`ram_gb`,
+  `architecture`, `device_class`, and the `power`/`thermal`/`network`
+  constraint blocks). Every one is omitted when unset, so a 0.7.x peer receives
+  a byte-identical payload. Cross-implementation golden CBOR vectors are
+  checked in on both sides, so Python and Swift cannot drift apart silently.
+
+- **Dashboard** — `mycellm/swarm` in the model selector, an execution-plan card
+  under every swarm answer (units, refusals, degradation, spend against
+  budget), a Serving Groups panel that reports *online* and *healthy*
+  separately, and trust / proposer-count / token-budget controls.
+
+### Fixed
+
+Nine live defects in shipped 0.7.1 code, all the same shape — **state recorded
+correctly, then never enforced**:
+
+- **Dead relays kept serving ghost models**; the fleet routed to a corpse.
+  Models are now withdrawn on every failure path.
+- **Relay name collisions** silently dropped the second relay, and `remove()`
+  unloaded the *other* relay's model.
+- **No reconciliation** — a model withdrawn upstream stayed advertised forever.
+- **Network isolation skipped locally-originated routing.** It was enforced on
+  relayed traffic only, so a request originating on this node could be served
+  by a peer sharing none of its networks.
+- **Per-model `scope` was enforced nowhere.** `models_visible_to_network` had
+  the right rule and zero callers.
+- **The advertised version was hardcoded `"0.1.0"`** on every Python node,
+  which blocks feature-gating on it — a peer claiming 0.1.0 might be any
+  release ever shipped. It now reports the real package version. Nothing should
+  gate on this until truthful versions have been in the wild long enough that
+  "0.1.0" is rare; the clock starts here.
+- **`routing`, `min_context` and `max_cost` were accepted and ignored.** A
+  caller who set a credit ceiling had none. They are now refused with a 400
+  naming exactly what happened — silently ignoring a constraint is worse than
+  refusing it, because the caller believes a limit is in force.
+- **A restarted node reported a group unhealthy with 0 deployments while
+  serving it**, because an auto-loaded model blocked the relay's claim on its
+  own name.
+- **Privacy scanning covered one caller.** `scan_with_policy` was correct and
+  reached only from the public HTTP gateway; `route_inference` — the CLI, the
+  OpenAI API, any fan-out — scanned nothing. Egress is now decided per target
+  during planning, before dispatch, so a blocked prompt is never partially
+  sent. Trust derives from where a target *is*; a caller may lower its own
+  ceiling but cannot raise a peer's.
+
+### Documented, not fixed
+
+- **Capabilities are not signed**, despite the module docstring claiming so
+  since before 0.7. The QUIC+TLS session stops a third party tampering in
+  flight, but the peer itself can claim anything. Fixing it changes the signed
+  byte range, which every 0.7.1 peer computes differently, so it cannot be done
+  additively — it needs the version field above to become trustworthy first.
+
 ## [0.7.1] — 2026-08-15
 
 ### Security

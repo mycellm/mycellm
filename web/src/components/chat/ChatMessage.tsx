@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, ChevronRight, RefreshCw, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MarkdownRenderer } from '@/components/common/MarkdownRenderer'
+import { ExecutionPlanCard } from './ExecutionPlanCard'
 import type { ChatMessage as ChatMessageType } from '@/api/types'
 
 interface ChatMessageProps {
@@ -41,7 +42,8 @@ function formatTime(ts: number): string {
 }
 
 export function ChatMessage({ message, onRetry }: ChatMessageProps) {
-  const { role, content, model, routed_to, tokens, timestamp, reasoning_content } = message
+  const { role, content, model, routed_to, tokens, timestamp, reasoning_content, plan } =
+    message
 
   // System messages
   if (role === 'system') {
@@ -71,6 +73,10 @@ export function ChatMessage({ message, onRetry }: ChatMessageProps) {
           )}
         >
           <MarkdownRenderer content={content} className="text-sm text-compute" />
+          {/* A refused swarm returns the plan with the error. Showing it here
+              is the difference between "it failed" and "these two targets were
+              blocked by egress policy, for this reason". */}
+          {plan && <ExecutionPlanCard plan={plan} />}
           {onRetry && (
             <div className="mt-2">
               <button
@@ -125,6 +131,8 @@ export function ChatMessage({ message, onRetry }: ChatMessageProps) {
       >
         {reasoning_content && <ReasoningPanel reasoning={reasoning_content} />}
         <MarkdownRenderer content={content} className="text-sm text-gray-200" />
+
+        {plan && <ExecutionPlanCard plan={plan} />}
 
         {(model || tokens) && (
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-white/5 pt-2 text-xs text-gray-600">

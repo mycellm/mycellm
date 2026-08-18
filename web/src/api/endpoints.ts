@@ -24,6 +24,8 @@ export const API = {
     publicDashboard: '/v1/node/public/dashboard',
     publicStats: '/v1/node/public/stats',
     fleetHardware: '/v1/node/fleet/hardware',
+    plan: '/v1/node/plan',
+    groups: '/v1/node/groups',
     relay: '/v1/node/relay',
     relayAdd: '/v1/node/relay/add',
     relayRemove: '/v1/node/relay/remove',

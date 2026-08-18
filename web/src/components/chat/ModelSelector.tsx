@@ -14,6 +14,12 @@ export function ModelSelector({ models, selected, onSelect }: ModelSelectorProps
   const localModels = models.filter((m) => m.owned_by === 'local')
   const fleetModels = models.filter((m) => m.owned_by?.startsWith('fleet:'))
   const peerModels = models.filter((m) => m.owned_by?.startsWith('peer:'))
+  // Strategy models (`owned_by: 'mycellm'`) select an execution strategy
+  // rather than a model. `auto` is already the empty option below, so only
+  // the rest are listed. Without this group the node advertised
+  // `mycellm/swarm` on /v1/models and the dashboard had no way to pick it —
+  // the same advertised-but-unreachable shape 0.8 exists to remove.
+  const strategyModels = models.filter((m) => m.owned_by === 'mycellm' && m.id !== 'auto')
 
   return (
     <select
@@ -27,6 +33,16 @@ export function ModelSelector({ models, selected, onSelect }: ModelSelectorProps
       )}
     >
       <option value="">{t('model.auto')}</option>
+
+      {strategyModels.length > 0 && (
+        <optgroup label={t('model.strategies')}>
+          {strategyModels.map((m) => (
+            <option key={m.id} value={m.id} title={m.description}>
+              {m.id}
+            </option>
+          ))}
+        </optgroup>
+      )}
 
       {localModels.length > 0 && (
         <optgroup label={`${t('model.local')} (${localModels.length})`}>

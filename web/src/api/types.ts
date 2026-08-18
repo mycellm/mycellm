@@ -110,7 +110,12 @@ export interface Model {
   id: string
   object: string
   created: number
+  // 'local' | 'fleet:<node>' | 'peer:<id>' | 'mycellm' (strategy models such
+  // as `auto` and `mycellm/swarm`, which select a strategy, not a model).
   owned_by: string
+  tags?: string[]
+  description?: string
+  context_length?: number
 }
 
 export interface SavedModel {
@@ -254,19 +259,105 @@ export interface ChatMessage {
   // OpenAI-o-series style: model's internal reasoning, separated from the
   // user-facing answer so the UI can render it in a collapsible panel.
   reasoning_content?: string
+  // Execution plan returned by the node on the `mycellm` field. Present for
+  // swarm answers, which are paid for per proposer — the caller is entitled
+  // to see what ran, what was refused, and whether the job degraded.
+  plan?: ExecutionMeta
   timestamp: number
+}
+
+// ── Execution fabric (0.8) ────────────────────────────────────────────────
+
+export interface PlanUnit {
+  unit_id: string
+  role: 'direct' | 'proposer' | 'synthesizer' | 'critic' | 'verifier' | 'embed'
+  target: string
+  model: string
+  depends_on: string[]
+}
+
+export interface PlanRejection {
+  target: string
+  reason: string
+}
+
+/** `ExecutionPlan.to_dict()` plus the coordinator's post-run counters. */
+export interface ExecutionMeta {
+  job_id: string
+  strategy: 'direct' | 'replica' | 'swarm'
+  reasons: string[]
+  rejected: PlanRejection[]
+  token_budget: number
+  units: PlanUnit[]
+  // Present once a job has actually run (absent on a /plan dry run).
+  units_ok?: number
+  units_failed?: number
+  proposers_planned?: number
+  completion_tokens_spent?: number
+  synthesized_by?: string
+  served_by?: string
+  elapsed_s?: number
+  degraded?: boolean
+  degradation?: string
+  cancelled_for_budget?: number
+  failures?: { target: string; error: string }[]
+}
+
+export interface Deployment {
+  deployment_id: string
+  // The name the model is registered under locally (`relay:<id>`).
+  model: string
+  // What the gateway calls it upstream. These differ, and showing only one
+  // makes a routing question unanswerable from the UI.
+  upstream_model?: string
+  parallelism?: { type?: string; world_size?: number }
+}
+
+export interface ServingGroup {
+  group_id: string
+  name: string
+  // ⚠️ `endpoint`, NOT `url` — the field name the node actually emits. The
+  // relay *add* API takes `url`; `GET /v1/node/groups` returns `endpoint`.
+  // Guessing symmetry here rendered an empty string against a live node.
+  endpoint: string
+  runtime?: string
+  endpoint_mode?: string
+  online: boolean
+  healthy: boolean
+  error?: string
+  deployments: Deployment[]
+}
+
+export interface GroupsResponse {
+  groups: ServingGroup[]
+  count: number
+  healthy_count: number
+  deployment_count: number
 }
 
 export interface RoutingOptions {
   min_tier: string
   required_tags: string[]
-  routing: 'best' | 'fastest'
+  // ⚠️ `routing` is NOT a user choice. The node implements exactly one mode
+  // and returns HTTP 400 for anything else, so offering "fastest" here put a
+  // button in the UI that could only fail. It stays in the type as a literal
+  // so a future mode has to be added deliberately, in both places at once.
+  routing: 'best'
   fallback: 'downgrade' | 'reject'
+  // Route only to peers at this trust level or higher. '' = node default.
+  trust: '' | 'local' | 'trusted' | 'any'
+  // Swarm proposers. 0 = let the planner decide.
+  fanout: number
+  // Ceiling on generated tokens across the whole job. 0 = no ceiling.
+  token_budget: number
   // Whether to ask thinking-capable models to surface their reasoning.
   // When false (default), the server strips <think>...</think> blocks and
   // suppresses thinking on Qwen3-family templates. When true, reasoning is
   // returned on reasoning_content and shown in a collapsible UI panel.
   show_reasoning: boolean
 }
+
+/** The synthetic model that selects the swarm strategy. */
+export const SWARM_MODEL = 'mycellm/swarm'
 
 export type Tab = 'overview' | 'network' | 'models' | 'chat' | 'credits' | 'logs' | 'settings'

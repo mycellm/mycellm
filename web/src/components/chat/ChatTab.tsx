@@ -12,9 +12,10 @@ import { useSensitiveDetect } from '@/hooks/useSensitiveDetect'
 import { ChatMessage as ChatMessageComponent } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { ModelSelector } from './ModelSelector'
-import { RoutingOptions } from './RoutingOptions'
+import { RoutingOptions, RoutingOptionsPanel } from './RoutingOptions'
 import { SensitiveWarning } from './SensitiveWarning'
 import type { ChatMessage } from '@/api/types'
+import { SWARM_MODEL } from '@/api/types'
 
 const MAX_RETRIES = 5
 const RETRY_DELAYS = [2, 4, 8, 15, 30]
@@ -259,6 +260,34 @@ export function ChatTab() {
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .map((m) => ({ role: m.role, content: m.content }))
 
+      // The `mycellm` block carries two different kinds of option, and they
+      // apply under different conditions:
+      //   - resolution constraints (min_tier, tags, fallback) only mean
+      //     something when the node is choosing the model, i.e. model === ''
+      //   - execution options (trust, fanout, token_budget) apply to whatever
+      //     was chosen, including an explicitly-selected swarm
+      // `routing` is deliberately never sent: only "best" is implemented, the
+      // node rejects anything else with HTTP 400, and "best" is already the
+      // server-side default — so sending it adds a way to fail and nothing else.
+      const isSwarm = model === SWARM_MODEL
+      const resolving = model === ''
+      const constraints =
+        resolving && (routingOpts.min_tier !== 'any' || routingOpts.required_tags.length > 0)
+          ? {
+              min_tier: routingOpts.min_tier !== 'any' ? routingOpts.min_tier : undefined,
+              required_tags:
+                routingOpts.required_tags.length > 0 ? routingOpts.required_tags : undefined,
+              fallback: routingOpts.fallback,
+            }
+          : {}
+      const execution = {
+        trust: routingOpts.trust || undefined,
+        fanout: isSwarm && routingOpts.fanout > 0 ? routingOpts.fanout : undefined,
+        token_budget: routingOpts.token_budget > 0 ? routingOpts.token_budget : undefined,
+      }
+      const mycellm = { ...constraints, ...execution }
+      const hasOptions = Object.values(mycellm).some((v) => v !== undefined)
+
       const reqBody = {
         model: model || '',
         messages: history,
@@ -267,18 +296,7 @@ export function ChatTab() {
         // <think> blocks and asks Qwen3 templates to suppress thinking. Toggle
         // on → server returns reasoning_content for UI to render.
         reasoning: { exclude: !routingOpts.show_reasoning },
-        ...(model === '' &&
-        (routingOpts.min_tier !== 'any' || routingOpts.required_tags.length > 0)
-          ? {
-              mycellm: {
-                min_tier: routingOpts.min_tier !== 'any' ? routingOpts.min_tier : undefined,
-                required_tags:
-                  routingOpts.required_tags.length > 0 ? routingOpts.required_tags : undefined,
-                routing: routingOpts.routing,
-                fallback: routingOpts.fallback,
-              },
-            }
-          : {}),
+        ...(hasOptions ? { mycellm } : {}),
       }
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -317,17 +335,28 @@ export function ChatTab() {
 
             // Non-retryable or retries exhausted
             let errContent: string
+            let errPlan: ChatMessage['plan']
             if (status === 429) {
               errContent = t('retry.exhausted')
             } else if (status === 503) {
               errContent = t('retry.busy')
             } else {
-              errContent = `Error ${status}: ${body}`
+              // A swarm refusal (422) carries the plan that produced it. The
+              // refusals are the whole point: a target blocked by egress policy
+              // is otherwise indistinguishable from one that was never there.
+              try {
+                const parsed = JSON.parse(body)
+                errContent = parsed?.error?.message || `Error ${status}: ${body}`
+                errPlan = parsed?.error?.plan
+              } catch {
+                errContent = `Error ${status}: ${body}`
+              }
             }
             addMessage({
               id: generateId(),
               role: 'error',
               content: errContent,
+              plan: errPlan,
               timestamp: Date.now(),
             })
             break
@@ -346,6 +375,9 @@ export function ChatTab() {
             model: routedTo,
             routed_to: data.routed_to || routedTo,
             reasoning_content: reasoning,
+            // Present on swarm answers. Carries what ran, what was refused,
+            // and whether the job degraded — see ExecutionPlanCard.
+            plan: data.mycellm,
             tokens: {
               prompt: usage.prompt_tokens || 0,
               completion: usage.completion_tokens || 0,
@@ -474,7 +506,13 @@ export function ChatTab() {
         </button>
       </div>
 
-      {/* Routing options panel (rendered by RoutingOptions when open) */}
+      {/* Routing options panel — below the toolbar, never inside it. */}
+      <RoutingOptionsPanel
+        options={routingOpts}
+        onChange={(opts) => setRoutingOpts(opts)}
+        open={showRouting}
+        swarm={model === SWARM_MODEL}
+      />
 
       {/* Messages */}
       <div

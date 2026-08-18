@@ -23,5 +23,14 @@
     "transport": "Transporte",
     "models": "Modelos",
     "hardware": "Hardware"
+  },
+  "groups": {
+    "title": "Grupos de servicio",
+    "summary": "{{healthy}} en buen estado · {{deployments}} despliegues",
+    "healthy": "en buen estado",
+    "noDeployments": "en línea · 0 despliegues",
+    "offline": "desconectado",
+    "empty": "sin despliegues registrados",
+    "none": "Sin grupos de servicio. Añade un endpoint compatible con OpenAI desde la pestaña Modelos."
   }
 }

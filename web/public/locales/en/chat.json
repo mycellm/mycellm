@@ -9,18 +9,21 @@
     "auto": "Automatic (best available)",
     "local": "Local",
     "fleet": "Fleet",
-    "peers": "Peers"
+    "peers": "Peers",
+    "strategies": "Strategies"
   },
   "routing": {
     "title": "Routing Options",
     "minQuality": "Min quality",
     "tags": "Tags",
-    "mode": "Mode",
     "fallback": "If unavailable",
-    "bestQuality": "Best quality",
-    "fastest": "Fastest",
     "useNextBest": "Use next best",
-    "reject": "Reject request"
+    "reject": "Reject request",
+    "trust": "Trust",
+    "fanout": "Proposers",
+    "tokenBudget": "Token budget",
+    "auto": "Auto",
+    "noLimit": "No limit"
   },
   "tiers": {
     "any": "Any",
@@ -53,5 +56,26 @@
     "fleet": "Show fleet nodes",
     "config": "Show node configuration",
     "clear": "Clear conversation"
+  },
+  "trust": {
+    "default": "Node default",
+    "local": "Local only",
+    "trusted": "Trusted",
+    "any": "Any"
+  },
+  "plan": {
+    "proposers": "{{count}} proposer",
+    "proposers_other": "{{count}} proposers",
+    "failed": "{{count}} failed",
+    "refused": "{{count}} refused",
+    "degraded": "degraded",
+    "units": "Work units",
+    "refusedTitle": "Refused by egress policy",
+    "failuresTitle": "Failures",
+    "reasons": "Planner reasons",
+    "synthesizedBy": "Synthesized by",
+    "servedBy": "Served by",
+    "spent": "Tokens",
+    "cancelledForBudget": "{{count}} cancelled for budget"
   }
 }
