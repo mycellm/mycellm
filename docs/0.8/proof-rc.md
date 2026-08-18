@@ -145,5 +145,5 @@ same bytes with only the keys it knew still gets a usable model.
 |---|---|
 | Python unit + integration | **969 passed**, 2 skipped |
 | ruff | clean |
-| iOS (iPhone 17 Pro simulator) | **251 passed**, 0 failures |
+| iOS (iPhone 17 Pro simulator) | **253 passed**, 0 failures |
 | Dashboard `tsc -b && vite build` | clean |
