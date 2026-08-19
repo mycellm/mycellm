@@ -84,6 +84,8 @@ def inference_stream_chunk(
     finish_reason: str | None = None,
     tool_calls: list | None = None,
     seq: int | None = None,
+    served_by: str | None = None,
+    model: str | None = None,
 ) -> MessageEnvelope:
     """One frame of a streamed reply.
 
@@ -100,6 +102,14 @@ def inference_stream_chunk(
     payload: dict[str, Any] = {"text": text, "finish_reason": finish_reason}
     if seq is not None:
         payload["seq"] = seq
+    # Attribution rides on the frames themselves so a client can show WHO is
+    # answering while the answer is still arriving. Sent on the first frame
+    # only: within one stream it cannot be lost, and repeating it on every
+    # token would pay for it hundreds of times per reply.
+    if served_by:
+        payload["served_by"] = served_by
+    if model:
+        payload["model"] = model
     if tool_calls:
         payload["tool_calls"] = tool_calls
     return MessageEnvelope(

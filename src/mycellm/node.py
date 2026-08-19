@@ -938,7 +938,9 @@ class MycellmNode:
                         if text or tc:
                             chunk_msg = inference_stream_chunk(
                                 self.peer_id, msg.id, text or "",
-                                chunk.get("finish_reason"), tool_calls=tc, seq=seq)
+                                chunk.get("finish_reason"), tool_calls=tc, seq=seq,
+                                served_by=chunk.get("peer_id") if seq == 0 else None,
+                                model=chunk.get("model") if seq == 0 else None)
                             seq += 1
                             protocol.send_frame(frame_stream, chunk_msg)
                             relayed = True
@@ -1024,6 +1026,8 @@ class MycellmNode:
                     chunk_msg = inference_stream_chunk(
                         self.peer_id, msg.id, chunk.text, chunk.finish_reason,
                         tool_calls=chunk.tool_calls, seq=seq,
+                        served_by=self.peer_id if seq == 0 else None,
+                        model=model_name if seq == 0 else None,
                     )
                     seq += 1
                     protocol.send_frame(frame_stream, chunk_msg)
@@ -2659,7 +2663,9 @@ class MycellmNode:
                         tool_calls = resp.payload.get("tool_calls")
                         if text or tool_calls:
                             produced = True
-                            yield {"text": text, "finish_reason": finish_reason, "tool_calls": tool_calls, "peer_id": target.peer_id}
+                            yield {"text": text, "finish_reason": finish_reason,
+                                   "tool_calls": tool_calls, "peer_id": target.peer_id,
+                                   "model": effective_model}
                     target.entry.failure_count = max(0, target.entry.failure_count - 1)
                     return
                 except Exception as e:
