@@ -367,6 +367,9 @@ export function ChatTab() {
           const reasoning = data.choices?.[0]?.message?.reasoning_content || undefined
           const usage = data.usage || {}
           const routedTo = data.model || 'unknown'
+          // `mycellm.node` is an anonymised hash of the serving node; the
+          // gateway has always sent it and the UI has always thrown it away.
+          const servedBy = data.mycellm?.node || data.mycellm?.served_by || ''
 
           addMessage({
             id: generateId(),
@@ -374,6 +377,7 @@ export function ChatTab() {
             content: respText,
             model: routedTo,
             routed_to: data.routed_to || routedTo,
+            served_by: servedBy,
             reasoning_content: reasoning,
             // Present on swarm answers. Carries what ran, what was refused,
             // and whether the job degraded — see ExecutionPlanCard.

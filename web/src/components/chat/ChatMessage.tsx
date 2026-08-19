@@ -42,8 +42,8 @@ function formatTime(ts: number): string {
 }
 
 export function ChatMessage({ message, onRetry }: ChatMessageProps) {
-  const { role, content, model, routed_to, tokens, timestamp, reasoning_content, plan } =
-    message
+  const { role, content, model, routed_to, tokens, timestamp, reasoning_content, plan,
+          served_by } = message
 
   // System messages
   if (role === 'system') {
@@ -146,6 +146,11 @@ export function ChatMessage({ message, onRetry }: ChatMessageProps) {
               <span>
                 {tokens.prompt}+{tokens.completion} tokens
               </span>
+            )}
+            {served_by && (
+              // Purple: this came off the network. Matches iOS, where the same
+              // fact is the same colour.
+              <span className="text-poison">node:{served_by}</span>
             )}
           </div>
         )}

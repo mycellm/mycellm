@@ -259,6 +259,10 @@ export interface ChatMessage {
   // OpenAI-o-series style: model's internal reasoning, separated from the
   // user-facing answer so the UI can render it in a collapsible panel.
   reasoning_content?: string
+  /// Which node produced this reply. The gateway stamps every response with it
+  /// and the UI used to drop it, so a fleet answer looked identical to a local
+  /// one — the single most useful fact about a distributed inference result.
+  served_by?: string
   // Execution plan returned by the node on the `mycellm` field. Present for
   // swarm answers, which are paid for per proposer — the caller is entitled
   // to see what ran, what was refused, and whether the job degraded.
