@@ -143,7 +143,11 @@ function NodeDetailModal({
                     key={i}
                     className="bg-white/5 text-xs text-gray-300 px-2 py-0.5 rounded font-mono"
                   >
-                    {m}
+                    {/* Defensive on purpose. The callers all map to names now,
+                        but a shape change upstream should degrade to a useless
+                        string rather than blank the whole dashboard with an
+                        unrecoverable render error. */}
+                    {typeof m === 'string' ? m : ((m as { name?: string })?.name ?? String(m))}
                   </span>
                 ))}
               </div>
@@ -191,7 +195,11 @@ export function NetworkTopology() {
         name: status?.node_name || t('thisNode', 'This node'),
         role: status?.role || 'bootstrap',
         status: 'online',
-        models: status?.models || [],
+        // Mapped to names like every other branch. `self` was the ONE branch
+        // that passed the raw objects through, which is why React #31 only
+        // fired when you opened the detail modal for the node you were
+        // actually browsing on.
+        models: (status?.models || []).map((m) => m.name || String(m)),
         type: 'self',
       },
     ]

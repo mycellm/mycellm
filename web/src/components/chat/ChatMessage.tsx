@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, RefreshCw, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MarkdownRenderer } from '@/components/common/MarkdownRenderer'
+import { ExecutionPlanCard } from './ExecutionPlanCard'
 import type { ChatMessage as ChatMessageType } from '@/api/types'
 
 interface ChatMessageProps {
@@ -41,7 +42,8 @@ function formatTime(ts: number): string {
 }
 
 export function ChatMessage({ message, onRetry }: ChatMessageProps) {
-  const { role, content, model, routed_to, tokens, timestamp, reasoning_content } = message
+  const { role, content, model, routed_to, tokens, timestamp, reasoning_content, plan,
+          served_by, streaming, phase } = message
 
   // System messages
   if (role === 'system') {
@@ -71,6 +73,10 @@ export function ChatMessage({ message, onRetry }: ChatMessageProps) {
           )}
         >
           <MarkdownRenderer content={content} className="text-sm text-compute" />
+          {/* A refused swarm returns the plan with the error. Showing it here
+              is the difference between "it failed" and "these two targets were
+              blocked by egress policy, for this reason". */}
+          {plan && <ExecutionPlanCard plan={plan} />}
           {onRetry && (
             <div className="mt-2">
               <button
@@ -124,9 +130,35 @@ export function ChatMessage({ message, onRetry }: ChatMessageProps) {
         )}
       >
         {reasoning_content && <ReasoningPanel reasoning={reasoning_content} />}
-        <MarkdownRenderer content={content} className="text-sm text-gray-200" />
 
-        {(model || tokens) && (
+        {/* Live swarm phase. Sits above the answer because it is what the user
+            is waiting on: a swarm spends its first seconds fanning out, and
+            "Asking 3 models on aurora, hokulea…" is the fact that makes a
+            distributed fabric visible instead of a slow spinner. */}
+        {phase && (
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs text-ledger">
+            <Loader2 size={11} className="animate-spin" />
+            <span>{phase}</span>
+          </div>
+        )}
+
+        {/* ⚠️ PLAIN TEXT WHILE STREAMING, MARKDOWN ONCE FINISHED.
+            Re-parsing the whole answer on every token is quadratic work on the
+            render thread. On iOS that froze the app outright (send dimmed, the
+            keyboard went black); in a browser it "only" stutters on long
+            answers, which is still a bug — and the fix is the same one. */}
+        {streaming ? (
+          <div className="whitespace-pre-wrap text-sm text-gray-200">
+            {content}
+            <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-spore/70 align-text-bottom" />
+          </div>
+        ) : (
+          <MarkdownRenderer content={content} className="text-sm text-gray-200" />
+        )}
+
+        {plan && <ExecutionPlanCard plan={plan} />}
+
+        {!streaming && (model || tokens) && (
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-white/5 pt-2 text-xs text-gray-600">
             {model && routed_to && routed_to !== model && (
               <span>
@@ -138,6 +170,11 @@ export function ChatMessage({ message, onRetry }: ChatMessageProps) {
               <span>
                 {tokens.prompt}+{tokens.completion} tokens
               </span>
+            )}
+            {served_by && (
+              // Purple: this came off the network. Matches iOS, where the same
+              // fact is the same colour.
+              <span className="text-poison">node:{served_by}</span>
             )}
           </div>
         )}

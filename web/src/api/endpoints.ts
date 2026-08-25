@@ -24,6 +24,8 @@ export const API = {
     publicDashboard: '/v1/node/public/dashboard',
     publicStats: '/v1/node/public/stats',
     fleetHardware: '/v1/node/fleet/hardware',
+    plan: '/v1/node/plan',
+    groups: '/v1/node/groups',
     relay: '/v1/node/relay',
     relayAdd: '/v1/node/relay/add',
     relayRemove: '/v1/node/relay/remove',
@@ -56,6 +58,12 @@ export const API = {
   },
   chat: {
     completions: '/v1/chat/completions',
+  },
+  jobs: {
+    list: '/v1/jobs',
+    submit: '/v1/jobs',
+    get: (id: string) => `/v1/jobs/${encodeURIComponent(id)}`,
+    cancel: (id: string) => `/v1/jobs/${encodeURIComponent(id)}`,
   },
   admin: {
     nodes: '/v1/admin/nodes',

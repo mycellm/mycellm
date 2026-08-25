@@ -4,6 +4,198 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
+## [0.8.0] — unreleased
+
+**The adaptive inference fabric.** A request stops being "pick a node and send
+it there" and becomes a plan: a job, a set of work units, and targets chosen
+before anything is dispatched. The planner is a pure function over (job,
+candidates), which is what makes "why did this request go there" answerable in
+a unit test rather than only in production.
+
+### Added
+
+- **`mycellm/swarm`** — a synthetic model that selects a strategy, not a model.
+  N proposers answer in parallel, then a synthesis pass merges them. It is
+  advertised on `/v1/models` only when the node can actually form a swarm,
+  because listing a model that always refuses is the advertised-but-unavailable
+  shape this release exists to remove. Honesty properties, each tested: a swarm
+  that cannot form degrades to direct **and says so**; a single-model swarm is
+  labelled self-consistency sampling rather than heterogeneity; a proposer
+  dying does not fail the job; synthesis failure returns the best proposal
+  instead of discarding work already paid for; `token_budget` is a ceiling, and
+  cancelled units do not outlive the job.
+
+- **`POST /v1/node/plan`** — explain how a request *would* execute, running
+  nothing. Returns the refusals as well as the selections, because a target
+  blocked by egress policy is otherwise indistinguishable from one that was
+  never there.
+
+- **`GET /v1/node/groups`** — serving groups and their deployments. Two groups
+  serving the same model name stay distinguishable, which is why deployments
+  have ids rather than being keyed by model.
+
+- **Fleet management for the fabric** — `node.groups`, `node.targets`,
+  `node.plan`, `relay.list`, `relay.add`, `relay.remove`, `relay.refresh`.
+  Until these existed, every 0.8 concept was reachable only on a node's own
+  loopback API: an operator could see that a peer advertised a model but not
+  which group backed it, and could not attach or detach a gateway without
+  shelling into the host. `relay.add` resolves a secret reference on the target
+  node, so a fleet command can name a credential instead of carrying one.
+  `node.plan` deliberately has **no** privacy override: the fleet key manages
+  models, and letting it silently disable egress scanning for arbitrary text on
+  someone else's machine is a different power.
+
+- **Additive capability fields** — `deployment_id`, `serving_group_id`,
+  `parallelism`, `execution_roles`, and device telemetry (`ram_gb`,
+  `architecture`, `device_class`, and the `power`/`thermal`/`network`
+  constraint blocks). Every one is omitted when unset, so a 0.7.x peer receives
+  a byte-identical payload. Cross-implementation golden CBOR vectors are
+  checked in on both sides, so Python and Swift cannot drift apart silently.
+
+- **Dashboard** — `mycellm/swarm` in the model selector, an execution-plan card
+  under every swarm answer (units, refusals, degradation, spend against
+  budget), a Serving Groups panel that reports *online* and *healthy*
+  separately, and trust / proposer-count / token-budget controls.
+
+- **An async job queue** (`/v1/jobs`) — work that waits for a device instead of
+  failing when none is free. A fleet of personal machines is intermittent by
+  nature: phones sleep, laptops close, iPads charge overnight. Through 0.7 every
+  one of those was a failed request; the queue makes them a scheduling input.
+  Jobs are persisted before the caller is told they were accepted and survive an
+  unclean shutdown. Eligibility reads the power/thermal telemetry this release
+  already advertises — no new mechanism, the existing one simply started
+  governing what runs.
+
+  Priority is deliberately boring: `staked_credits + waiting_time`, evaluated
+  **within** an ownership class. Owner affinity is applied first and as a hard
+  rule — your work outranks a stranger's on your hardware at any bid, which is
+  the one promise a marketplace cannot make and so must not be expressible as a
+  number someone can outbid. Waiting time always accrues, because any bidding
+  without it converges on pay-to-play and unpaid work never runs. A stake is
+  *staked*, not spent: refunded when a job expires or is cancelled unrun.
+
+  Every queued job records **why** it is waiting, in plain language. A queue
+  that cannot say what it is waiting for is indistinguishable from a hang.
+
+- **Streaming for `mycellm/swarm`.** The shape of a swarm decides what can
+  stream: proposers run in parallel and feed synthesis, so only synthesis
+  produces user-facing tokens. Progress frames carry an **empty** `delta` with
+  the phase on `mycellm`, so a client that concatenates `delta.content` gets the
+  answer and nothing else, while one that wants "3 proposers on 2 nodes, now
+  synthesising" has the facts. The proposer fan-out is shared with the blocking
+  path — a second copy would have drifted, and the way it would drift is a
+  streaming swarm quietly spending past a budget the blocking one enforces.
+
+- **Quality tiers are selectable end to end.** `/v1/models` reports a `tier` per
+  model, a new **`GET /v1/public/models`** reports what the public gateway can
+  actually reach (which is not the same list), and the public chat endpoint
+  accepts `mycellm.min_tier` or a named `model` — never both, since a floor
+  constrains a choice that a named model has already made. A floor nothing meets
+  is refused with `type: "no_candidate"` so clients can tell a
+  retrying-won't-help 503 from a busy one.
+
+- **`MYCELLM_TRUSTED_PROXIES`** — whose `X-Forwarded-For` this node will
+  believe. Default is loopback only; widen it deliberately.
+
+### Fixed
+
+Nine live defects in shipped 0.7.1 code, all the same shape — **state recorded
+correctly, then never enforced**:
+
+- **Dead relays kept serving ghost models**; the fleet routed to a corpse.
+  Models are now withdrawn on every failure path.
+- **Relay name collisions** silently dropped the second relay, and `remove()`
+  unloaded the *other* relay's model.
+- **No reconciliation** — a model withdrawn upstream stayed advertised forever.
+- **Network isolation skipped locally-originated routing.** It was enforced on
+  relayed traffic only, so a request originating on this node could be served
+  by a peer sharing none of its networks.
+- **Per-model `scope` was enforced nowhere.** `models_visible_to_network` had
+  the right rule and zero callers.
+- **The advertised version was hardcoded `"0.1.0"`** on every Python node,
+  which blocks feature-gating on it — a peer claiming 0.1.0 might be any
+  release ever shipped. It now reports the real package version. Nothing should
+  gate on this until truthful versions have been in the wild long enough that
+  "0.1.0" is rare; the clock starts here.
+- **`routing`, `min_context` and `max_cost` were accepted and ignored.** A
+  caller who set a credit ceiling had none. They are now refused with a 400
+  naming exactly what happened — silently ignoring a constraint is worse than
+  refusing it, because the caller believes a limit is in force.
+- **A restarted node reported a group unhealthy with 0 deployments while
+  serving it**, because an auto-loaded model blocked the relay's claim on its
+  own name.
+- **Privacy scanning covered one caller.** `scan_with_policy` was correct and
+  reached only from the public HTTP gateway; `route_inference` — the CLI, the
+  OpenAI API, any fan-out — scanned nothing. Egress is now decided per target
+  during planning, before dispatch, so a blocked prompt is never partially
+  sent. Trust derives from where a target *is*; a caller may lower its own
+  ceiling but cannot raise a peer's.
+
+Five more found by running the thing rather than reading it:
+
+- **Every per-IP limit was one shared bucket behind a reverse proxy.**
+  `request.client.host` is the TCP peer, and the public bootstrap runs behind
+  Caddy in Docker — so every caller on earth arrived as the bridge gateway.
+  Public chat's 30/min anon budget, the node-announce limiter and the auth
+  lockout all applied to the *entire internet collectively*, and every
+  announcing node was recorded at `192.168.80.1`. Confirmed in production, and
+  confirmed fixed there: nodes now register their real address.
+
+- **A streaming `mycellm/swarm` request answered "No model available."** The
+  swarm branch sat after the `body.stream` check, so it fell through to ordinary
+  model resolution — while `/v1/models` advertised the model and most clients
+  stream by default. Advertised and unreachable, which is the shape this release
+  exists to remove.
+
+- **Relayed models reported 0 prompt / 0 completion tokens.** Two causes
+  stacked: the request never set `stream_options.include_usage`, so upstream
+  sent nothing, and `generate()` hardcoded zeros, so anything volunteered was
+  discarded anyway. The dashboard rendered that as a confident "0+0 tokens".
+
+- **The MLX vision-language backend reported no usage when streaming.** Its
+  `generate()` re-encodes the output as a fallback, so non-streaming looked
+  healthy and hid it — a fallback that repairs a missing value also hides that
+  it is missing. This affects any multimodal model, which on Apple Silicon now
+  includes text-shaped names like Qwen3.5.
+
+- **Tiers were guessed for models whose size is unknown.**
+  `estimate_param_count` defaults an unparseable name to 7B, which is fine for
+  ranking and wrong for a threshold: every relayed model reported `tier: "fast"`
+  — a guess wearing the clothes of a measurement — and a `min_tier: fast`
+  request would have admitted models nobody sized. Split into
+  `parse_param_count` (returns nothing when it does not know, used wherever a
+  tier is shown or enforced) and `estimate_param_count` (keeps its default, used
+  only for ranking).
+
+**Dashboard** — a React 19 SPA that was not behaving like one:
+
+- **A fake boot sequence cost 1,850ms on every load.** Five lines at 250ms plus
+  a 600ms pause, on every open and refresh of any node with an API key. The
+  lines were fiction — "Loading Ed25519 identity", "Binding QUIC transport" —
+  none of it was happening. It now plays once per browser and reports only
+  observed facts.
+- **Tabs were destroyed on every switch**, taking accumulated state with them
+  and rebuilding from nothing on return. Tabs are now kept alive once visited,
+  with per-tab scroll restoration.
+- **Google Fonts blocked first paint and phoned home.** Self-hosted now: the
+  dashboard of a tool whose claim is that you control what leaves your network
+  should not make an uninvited third-party request every time it opens.
+- **Bundle cut from 1,477 kB to 641 kB** (gzip 467 → 188) — `highlight.js`
+  was importing all ~190 grammars.
+- **React error #31 blanked the page** when you opened the detail modal for your
+  own node: `NodeStatus.models` was typed `string[]` while the API returned
+  objects, so the compiler could not see a component rendering one directly.
+- Long values in Node Configuration **overlapped their labels** between 768px
+  and 900px.
+
+### Documented, not fixed
+
+- **Capabilities are not signed**, despite the module docstring claiming so
+  since before 0.7. The QUIC+TLS session stops a third party tampering in
+  flight, but the peer itself can claim anything. Fixing it changes the signed
+  byte range, which every 0.7.1 peer computes differently, so it cannot be done
+  additively — it needs the version field above to become trustworthy first.
+
 ## [0.7.1] — 2026-08-15
 
 ### Security

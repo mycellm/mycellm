@@ -174,6 +174,20 @@ class RelayManager:
             return plain
         return f"relay:{_slugify(relay.name or _label_from_url(relay.url))}:{model_id}"
 
+    def _is_ours(self, relay: RelayEndpoint, registered_name: str) -> bool:
+        """Is this already-loaded model actually served by THIS relay?
+
+        Checked against the backend's configured `api_base`, not against the
+        name — a name match is what we are trying to disambiguate. Falls back to
+        the advertised `serving_group_id` when the api_base is unavailable.
+        """
+        info = getattr(self._inference, "_model_info", {}).get(registered_name)
+        if info is not None and getattr(info, "serving_group_id", ""):
+            return info.serving_group_id == relay.group_id
+        saved = getattr(self._inference, "_saved_configs", {}).get(registered_name, {})
+        api_base = (saved.get("api_base") or "").rstrip("/")
+        return bool(api_base) and api_base == f"{relay.url}/v1"
+
     def _owner_of(self, registered_name: str) -> RelayEndpoint | None:
         for r in self._relays.values():
             if registered_name in r.registered:
@@ -283,11 +297,22 @@ class RelayManager:
             if relay_name in relay.registered:
                 continue
 
-            # Loaded but owned by someone else (a local model, or another
-            # relay that claimed the plain name first). `_claim_name` avoids
-            # this for relays; this guard covers a genuine local model of the
-            # same name, which we must not silently displace.
+            # Loaded but not in our ownership record. Two very different cases.
             if relay_name in {m.name for m in self._inference.loaded_models}:
+                if self._is_ours(relay, relay_name):
+                    # ADOPTION. The model auto-loaded from its saved config on
+                    # startup, before discovery ran, so it is already serving
+                    # but unowned. Without this the relay refused to claim it,
+                    # `registered` stayed empty, and the group reported
+                    # unhealthy with zero deployments while actually serving
+                    # traffic — health that contradicts reality.
+                    relay.registered[relay_name] = model_id
+                    logger.info(
+                        f"Relay {relay.url}: adopted already-loaded {relay_name}"
+                    )
+                    continue
+                # A genuine foreign backend (a local model of the same name, or
+                # another relay that claimed it first). Do not displace it.
                 logger.debug(
                     f"Relay {relay.url}: {relay_name} already served by another "
                     f"backend — not claiming it"

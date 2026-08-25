@@ -304,14 +304,23 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     start_time = time.time()
     node.activity.record(EventType.INFERENCE_START, model=body.model, source="api")
 
-    if body.stream:
-        return await _stream_response(node, body, messages)
-
     # ── mycellm/swarm ───────────────────────────────────────────────────
     # A synthetic model that selects a STRATEGY rather than a model: fan out to
     # several models, then synthesise. Intercepted before resolve_model_name
     # because no backend serves this name and resolution would 404 it.
+    #
+    # ⚠️ CHECKED BEFORE `body.stream`, AND THE ORDER IS THE FIX. It used to come
+    # after, so a streaming swarm request fell straight through to ordinary
+    # model resolution and answered "[mycellm] No model available." — while
+    # /v1/models advertised `mycellm/swarm` and most clients stream by default.
+    # Advertised-but-unreachable is the exact shape 0.8 exists to remove.
     from mycellm.execution.planner import is_swarm_request
+
+    if is_swarm_request(body.model) and body.stream:
+        return await _stream_swarm(node, request, body, messages)
+
+    if body.stream:
+        return await _stream_response(node, body, messages)
 
     if is_swarm_request(body.model):
         from mycellm.execution.models import Job
@@ -677,6 +686,121 @@ def _usage_envelope(chunk_id: str, model: str, prompt_tokens: int, completion_to
 
 def _wants_usage(body: "ChatCompletionRequest") -> bool:
     return bool((body.stream_options or {}).get("include_usage"))
+
+
+async def _stream_swarm(node, request, body: ChatCompletionRequest, messages: list[dict]):
+    """SSE for `mycellm/swarm`.
+
+    A swarm has two phases and only one of them can stream. Proposers run in
+    parallel and their answers are an *input* to synthesis, so streaming them
+    would interleave several different replies into nonsense; synthesis is one
+    model producing the final answer, so it streams token by token.
+
+    Progress from the proposer phase goes out as chunks with **empty content**
+    and a populated `mycellm` field. That distinction is load-bearing: a client
+    that concatenates `delta.content` gets exactly the answer and nothing else,
+    while a client that wants to show "3 proposers on 2 nodes, now
+    synthesising" has the facts to do it. Putting progress in `content` would
+    make every naive client render the plan into the reply.
+    """
+    from sse_starlette.sse import EventSourceResponse
+
+    from mycellm.activity import EventType
+    from mycellm.execution.models import Job
+
+    job = Job(
+        job_id=Job.new_id(),
+        model=body.model,
+        messages=messages,
+        temperature=body.temperature,
+        max_tokens=body.max_tokens or 2048,
+        trust=(body.mycellm.trust if body.mycellm else ""),
+        token_budget=int((body.mycellm.token_budget if body.mycellm else 0) or 0),
+        fanout=int((body.mycellm.fanout if body.mycellm else 0) or 0),
+    )
+    override = request.headers.get("X-Privacy-Override", "") == "acknowledged"
+
+    async def generate():
+        chunk_id = f"chatcmpl-{job.job_id}"
+        created = int(time.time())
+        sent_role = False
+        errored = False
+        # Did the coordinator say anything conclusive? A generator that yields
+        # nothing at all produces a clean empty stream, which every client
+        # reads as "the model had nothing to say" rather than "nothing ran".
+        # Those are opposite facts and must not share a representation.
+        closed = False
+
+        def envelope(delta: dict, finish_reason=None, extra: dict | None = None) -> dict:
+            payload = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": body.model,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+            }
+            if extra:
+                payload["mycellm"] = extra
+            return payload
+
+        try:
+            async for event in node.execute_job_stream(job, override_privacy=override):
+                kind = event.get("type")
+
+                if kind == "progress":
+                    yield {"data": json.dumps(envelope({}, extra=event))}
+
+                elif kind == "text":
+                    text = event.get("text", "")
+                    if not text:
+                        continue
+                    delta = {"content": text}
+                    if not sent_role:
+                        delta = {"role": "assistant", "content": text}
+                        sent_role = True
+                    yield {"data": json.dumps(envelope(delta))}
+
+                elif kind == "error":
+                    # ⚠️ AN SSE STREAM CANNOT CHANGE ITS STATUS CODE — headers
+                    # are long gone. A refusal therefore has to arrive as
+                    # content, or the client sees a clean empty stream and
+                    # reports success. The plan still rides along in `mycellm`
+                    # so a blocked egress stays visible rather than looking
+                    # like a model that had nothing to say.
+                    errored = True
+                    message = event.get("error", "swarm failed")
+                    delta = {"content": f"[mycellm] {message}"}
+                    if not sent_role:
+                        delta = {"role": "assistant", "content": f"[mycellm] {message}"}
+                        sent_role = True
+                    yield {"data": json.dumps(envelope(
+                        delta, finish_reason="stop",
+                        extra={**event.get("meta", {}), "error": message}))}
+
+                elif kind == "done":
+                    closed = True
+                    if not errored:
+                        yield {"data": json.dumps(envelope(
+                            {}, finish_reason="stop", extra=event.get("meta", {})))}
+
+            if not closed and not errored:
+                message = "swarm produced no result"
+                yield {"data": json.dumps(envelope(
+                    {"content": f"[mycellm] {message}"} if sent_role
+                    else {"role": "assistant", "content": f"[mycellm] {message}"},
+                    finish_reason="stop"))}
+
+        except Exception as e:  # noqa: BLE001 — a broken stream must still close
+            logger.warning(f"swarm stream failed: {e}")
+            yield {"data": json.dumps(envelope(
+                {"content": f"[mycellm] {e}"} if sent_role
+                else {"role": "assistant", "content": f"[mycellm] {e}"},
+                finish_reason="stop"))}
+
+        node.activity.record(EventType.INFERENCE_COMPLETE, model=body.model, source="api")
+        yield {"data": "[DONE]"}
+
+    return EventSourceResponse(generate())
 
 
 async def _stream_response(node, body: ChatCompletionRequest, messages: list[dict]):
@@ -1508,6 +1632,30 @@ async def list_models(request: Request):
     actually request.
     """
     from mycellm.protocol.capabilities import normalize_model_name
+    from mycellm.router.model_resolver import derive_tier, parse_param_count
+
+    def _tier(name: str, param_b: float = 0.0, declared: str = "") -> str:
+        """Tier a model belongs to, for the UI's tier selector.
+
+        ⚠️ RETURNS "" WHEN THE SIZE IS UNKNOWN, RATHER THAN GUESSING. The
+        obvious implementation calls `estimate_param_count`, which defaults an
+        unparseable name to 7B — so every relayed model (`relay-model`,
+        `swarm-a`, anything named after its purpose) was reported as
+        `tier: "fast"`. That is a guess wearing the clothes of a measurement,
+        and it would let a `min_tier: fast` request admit a model nobody sized.
+        Clients already treat an absent tier as unknown-never-qualifying.
+
+        Never raises: a model with no derivable tier is listed without one
+        rather than omitted, because the model list must not depend on the
+        tier heuristic working.
+        """
+        if declared:
+            return declared
+        try:
+            known = param_b or parse_param_count(name)
+            return derive_tier(known) if known else ""
+        except Exception:  # noqa: BLE001 — a tier is a nicety, the model is not
+            return ""
 
     node = request.app.state.node
     models = []
@@ -1552,6 +1700,8 @@ async def list_models(request: Request):
             # Effective (post-preflight-clamp) window — lets agents size
             # their context/auto-compaction deterministically.
             "context_length": m.ctx_len,
+            "tier": _tier(m.name, getattr(m, "param_count_b", 0.0) or 0.0,
+                          getattr(m, "tier", "") or ""),
         })
 
     seen = {normalize_model_name(m.name) for m in node.inference.loaded_models}
@@ -1567,6 +1717,8 @@ async def list_models(request: Request):
                     "created": int(time.time()),
                     "owned_by": f"peer:{entry.peer_id[:8]}",
                     "context_length": m.ctx_len,
+                    "tier": _tier(m.name, getattr(m, "param_count_b", 0.0) or 0.0,
+                                  getattr(m, "tier", "") or ""),
                 })
                 seen.add(display)
 
@@ -1584,6 +1736,11 @@ async def list_models(request: Request):
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": f"fleet:{entry.get('node_name', entry.get('peer_id', '')[:8])}",
+                    "tier": _tier(
+                        raw if isinstance(raw, str) else display,
+                        float(m.get("param_count_b", 0) or 0) if isinstance(m, dict) else 0.0,
+                        (m.get("tier", "") or "") if isinstance(m, dict) else "",
+                    ),
                 })
                 seen.add(display)
 

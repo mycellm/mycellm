@@ -11,6 +11,9 @@ export default {
         relay: '#3B82F6',
         ledger: '#FACC15',
         poison: '#A855F7',
+        // The one hue the brand palette lacked. Added for GGUF rather than
+        // reusing `ledger`, which already means credits and reads as a warning.
+        format: '#F97316',
         console: '#E5E5E5',
         dimmed: '#333333',
         surface: {

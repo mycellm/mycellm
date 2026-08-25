@@ -1,199 +1,180 @@
 # Mycellm 0.8 — overnight report
 
-**Night of 2026-08-17** · branch `develop` on both repos · Python `app` @ `75dac10`
+**Night of 2026-08-17** · branch `develop`, both repos · Python `app` @ `3b38cd9`
+**Tests:** 825 → **950** unit+integration, green · ruff clean · verified on x86_64 and arm64
 
 ---
 
-## 1. The thing you need to know first
+## 1. Read this first: Drydock could not run this work
 
-**Drydock could not run this work, and no amount of monitoring would have
-changed that.** Its agent surface says so explicitly:
+Its own agent contract says so, and I verified it rather than trusting my notes:
 
 > You cannot drive sessions, mutate tickets, or touch the engine through this
-> surface — by design. — `GET /api/agents/skill.zip` → `SKILL.md`
+> surface — **by design**. — `GET /api/agents/skill.zip`
 
-I verified it rather than trusting my notes: an agent can `capture` a signal,
-read memory/context, and post canvas assets and artifacts. It cannot commission
-a run. So "file the plan with Drydock, monitor it, unblock it" had no mechanism
-behind it. Rather than wait on something structurally incapable of starting, I
-filed the plan **and built the work directly**, then posted the results back to
-Drydock as deliverables.
+An agent can file signals, read memory/context, and post canvas assets and
+artifacts. It cannot commission a run. "File the plan, monitor Drydock, unblock
+it" therefore had no mechanism behind it — nothing would have started overnight.
+So I filed the plan **and built the work directly**, and posted results back.
 
-Everything is filed. Signal `f04e1efff705` (project `mycellm`, auto-triaged),
-four canvas assets under task `0.8-foundation`, two artifacts.
+Filed: signal `f04e1efff705` (project `mycellm`, auto-triaged), canvas assets
+under task `0.8-foundation`, artifacts on the project page.
 
-One piece of litter: signal `90fb2f81cb17` was filed with the project **UUID**
-where capture wants the **slug**, so it landed unattached in global triage.
-Agents cannot patch signals (405, by design), so please dismiss it; the correct
-one supersedes it and says so.
+**One thing needs you:** signal `90fb2f81cb17` was filed with the project UUID
+where capture wants the slug, so it landed unattached in global triage. Agents
+cannot patch signals (405, by design). Please dismiss it; the correct one
+supersedes it and says so.
 
 ---
 
-## 2. The panel
+## 2. The panel, and where it was wrong
 
-Fable, codex (gpt-5.6-sol), and agy each read the 3,053-line proposal against
-the tree, independently, on one brief. I verified their load-bearing claims
-myself before acting.
+Fable, codex (gpt-5.6-sol) and agy each read the 3,053-line proposal against the
+tree independently. **Unanimously**, and confirmed by me: §15.6 targets
+`router/router.py`, which is **dead code imported nowhere** — the real routing is
+`node.py:2183`. Following the spec's build plan would have burned the night
+editing a file nothing calls.
 
-### They agreed, and they were right
+They also disagreed, which was worth more than the agreement. agy said an unknown
+`MessageType` makes iOS **"drop the connection"** and built a mandatory rule on
+that severity. Fable and codex said message-drop. **I checked: they are right** —
+both transports catch and return (`quic.py:118-121`,
+`QUICTransport.swift:155-158`). The connection survives and the *message* is
+silently lost, which is worse for request/response because `send_and_wait` hangs
+until timeout instead of failing fast. Same conclusion, different reason; taking
+the consensus at face value would have put something false in the code comments.
 
-| Finding | I verified |
+On the vertical they split — Fable: swarm first; codex: groups first. I built
+groups first *because Fable's own review supplied the reason against its
+recommendation*: a swarm fanning out through `route_inference` bypassed privacy
+scanning entirely. Then I built the swarm, once that was fixed.
+
+---
+
+## 3. What shipped — 10 commits
+
+### The privacy gate (the prerequisite)
+`scan_with_policy` was already correct and had **exactly one caller**: the public
+HTTP gateway. `route_inference` — used by the CLI, the OpenAI API and any
+fan-out — scanned nothing. `execution/policy.py` now decides egress **per target
+during planning**, before anything is dispatched, so a blocked prompt is never
+partially sent. Trust is derived from where a target *is*; a caller may lower its
+own ceiling but cannot raise a peer's trust.
+
+### `mycellm/swarm` and the execution fabric
+`src/mycellm/execution/` — `Job`, `WorkUnit`, `ExecutionPlan`, `Target`, a **pure**
+`ExecutionPlanner`, an `ExecutionCoordinator`, `EgressPolicy` — plus the
+`mycellm/swarm` synthetic model, `POST /v1/node/plan`, and `GET /v1/node/groups`.
+
+`Target` exists because `PeerEntry` cannot represent a serving group:
+`peers_for_model` requires an open QUIC connection, so an HTTP-fronted gateway is
+invisible to routing. `execution_targets()` is a read-only projection over loaded
+models, QUIC peers and relay groups — not a fourth registry that would drift.
+
+Honesty properties, each tested: a swarm that cannot form **degrades to direct
+and says so**; a single-model swarm is labelled *self-consistency sampling*, not
+heterogeneity; a proposer dying does not fail the job; synthesis failure returns
+the best proposal rather than discarding paid-for work; `token_budget` is a
+ceiling and cancelled units do not outlive the job; the plan — including
+refusals — is returned in the response.
+
+### Nine live defects in shipped 0.7.1 code
+All the same shape: **state recorded correctly, never enforced.**
+
+| | Defect |
 |---|---|
-| **`router/router.py` is dead code.** §15.6 would have modified a file nothing calls. Real routing is `node.py:2183` / `:2259`, called from `api/openai.py:303,470,927,1077`. | ✅ grep: zero production importers |
-| **A ServingGroup cannot be a `PeerEntry`.** `peers_for_model` requires `is_live()`, which requires an open QUIC protocol object. An HTTP-reached gateway would be permanently invisible. | ✅ read `registry.py:39-56` |
-| **Additive capability fields are safe both directions.** | ✅ read both decoders |
-| **Do not add new `MessageType` values.** | ✅ — with a correction, below |
-| **§20.3 (heterogeneous swarm beats best single model) is not demonstrable on this hardware.** | accepted |
-| **iOS needs no changes** — it already serves `INFERENCE_REQ` and self-demotes. | accepted |
+| D1 | Dead relays kept serving **ghost models**; the fleet routed to a corpse |
+| D2 | **Relay name collisions** — second relay silently dropped; `remove()` unloaded the *other's* model |
+| D3 | **No reconciliation** — a model withdrawn upstream stayed advertised forever |
+| D4 | **Network isolation skipped locally-originated routing** (enforced on relayed traffic only) |
+| D5 | **Per-model `scope` enforced nowhere** — `models_visible_to_network` had the right rule and *zero callers* |
+| D6 | **Advertised version hardcoded `"0.1.0"`**, blocking all future feature-gating |
+| D7 | **`routing`/`min_context`/`max_cost` accepted and ignored** — callers had credit ceilings that did not exist |
+| D8 | **Capabilities are not signed** despite the docstring saying so (documented; the fix is not additive) |
+| D9 | **A restarted node reported a group unhealthy with 0 deployments while serving it** |
 
-### Where the panel was wrong, and why it mattered
-
-agy said an unknown `MessageType` makes iOS **"drop the connection"** and built
-a "MANDATORY RULE" on that severity. Fable and codex said message-drop, not
-connection-drop.
-
-**Fable and codex are right.** Both transports catch and return —
-`quic.py:118-121`, `QUICTransport.swift:155-158`. The connection survives; the
-*message* is silently lost, which is worse in one specific way: a
-`send_and_wait` on a new type hangs until timeout instead of failing fast.
-
-The conclusion (keep 0.8 data inside existing messages) is unchanged, but the
-reason is different, and I would have written the wrong thing into the code
-comments had I taken the consensus at face value.
-
-### The panel disagreed on the vertical
-
-Fable: build `mycellm/swarm` first, defer ServingGroups — the relay already is
-the virtual peer. codex: build the ServingGroup slice, defer swarm entirely —
-identity, health and privacy must be coherent first. agy: sit closer to codex.
-
-I went with codex/agy, because Fable's own review supplied the reason against
-its recommendation: a swarm fanning out through `route_inference` today would
-bypass privacy scanning entirely (`gateway.py:262-279` is the only enforcement
-point) and route across networks. Building the headline feature on that
-foundation would have been building on sand.
-
----
-
-## 3. What shipped
-
-Six commits on `develop`, **882 unit+integration tests green** (from 825).
-
-### Protocol (`8225df5`)
-Additive `deployment_id` / `serving_group_id` / `parallelism` on
-`ModelCapability`; device telemetry on `HardwareInfo`. Every field omitted from
-the wire when unset — asserted by comparing canonical CBOR against a
-hand-written 0.7-shaped payload, so "byte-identical" is tested, not claimed.
-
-I also wrote `execution_roles`, then **deleted it**. Nothing would have consumed
-it, and an advertised-but-unenforced capability is this codebase's signature
-bug. It lands with its planner.
-
-### Five live defects in shipped 0.7.1 code
-
-Found while reviewing 0.8. All the same shape — *state recorded correctly,
-never enforced*.
-
-| | Defect | Fix |
-|---|---|---|
-| D1 | Dead relays kept serving **ghost models**: health failure set `online=False` and returned, leaving models loaded and advertised. The fleet routed to a dead endpoint. | `24eea3e` |
-| D2 | **Relay name collisions**: two relays serving the same model both wanted `relay:{id}`; the second was silently dropped, and `remove()` unloaded the other's model. | `24eea3e` |
-| D3 | **No reconciliation**: a model withdrawn upstream stayed registered forever. | `24eea3e` |
-| D4 | **Network isolation skipped locally-originated routing.** The relay path always passed `network_ids`; `route_inference`/`route_inference_stream` passed none. | `0b633cd` |
-| D5 | **Per-model `scope`/`visible_networks` enforced nowhere.** `models_visible_to_network` had the correct rule and **zero production callers**. A model scoped to net-A on a peer in both nets was served to net-B. | `75dac10` |
-| D6 | **Advertised version hardcoded `"0.1.0"`** while iOS sent its real version — making all future feature-gating impossible. | `8225df5` |
-| D7 | **`routing`/`min_context`/`max_cost` accepted and ignored.** `routing` was consulted *nowhere* — a client asking for `ensemble` got ordinary routing and HTTP 200; `max_cost` gave callers a credit ceiling that did not exist. | `052a715` |
-
-D7 now returns `400 unsupported_routing_option`. The guard sits **above** the
-`if body.stream` branch on purpose — the streaming path never read
-`body.mycellm` at all, so placing it with the non-streaming constraint handling
-would have exempted every streaming request. A test asserts the ordering.
-
-### ServingGroup identity + its consumer (`b6afccf`)
-A relay endpoint **is** a 0.8 ServingGroup — a gateway-owned serving service —
-so identity lives on `RelayEndpoint` rather than in a parallel registry that
-would become a second source of truth. `GET /v1/node/groups` reads the fields
-back. Fields and consumer shipped together, per the rule below.
-
-### Capabilities are not signed (documented, not fixed)
-The module docstring claimed "signed by device key". `NodeHello.signable_data()`
-covers nonce, timestamp and peer ID only. Fixing it changes the signed byte
-range, which is not additive — it needs a trustworthy version field first
-(D6 starts that clock). The false claim is corrected in the docstring, because
-a security property that exists only in documentation is worse than a known gap.
+`execution_roles` was written, **deleted** for having no consumer, then restored
+once `ExecutionPlanner._eligible_for` existed to read it. That sequence is the
+discipline: no field ships without a consumer the same night.
 
 ---
 
 ## 4. Working proofs
 
-Not just unit tests — the unit tests exercise new methods and so could never
-have run against the old code.
-
-**Proof 1** (`docs/0.8/proof-relay.md`) — relay lifecycle over real HTTP with
-two isolated servers: 16/16, including "one relay dies, the other keeps
-serving".
-
-**Proof 2** (`docs/0.8/proof-ab.md`) — the same script against **unmodified
-`main`** and against `develop`:
+**Live swarm, real models, real hardware** (`docs/0.8/proof-swarm-live.md`):
+a local GGUF plus a **35B MoE on Aurora reached over HTTP**, Aurora running
+**0.6.3** — so this also demonstrates §20.1 cross-version interop on real
+hardware.
 
 ```
-BASELINE  after discovery: ['relay:llama3','relay:qwen3']
-          after it died  : ['relay:llama3','relay:qwen3']   ← GHOSTS
-DEVELOP   after it died  : []                                ← withdrawn
+strategy      : swarm
+units ok/fail : 2 / 0
+synthesized_by: group:external:relay:Qwen3.6-35B-A3B
+wall          : 72s
+ANSWER: The sky appears blue because molecules in Earth's atmosphere scatter
+shorter wavelengths of sunlight … known as Rayleigh scattering.
 ```
 
-**Proof 3** (`docs/0.8/proof-e2e.md`) — a live node, real HTTP API: advertises
-`0.7.1` (was `0.1.0`); `/v1/node/groups` shows 2 groups / 3 deployments; both
-same-named `llama3` deployments visible and distinct; on endpoint death all
-deployments withdrawn and `healthy=false`.
+The same request with a credential: the remote model **refused by name**, HTTP
+422, `every candidate refused by egress policy`.
 
-**Cross-machine** — the wheel installed on **hokulea (arm64)** and the
-ghost-model proof re-run there against the *installed package*: withdrawn. Full
-suite there: 838 passed. (3 failures are environmental — those tests scan
-`web/src`, which I did not copy to the box.)
+**A/B against unmodified `main`** (`proof-ab.md`) — same script, two codebases:
+baseline leaves ghost models, `develop` withdraws them.
 
----
+**Relay lifecycle over real HTTP** (`proof-relay.md`) — 16/16, including "one
+relay dies, the other keeps serving".
 
-## 5. The rule this work followed
+**End-to-end through a live node** (`proof-e2e.md`) — 2 groups, 3 deployments,
+both same-named `llama3` deployments distinct, all withdrawn on death.
 
-> **No field ships without a consumer the same night.**
+**Cross-machine** — wheel installed on hokulea (arm64): **896 passed, 0 failed**.
 
-Three separate shipped bugs in this codebase have one shape: embedding models
-tagged `["embedding"]` that the chat path never checked; `routing: "ensemble"`
-accepted and ignored; `models_visible_to_network` written and never called.
-Two of those three were *fixed tonight*, and `execution_roles` was deleted
-rather than shipped ahead of its consumer.
+### Two bugs only the live runs found
 
----
+**A remote endpoint was classified `local`, defeating the privacy gate.**
+`Target.kind` came from `serving_group_id`, which `model_configs.json` does not
+persist. After a restart the auto-loaded relay model came back with no group id,
+was treated as local, and a credential-bearing prompt was **not blocked**.
+Remoteness now derives from `LOCAL_BACKENDS`, which cannot go missing in a config
+round-trip. 946 unit tests were green while this was broken.
 
-## 6. Not done, deliberately
-
-- **`mycellm/swarm`, `ExecutionPlan`, `ExecutionCoordinator`** — reasoning in §2.
-- **oMLX cluster proof.** No cluster is deployed. A mock endpoint proves the
-  *adapter contract*, not "distributed oMLX works". Stating the difference
-  rather than blurring it.
-- **§20.3 quality claim.** Not demonstrable overnight; not claimed. The
-  existing five-task Hyphae benchmark scored 5/5 on every configuration, so it
-  has no discriminating power for this question.
-- **iOS.** No changes needed, and build 31 is in App Store review. `develop`
-  exists on the iOS repo at parity with `main`.
-- **Capability signing.** Cannot be done additively; needs D6 to age first.
+**Synthesis gates the whole swarm, and "prefer local" destroyed it.** The 35B
+answered correctly, the 0.5B emitted gibberish, and because the 0.5B was also
+chosen to synthesise, the swarm **returned gibberish while reporting success**.
+My first fix ranked by `tok_s` with local as tie-break — and failed live *again*,
+because nothing had measured either target so both reported `0.0`. Parameter
+count (0.5 vs 35) is the signal that separates them.
 
 ---
 
-## 7. Next steps
+## 5. Not claimed
 
-1. **Decide the vertical.** The panel split. Groups-first is now built; swarm is
-   unblocked to the extent that network isolation is fixed, but **privacy is
-   still boundary-only** — `scan_with_policy` runs only at the public gateway,
-   so any fan-out through `route_inference` bypasses it. That gate belongs in
-   the coordinator's eligibility filter *before* swarm work starts.
-2. **The exploratory benchmark**, run as a pilot rather than a release gate:
-   deterministic scoring only (exact-match arithmetic + schema-validated
-   extraction), four arms including *same-model N-sample* — the control most
-   likely to tie, and the one that decides whether the story is diversity or
-   just best-of-N.
-3. **Let the version fix age** before relying on it to gate anything.
-4. **Fix the e2e flakiness** — `test_three_nodes` and `test_resilience_recovery`
-   fail under load on `main` too (verified against a clean worktree), so they
-   are pre-existing, not caused by this work.
+- **§20.3 swarm quality superiority is NOT demonstrated.** The local 0.5B emits
+  gibberish on this host, so the swarm has one useful proposer; the 35B alone
+  would do as well. Mechanism is proven; value is not. A real benchmark needs
+  three genuinely working models and a same-model N-sample control — the arm most
+  likely to tie, and the one that decides whether the story is diversity or
+  best-of-N.
+- **No oMLX cluster exists.** A mock proves the *adapter contract*, not
+  distributed oMLX.
+- **`usage` reports 0 tokens** for openai-compat backends — pre-existing.
+- **iOS unchanged.** `develop` exists at parity with `main`; the panel agreed no
+  changes are needed and build 31 is in App Store review.
+- **Capability signing** cannot be done additively; it needs D6 to age first.
+
+Two e2e tests (`test_three_nodes`, `test_resilience_recovery`) fail under load —
+verified failing on a clean worktree of `main` too, so pre-existing.
+
+---
+
+## 6. Next steps
+
+1. **Merge decision.** `develop` is 10 commits ahead of `main`, all green. The
+   0.7.1→0.8 protocol changes are additive and asserted byte-identical when unset.
+2. **Get a third working model** and run the deterministic 4-arm benchmark. Until
+   then §20.3 stays unclaimed.
+3. **Let the version fix age** before gating anything on it.
+4. **Streaming for `mycellm/swarm`** — currently non-streaming only; the
+   synthesis stage is the natural place to stream from.
+5. **Per-WorkUnit receipts** — each unit already produces a real receipt on the
+   serving side; job-level aggregation is deferred, not blocked.

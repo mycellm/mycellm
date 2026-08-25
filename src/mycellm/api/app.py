@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from mycellm.api.admin import router as admin_router
+from mycellm.api.client_ip import DEFAULT_TRUSTED_PROXIES, client_address
 from mycellm.api.gateway import router as gateway_router
 from mycellm.api.models import router as models_router
 from mycellm.api.node import router as node_router
@@ -56,10 +57,12 @@ class AnonRateLimitMiddleware(BaseHTTPMiddleware):
     Authenticated callers (valid api_key on the request) bypass entirely.
     """
 
-    def __init__(self, app, api_key: str, max_per_min: int = 30):
+    def __init__(self, app, api_key: str, max_per_min: int = 30,
+                 trusted_proxies: str = DEFAULT_TRUSTED_PROXIES):
         super().__init__(app)
         self.api_key = api_key
         self.max_per_min = max_per_min
+        self.trusted_proxies = trusted_proxies
         self._buckets: dict[str, list[float]] = {}
 
     def _is_authenticated(self, request: Request) -> bool:
@@ -81,7 +84,10 @@ class AnonRateLimitMiddleware(BaseHTTPMiddleware):
         if self._is_authenticated(request):
             return await call_next(request)
 
-        ip = request.client.host if request.client else "unknown"
+        # ⚠️ REAL CALLER, NOT THE PROXY. Behind a reverse proxy this used to
+        # collapse into a single bucket, so `max_per_min` throttled every
+        # anonymous visitor on the network collectively rather than each one.
+        ip = client_address(request, self.trusted_proxies)
         now = time.time()
         bucket = [t for t in self._buckets.get(ip, []) if now - t < 60]
         if len(bucket) >= self.max_per_min:
@@ -140,10 +146,12 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     _PUBLIC_WINDOW_SECS = 300
     _PUBLIC_WINDOW_MAX_FAILS = 30
 
-    def __init__(self, app, api_key: str, public: bool = False):
+    def __init__(self, app, api_key: str, public: bool = False,
+                 trusted_proxies: str = DEFAULT_TRUSTED_PROXIES):
         super().__init__(app)
         self.api_key = api_key
         self.public = public
+        self.trusted_proxies = trusted_proxies
         # {ip: {"failures": N, "locked_until": timestamp}}
         self._auth_state: dict[str, dict] = {}
         # Public-mode: {ip: [timestamps of failed auths]} sliding window
@@ -169,7 +177,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         if self.public and _is_public_inference_path(path):
             return await call_next(request)
 
-        ip = request.client.host if request.client else "unknown"
+        ip = client_address(request, self.trusted_proxies)
 
         def _valid_key() -> bool:
             import hmac
@@ -298,6 +306,7 @@ def create_app(node: MycellmNode) -> FastAPI:
             ApiKeyMiddleware,
             api_key=settings.api_key,
             public=settings.public,
+            trusted_proxies=settings.trusted_proxies,
         )
 
     # Per-IP anon rate limiter — only active in public bootstrap mode.
@@ -309,10 +318,15 @@ def create_app(node: MycellmNode) -> FastAPI:
             AnonRateLimitMiddleware,
             api_key=settings.api_key,
             max_per_min=settings.public_anon_rate_per_min,
+            trusted_proxies=settings.trusted_proxies,
         )
 
     # Store node reference for route handlers
     app.state.node = node
+    # Settings too: handlers need `trusted_proxies` to decide whose
+    # X-Forwarded-For to believe, and reaching through the node for it would
+    # couple every route to the node's internals.
+    app.state.settings = settings
 
     # API routes
     app.include_router(openai_router, prefix="/v1")
@@ -320,6 +334,12 @@ def create_app(node: MycellmNode) -> FastAPI:
     app.include_router(admin_router, prefix="/v1/admin")
     app.include_router(models_router, prefix="/v1/node/models")
     app.include_router(gateway_router, prefix="/v1/public")
+
+    # Job queue. Mounted unconditionally so a disabled queue answers 503 with
+    # a reason rather than 404 — "not enabled here" and "no such endpoint" send
+    # a client down completely different paths.
+    from mycellm.api.jobs import router as jobs_router
+    app.include_router(jobs_router, prefix="/v1/jobs")
 
     # Ollama-compatible API routes
     # Clients like OpenClaw use the Ollama SDK which calls /api/tags,

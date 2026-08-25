@@ -137,6 +137,11 @@ class MycellmNode:
         self.device_cert: DeviceCert | None = None
         self.peer_id: str = ""
         self.capabilities = Capabilities()
+        # Set by `_start_job_queue`. Declared here so every read site —
+        # the API, the scheduler, a test double — sees the attribute
+        # whether or not the queue came up.
+        self.job_queue = None
+        self.job_scheduler = None
 
         # Subsystems
         self.inference = InferenceManager(
@@ -499,10 +504,20 @@ class MycellmNode:
     # ── Fleet admin command handling ──
 
     # Allowlisted fleet commands (restricted scope — no secrets, no key changes)
+    #
+    # The `node.groups` / `node.targets` / `node.plan` / `relay.*` family is the
+    # 0.8 management surface. Until it existed, every 0.8 concept was reachable
+    # only on the node's own loopback API: an operator could see that a peer
+    # advertised a model but not which serving group backed it, and could not
+    # attach or detach a gateway without shelling into the host. Advertising a
+    # fabric the fleet cannot administer is the same advertised-but-unreachable
+    # shape 0.8 spent its defect budget removing.
     _FLEET_COMMANDS = {
         "node.status", "node.config",
         "model.list", "model.load", "model.unload", "model.scope",
         "train.status",
+        "node.groups", "node.targets", "node.plan",
+        "relay.list", "relay.add", "relay.remove", "relay.refresh",
     }
 
     async def _handle_fleet_command(self, protocol, msg: MessageEnvelope, stream_id: int) -> None:
@@ -628,6 +643,138 @@ class MycellmNode:
             # to. Round execution + QUIC broadcast are a later phase — this is
             # the discovery surface so a coordinator knows who can join.
             return self._training_status()
+
+        # ── 0.8 fabric: serving groups, execution targets, planning ──
+
+        elif command == "node.groups":
+            # Read-only. The fleet view of what `GET /v1/node/groups` returns
+            # locally: which gateways this node fronts, and which deployments
+            # each one actually serves right now.
+            if not getattr(self, "relay_manager", None):
+                return {"groups": [], "count": 0, "healthy_count": 0,
+                        "deployment_count": 0}
+            groups = self.relay_manager.get_groups()
+            return {
+                "groups": groups,
+                "count": len(groups),
+                "healthy_count": sum(1 for g in groups if g["healthy"]),
+                "deployment_count": sum(len(g["deployments"]) for g in groups),
+            }
+
+        elif command == "node.targets":
+            # Everywhere a WorkUnit could run on this node — the planner's own
+            # input, exposed so a fleet operator can see why a peer chose what
+            # it chose without guessing from the model list.
+            targets = self.execution_targets(params.get("model", ""))
+            return {
+                "targets": [
+                    {"target": str(t), "model": t.model, "kind": t.kind,
+                     "remote": t.is_remote, "tok_s": t.tok_s,
+                     "params_b": t.params_b, "roles": list(t.roles)}
+                    for t in targets
+                ],
+                "count": len(targets),
+            }
+
+        elif command == "node.plan":
+            # Dry-run: what WOULD this peer do with this request. Executes
+            # nothing, so a fleet operator can inspect egress refusals — the
+            # thing that is otherwise invisible, because a target blocked by
+            # policy looks identical to one that was never there.
+            from mycellm.execution.models import Job
+            from mycellm.execution.planner import ExecutionPlanner
+
+            job = Job(
+                job_id=Job.new_id("fleet"),
+                model=params.get("model", ""),
+                messages=params.get("messages") or [{"role": "user", "content": ""}],
+                temperature=float(params.get("temperature", 0.7)),
+                max_tokens=int(params.get("max_tokens", 2048)),
+                trust=params.get("trust", ""),
+                token_budget=int(params.get("token_budget", 0) or 0),
+                fanout=int(params.get("fanout", 0) or 0),
+            )
+            if job.network_ids is None:
+                job.network_ids = self._own_network_ids()
+            targets = self.execution_targets()
+            # No privacy override over the fleet channel. An operator holding
+            # the admin key can already load models here; letting them silently
+            # disable this node's egress scanning for a prompt they supply is a
+            # different power, and not one the plan surface needs.
+            plan = ExecutionPlanner().plan(job, targets, override_privacy=False)
+            return {"plan": plan.to_dict(), "candidate_count": len(targets)}
+
+        elif command == "relay.list":
+            if not getattr(self, "relay_manager", None):
+                return {"relays": []}
+            return {"relays": self.relay_manager.get_status()}
+
+        elif command == "relay.add":
+            if not getattr(self, "relay_manager", None):
+                raise ValueError("Relay manager not initialized")
+            url = params.get("url", "")
+            if not url:
+                raise ValueError("url required")
+            api_key = params.get("api_key", "")
+            # Same secret-store indirection the HTTP path uses, so a fleet
+            # command can name a secret already on the target node instead of
+            # putting the literal credential on the wire.
+            if api_key and getattr(self, "secret_store", None):
+                api_key = self.secret_store.resolve(api_key)
+            relay = await self.relay_manager.add(
+                url=url,
+                api_key=api_key,
+                name=params.get("name", ""),
+                max_concurrent=params.get("max_concurrent", 32),
+            )
+            self.capabilities.models = self.inference.loaded_models
+            self.capabilities.role = (
+                "seeder" if self.inference.loaded_models else "consumer"
+            )
+            await self.announce_capabilities()
+            return {
+                "status": "added",
+                "relay": {
+                    "url": relay.url, "name": relay.name,
+                    "group_id": relay.group_id, "online": relay.online,
+                    "error": relay.error,
+                    "models": list(relay.registered.values()),
+                },
+            }
+
+        elif command == "relay.remove":
+            if not getattr(self, "relay_manager", None):
+                raise ValueError("Relay manager not initialized")
+            url = params.get("url", "")
+            if not url:
+                raise ValueError("url required")
+            removed = await self.relay_manager.remove(url)
+            if removed:
+                self.capabilities.models = self.inference.loaded_models
+                self.capabilities.role = (
+                    "seeder" if self.inference.loaded_models else "consumer"
+                )
+                await self.announce_capabilities()
+            return {"status": "removed" if removed else "not_found", "url": url}
+
+        elif command == "relay.refresh":
+            if not getattr(self, "relay_manager", None):
+                raise ValueError("Relay manager not initialized")
+            url = params.get("url", "")
+            total = (
+                await self.relay_manager.refresh(url) if url
+                else await self.relay_manager.refresh_all()
+            )
+            if total > 0:
+                self.capabilities.models = self.inference.loaded_models
+                self.capabilities.role = (
+                    "seeder" if self.inference.loaded_models else "consumer"
+                )
+                await self.announce_capabilities()
+            return {
+                "models_discovered": total,
+                "relays": self.relay_manager.get_status(),
+            }
 
         raise ValueError(f"Unknown command: {command}")
 
@@ -771,11 +918,21 @@ class MycellmNode:
         _infer_start = time.time()
 
         model_name = self.inference.resolve_model_name(model)
+        # Peer inference is the one path with no HTTP access log, so a request
+        # that never arrives and one that arrives and routes nowhere look
+        # identical from the client. Log both facts at the boundary.
+        logger.info(
+            f"{styled_tag('INFER')} peer={msg.from_peer[:12]} model={model!r} "
+            f"stream={stream} resolved={model_name!r} local={bool(model_name)}"
+        )
         if not model_name:
             # Model not loaded locally — try relaying to a peer that has it
             if stream:
                 try:
                     relayed = False
+                    seq = 0
+                    # One stream for the whole reply — see `open_frame_stream`.
+                    frame_stream = await protocol.open_frame_stream()
                     async for chunk in self.route_inference_stream(model, messages, **{
                         "temperature": payload.get("temperature", 0.7),
                         "max_tokens": payload.get("max_tokens", 2048),
@@ -784,15 +941,29 @@ class MycellmNode:
                         text = chunk.get("text", "")
                         tc = chunk.get("tool_calls")
                         if text or tc:
-                            chunk_msg = inference_stream_chunk(self.peer_id, msg.id, text or "", chunk.get("finish_reason"), tool_calls=tc)
-                            await protocol.send_message(chunk_msg)
+                            chunk_msg = inference_stream_chunk(
+                                self.peer_id, msg.id, text or "",
+                                chunk.get("finish_reason"), tool_calls=tc, seq=seq,
+                                served_by=chunk.get("peer_id") if seq == 0 else None,
+                                model=chunk.get("model") if seq == 0 else None)
+                            seq += 1
+                            protocol.send_frame(frame_stream, chunk_msg)
                             relayed = True
+                    logger.info(
+                        f"{styled_tag('INFER')} relay stream for {msg.from_peer[:12]}: "
+                        f"{seq} frame(s) sent"
+                    )
                     if relayed:
                         done_msg = inference_done(self.peer_id, msg.id)
-                        await protocol.send_message(done_msg)
+                        protocol.send_frame(frame_stream, done_msg)
+                        protocol.end_frame_stream(frame_stream)
                         return
+                    protocol.end_frame_stream(frame_stream)
                 except Exception as e:
-                    logger.debug(f"Relay stream failed: {e}")
+                    logger.warning(
+                        f"{styled_tag('INFER')} relay stream failed for "
+                        f"{msg.from_peer[:12]} model={model!r}: {type(e).__name__}: {e}"
+                    )
             else:
                 result = await self.route_inference(model, messages,
                     temperature=payload.get("temperature", 0.7),
@@ -808,6 +979,10 @@ class MycellmNode:
                     await protocol.reply_on_stream(stream_id, resp)
                     return
 
+            logger.warning(
+                f"{styled_tag('INFER')} MODEL_UNAVAILABLE for {msg.from_peer[:12]} "
+                f"model={model!r} candidates={self._candidate_models(model)}"
+            )
             err = error_message(self.peer_id, msg.id, ErrorCode.MODEL_UNAVAILABLE)
             await protocol.reply_on_stream(stream_id, err)
             return
@@ -850,16 +1025,22 @@ class MycellmNode:
         try:
             completion_tokens = 0
             if stream and not tools:
+                seq = 0
+                frame_stream = await protocol.open_frame_stream()
                 async for chunk in self.inference.generate_stream(req):
                     chunk_msg = inference_stream_chunk(
                         self.peer_id, msg.id, chunk.text, chunk.finish_reason,
-                        tool_calls=chunk.tool_calls,
+                        tool_calls=chunk.tool_calls, seq=seq,
+                        served_by=self.peer_id if seq == 0 else None,
+                        model=model_name if seq == 0 else None,
                     )
-                    await protocol.send_message(chunk_msg)
+                    seq += 1
+                    protocol.send_frame(frame_stream, chunk_msg)
                     if chunk.text:
                         completion_tokens += 1  # ~1 token per streamed chunk
                 done_msg = inference_done(self.peer_id, msg.id)
-                await protocol.send_message(done_msg)
+                protocol.send_frame(frame_stream, done_msg)
+                protocol.end_frame_stream(frame_stream)
             elif stream and tools:
                 # Use non-streaming generate() for tool requests — streaming tool_call
                 # deltas are unreliable; emit the full result as a single stream chunk.
@@ -873,7 +1054,7 @@ class MycellmNode:
                         result.finish_reason = "tool_calls"
                 chunk_msg = inference_stream_chunk(
                     self.peer_id, msg.id, result.text, result.finish_reason,
-                    tool_calls=result.tool_calls,
+                    tool_calls=result.tool_calls, seq=0,
                 )
                 await protocol.send_message(chunk_msg)
                 done_msg = inference_done(self.peer_id, msg.id)
@@ -1561,6 +1742,13 @@ class MycellmNode:
 
         # Load persisted node registry from DB
         self.node_registry = await self.node_registry_repo.load_as_dict()
+
+        # Job queue + scheduler. Started after accounting because a stake is
+        # denominated in credits and the recovery pass needs the DB, and before
+        # transport because a job queued last night should start the moment
+        # this node is fit to run it — not once a peer happens to connect.
+        await self._start_job_queue()
+
         await self._start_transport()
 
         # Start NAT discovery (non-blocking background)
@@ -2156,6 +2344,15 @@ class MycellmNode:
             conn.close()
         self._peer_connections.clear()
 
+        # Stop the job scheduler before the DHT so in-flight jobs are requeued
+        # while transport is still up — a job killed after the network is gone
+        # cannot record why it stopped.
+        if getattr(self, "job_scheduler", None):
+            try:
+                await self.job_scheduler.stop()
+            except Exception as e:  # noqa: BLE001 — shutdown must not hang
+                logger.debug(f"job scheduler stop: {e}")
+
         # Stop DHT
         if self._dht_node:
             await self._dht_node.stop()
@@ -2178,7 +2375,16 @@ class MycellmNode:
         request. The resolver already excludes peers without a live connection,
         so dead/zombie seeders never appear here.
         """
-        if model not in ("", "auto") or not self.model_resolver:
+        # ⚠️ "default" BELONGS IN THIS SET, AND LEAVING IT OUT BROKE EVERY
+        # NETWORK CHAT FROM THE iOS APP. The app sends the literal string
+        # "default" when no remote model has been chosen; it reached
+        # `chain_builder.route("default")`, matched no peer, and the streaming
+        # relay answered MODEL_UNAVAILABLE. From the phone that looked like
+        # "streaming does not work" — a typing indicator, then a timeout — and
+        # three separate transport fixes went past it because the transport was
+        # never the problem. Any client's placeholder for "you pick" has to mean
+        # the same thing here as it does on the HTTP API.
+        if model not in ("", "auto", "default", None) or not self.model_resolver:
             return [model]
         resolved = self.model_resolver.resolve(
             "", self.inference.loaded_models,
@@ -2347,18 +2553,109 @@ class MycellmNode:
                 "inference_consumed", counterparty_id=t.peer_id)
         return res
 
-    async def execute_job(self, job, override_privacy: bool = False) -> dict:
-        """Plan and run a Job. The 0.8 entry point.
+    async def _start_job_queue(self) -> None:
+        """Bring up the async job queue, if enabled.
 
-        Direct requests still go through `route_inference`; this path is for
-        jobs whose *strategy* is the point (`mycellm/swarm`).
+        Failure here is logged and swallowed: a node that cannot queue work
+        must still serve it. The queue is an addition to what 0.7 could do, so
+        it is never allowed to be the reason a node does not start.
+        """
+        self.job_queue = None
+        self.job_scheduler = None
+        if not getattr(self._settings, "queue_enabled", True):
+            return
+        try:
+            from mycellm.execution.queue import JobQueue
+            from mycellm.execution.scheduler import JobScheduler
+
+            self.job_queue = JobQueue(owner_id=self.peer_id)
+            self.job_scheduler = JobScheduler(
+                self.job_queue,
+                self,
+                poll_interval=getattr(self._settings, "queue_poll_interval", 5.0),
+                max_concurrent=getattr(self._settings, "queue_max_concurrent", 1),
+            )
+            await self.job_scheduler.start()
+            logger.info(f"{styled_tag('QUEUE')} Job scheduler started")
+        except Exception as e:
+            logger.warning(f"Job queue not started: {e}")
+            self.job_queue = None
+            self.job_scheduler = None
+
+    async def run_work_unit_stream(self, unit):
+        """Stream one WorkUnit's output as text fragments.
+
+        Only used for swarm synthesis, which is the single point in a swarm
+        where one model is producing the final answer and streaming it means
+        something. Mirrors `run_work_unit`'s local/group vs QUIC dispatch so
+        the two cannot disagree about where a unit runs.
+        """
+        from mycellm.inference.base import InferenceRequest
+
+        t = unit.target
+        if t.kind in ("local", "group"):
+            name = self.inference.resolve_model_name(t.model) or t.model
+            async for chunk in self.inference.generate_stream(InferenceRequest(
+                messages=unit.messages,
+                model=name,
+                temperature=unit.temperature,
+                max_tokens=unit.max_tokens,
+            )):
+                text = getattr(chunk, "text", "") or ""
+                if text:
+                    yield text
+            return
+
+        # QUIC peer — reuse the routing stream so failover and accounting
+        # behave exactly as they do for an ordinary streamed request.
+        async for chunk in self.route_inference_stream(
+            t.model, unit.messages,
+            temperature=unit.temperature, max_tokens=unit.max_tokens,
+        ):
+            text = (chunk or {}).get("text", "")
+            if text:
+                yield text
+
+    async def execute_job_stream(self, job, override_privacy: bool = False,
+                                 targets: list | None = None):
+        """Plan a Job and stream it. Yields coordinator events.
+
+        The streaming twin of `execute_job`, and the reason `mycellm/swarm` is
+        reachable from a streaming client at all.
         """
         from mycellm.execution.coordinator import ExecutionCoordinator
         from mycellm.execution.planner import ExecutionPlanner
 
         if job.network_ids is None:
             job.network_ids = self._own_network_ids()
-        targets = self.execution_targets()
+        if targets is None:
+            targets = self.execution_targets()
+        plan = ExecutionPlanner().plan(job, targets, override_privacy=override_privacy)
+        coordinator = ExecutionCoordinator(
+            self.run_work_unit, stream_runner=self.run_work_unit_stream)
+        async for event in coordinator.execute_stream(job, plan):
+            yield event
+
+    async def execute_job(self, job, override_privacy: bool = False,
+                          targets: list | None = None) -> dict:
+        """Plan and run a Job. The 0.8 entry point.
+
+        Direct requests still go through `route_inference`; this path is for
+        jobs whose *strategy* is the point (`mycellm/swarm`).
+
+        `targets` lets a caller narrow the field before planning — the job
+        scheduler passes the subset that meets a queued job's tier floor, so a
+        "frontier or nothing" job cannot be planned onto a 1B model that
+        happened to be the only thing awake. Omitted, every reachable target is
+        considered, which is the 0.8 behaviour.
+        """
+        from mycellm.execution.coordinator import ExecutionCoordinator
+        from mycellm.execution.planner import ExecutionPlanner
+
+        if job.network_ids is None:
+            job.network_ids = self._own_network_ids()
+        if targets is None:
+            targets = self.execution_targets()
         plan = ExecutionPlanner().plan(job, targets, override_privacy=override_privacy)
         coordinator = ExecutionCoordinator(self.run_work_unit)
         return await coordinator.execute(job, plan)
@@ -2478,7 +2775,9 @@ class MycellmNode:
                         tool_calls = resp.payload.get("tool_calls")
                         if text or tool_calls:
                             produced = True
-                            yield {"text": text, "finish_reason": finish_reason, "tool_calls": tool_calls, "peer_id": target.peer_id}
+                            yield {"text": text, "finish_reason": finish_reason,
+                                   "tool_calls": tool_calls, "peer_id": target.peer_id,
+                                   "model": effective_model}
                     target.entry.failure_count = max(0, target.entry.failure_count - 1)
                     return
                 except Exception as e:

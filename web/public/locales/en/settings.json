@@ -43,5 +43,6 @@
     "prometheus": "Prometheus Metrics",
     "health": "Health Check",
     "docs": "API Documentation"
-  }
+  },
+  "none": "None"
 }

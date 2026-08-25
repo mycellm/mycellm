@@ -54,9 +54,14 @@ class ExecutionCoordinator:
     runner(unit) -> WorkUnitResult
     """
 
-    def __init__(self, runner, activity=None):
+    def __init__(self, runner, activity=None, stream_runner=None):
         self._run_unit = runner
         self._activity = activity
+        # Optional: stream_runner(unit) -> async iterator of text fragments.
+        # Only synthesis uses it. Proposers deliberately do not stream — several
+        # models emitting at once is noise, not progress, and the caller cannot
+        # use half of three different answers.
+        self._stream_unit = stream_runner
 
     async def execute(self, job: Job, plan: ExecutionPlan) -> dict:
         started = time.monotonic()
@@ -100,7 +105,20 @@ class ExecutionCoordinator:
 
     # ── Swarm ───────────────────────────────────────────────────────────
 
-    async def _run_swarm(self, job: Job, plan: ExecutionPlan) -> dict:
+    async def _gather_proposals(
+        self, plan: ExecutionPlan, on_result=None
+    ) -> tuple[list[WorkUnitResult], list[WorkUnitResult], dict, int]:
+        """Run the proposer fan-out. Returns (good, failed, meta, spent).
+
+        ⚠️ SHARED BY THE STREAMING AND NON-STREAMING PATHS ON PURPOSE. The
+        budget ceiling, the cancellation settle, and the degradation bookkeeping
+        below are subtle enough that a second copy would drift — and the way it
+        would drift is a streaming swarm quietly spending past a budget that the
+        non-streaming one enforces.
+
+        `on_result` is called as each proposer lands, so a caller can report
+        progress without learning how the fan-out works.
+        """
         proposers = plan.proposers
         budget = plan.token_budget
 
@@ -116,6 +134,8 @@ class ExecutionCoordinator:
                 res = await fut
                 results.append(res)
                 spent += res.completion_tokens
+                if on_result is not None:
+                    on_result(res, len(results), len(proposers))
                 # Budget is enforced as results land, which is the only point
                 # actual spend is known. Checking beforehand would need an
                 # estimate, and an estimate is not a ceiling.
@@ -149,6 +169,12 @@ class ExecutionCoordinator:
                 {"target": str(r.target), "error": r.error[:200]} for r in failed
             ]
             meta["degraded"] = True
+
+        return good, failed, meta, spent
+
+    async def _run_swarm(self, job: Job, plan: ExecutionPlan) -> dict:
+        budget = plan.token_budget
+        good, failed, meta, spent = await self._gather_proposals(plan)
 
         if not good:
             return {
@@ -203,6 +229,178 @@ class ExecutionCoordinator:
             "completion_tokens": spent + synth.completion_tokens,
             "meta": meta,
         }
+
+    # ── Streaming ───────────────────────────────────────────────────────
+
+    async def execute_stream(self, job: Job, plan: ExecutionPlan):
+        """Run a plan, yielding events as they happen.
+
+        ⚠️ THIS EXISTS BECAUSE `mycellm/swarm` WAS ADVERTISED AND UNSTREAMABLE.
+        `/v1/models` listed it, most clients stream by default, and a streaming
+        swarm request fell through to ordinary model resolution and answered
+        "No model available" — the advertised-but-unreachable shape 0.8 exists
+        to remove, reintroduced by the one strategy 0.8 added.
+
+        The shape of a swarm decides what can stream. Proposers run in parallel
+        and their output is an *input* to synthesis, not an answer — streaming
+        three at once would interleave three different replies into nonsense.
+        So the proposer phase reports progress and the synthesis phase streams
+        text, which happens to match what a user wants to see: who is working,
+        then the answer arriving.
+
+        Events:
+          {"type": "progress", "phase": ..., ...}   never user-facing text
+          {"type": "text", "text": ...}             real content
+          {"type": "done", "meta": {...}}
+          {"type": "error", "error": ..., "meta": {...}}
+        """
+        if not plan.units:
+            yield {"type": "error",
+                   "error": "; ".join(plan.reasons) or "no executable target",
+                   "meta": plan.to_dict()}
+            return
+
+        started = time.monotonic()
+
+        if plan.strategy is not Strategy.SWARM:
+            # Direct plans have nothing to orchestrate; run and emit once.
+            # Real token-by-token streaming for a single model already exists
+            # on `route_inference_stream` and the API uses it directly.
+            result = await self._run_direct(job, plan)
+            if result.get("error"):
+                yield {"type": "error", "error": result["error"],
+                       "meta": {**plan.to_dict(), **result.get("meta", {})}}
+                return
+            yield {"type": "text", "text": result.get("text", "")}
+            yield {"type": "done",
+                   "meta": {**plan.to_dict(), **result.get("meta", {}),
+                            "elapsed_s": round(time.monotonic() - started, 3)}}
+            return
+
+        budget = plan.token_budget
+        proposals: list[dict] = []
+
+        def _note(res: WorkUnitResult, done: int, total: int) -> None:
+            proposals.append({
+                "target": str(res.target),
+                "ok": res.ok,
+                "elapsed_s": res.elapsed_s,
+                "done": done,
+                "total": total,
+            })
+
+        yield {"type": "progress", "phase": "proposing",
+               "planned": len(plan.proposers),
+               "targets": [str(u.target) for u in plan.proposers]}
+
+        good, failed, meta, spent = await self._gather_proposals(plan, on_result=_note)
+        meta["proposals"] = proposals
+
+        def _finish(text: str, extra: dict | None = None):
+            return {"type": "done",
+                    "meta": {**plan.to_dict(), **meta, **(extra or {}),
+                             "elapsed_s": round(time.monotonic() - started, 3)}}
+
+        if not good:
+            yield {"type": "error",
+                   "error": ("every proposer failed: "
+                             + "; ".join(r.error[:120] for r in failed)) if failed
+                            else "no proposer produced output",
+                   "meta": {**plan.to_dict(), **meta}}
+            return
+
+        # Every degradation path below returns finished text rather than a
+        # stream. Emitting it as a single chunk keeps the wire shape identical
+        # — a client must not have to care whether the answer was synthesised
+        # or salvaged, only that the metadata says which.
+        if len(good) == 1:
+            meta["degraded"] = True
+            meta["degradation"] = "one proposer survived; returned directly"
+            yield {"type": "text", "text": good[0].text}
+            yield _finish(good[0].text)
+            return
+
+        synth_unit = plan.synthesizer
+        if synth_unit is None:
+            meta["degraded"] = True
+            meta["degradation"] = "no synthesizer planned; returned longest proposal"
+            best = max(good, key=lambda r: len(r.text))
+            yield {"type": "text", "text": best.text}
+            yield _finish(best.text)
+            return
+
+        if budget and spent >= budget:
+            meta["degraded"] = True
+            meta["degradation"] = "budget exhausted before synthesis"
+            best = max(good, key=lambda r: len(r.text))
+            yield {"type": "text", "text": best.text}
+            yield _finish(best.text)
+            return
+
+        unit = self._synthesis_unit(synth_unit, job, good)
+        yield {"type": "progress", "phase": "synthesizing",
+               "target": str(unit.target), "from_proposals": len(good)}
+
+        # No streaming runner: synthesise normally and emit once. Degrading to
+        # a single chunk is correct — the answer is still right, it simply
+        # arrives all at once, which is what happened before this method
+        # existed.
+        if self._stream_unit is None:
+            synth = await self._safe_run(unit)
+            if not synth.ok:
+                meta["degraded"] = True
+                meta["degradation"] = (f"synthesis failed ({synth.error[:120]}); "
+                                       f"returned best proposal")
+                best = max(good, key=lambda r: len(r.text))
+                yield {"type": "text", "text": best.text}
+                yield _finish(best.text)
+                return
+            meta["synthesized_by"] = str(synth.target)
+            meta["completion_tokens_spent"] = spent + synth.completion_tokens
+            yield {"type": "text", "text": synth.text}
+            yield _finish(synth.text)
+            return
+
+        emitted = ""
+        try:
+            async for fragment in self._stream_unit(unit):
+                if not fragment:
+                    continue
+                emitted += fragment
+                yield {"type": "text", "text": fragment}
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — a synthesiser may fail any way
+            logger.debug(f"synthesis stream failed: {e}")
+            # ⚠️ FALLING BACK IS ONLY SAFE BEFORE THE FIRST FRAGMENT. Once text
+            # has reached the client, emitting a proposal too would append a
+            # second answer to a half-finished one. Past that point the honest
+            # move is to stop and say the stream broke.
+            if emitted:
+                meta["degraded"] = True
+                meta["degradation"] = f"synthesis stream broke after partial output ({e})"
+                yield _finish(emitted)
+                return
+            meta["degraded"] = True
+            meta["degradation"] = f"synthesis failed ({str(e)[:120]}); returned best proposal"
+            best = max(good, key=lambda r: len(r.text))
+            yield {"type": "text", "text": best.text}
+            yield _finish(best.text)
+            return
+
+        if not emitted:
+            # A stream that yields nothing is indistinguishable from a clean
+            # empty answer, and neither is worth handing to a caller who paid
+            # for several proposers.
+            meta["degraded"] = True
+            meta["degradation"] = "synthesis produced no output; returned best proposal"
+            best = max(good, key=lambda r: len(r.text))
+            yield {"type": "text", "text": best.text}
+            yield _finish(best.text)
+            return
+
+        meta["synthesized_by"] = str(unit.target)
+        yield _finish(emitted)
 
     @staticmethod
     def _synthesis_unit(

@@ -9,22 +9,27 @@
     "auto": "Automático (mejor disponible)",
     "local": "Local",
     "fleet": "Flota",
-    "peers": "Pares"
+    "peers": "Pares",
+    "strategies": "Estrategias",
+    "tier": "Nivel mínimo",
+    "tierEmpty": "ninguno disponible"
   },
   "routing": {
     "title": "Opciones de Enrutamiento",
     "minQuality": "Calidad mínima",
     "tags": "Etiquetas",
-    "mode": "Modo",
     "fallback": "Si no está disponible",
-    "bestQuality": "Mejor calidad",
-    "fastest": "Más rápido",
     "useNextBest": "Usar siguiente mejor",
-    "reject": "Rechazar solicitud"
+    "reject": "Rechazar solicitud",
+    "trust": "Confianza",
+    "fanout": "Proponentes",
+    "tokenBudget": "Presupuesto de tokens",
+    "auto": "Auto",
+    "noLimit": "Sin límite"
   },
   "tiers": {
     "any": "Cualquiera",
-    "tiny": "Pequeño (1B+)",
+    "tiny": "Mínimo (<3B)",
     "fast": "Rápido (3B+)",
     "capable": "Capaz (13B+)",
     "frontier": "Frontera (65B+)"
@@ -53,5 +58,29 @@
     "fleet": "Mostrar nodos de flota",
     "config": "Mostrar configuración del nodo",
     "clear": "Limpiar conversación"
+  },
+  "trust": {
+    "default": "Predeterminado del nodo",
+    "local": "Solo local",
+    "trusted": "De confianza",
+    "any": "Cualquiera"
+  },
+  "plan": {
+    "proposers": "{{count}} proponente",
+    "proposers_other": "{{count}} proponentes",
+    "failed": "{{count}} fallidos",
+    "refused": "{{count}} rechazados",
+    "degraded": "degradado",
+    "units": "Unidades de trabajo",
+    "refusedTitle": "Rechazado por la política de salida",
+    "failuresTitle": "Fallos",
+    "reasons": "Motivos del planificador",
+    "synthesizedBy": "Sintetizado por",
+    "servedBy": "Servido por",
+    "spent": "Tokens",
+    "cancelledForBudget": "{{count}} cancelados por presupuesto"
+  },
+  "errors": {
+    "emptyStream": "El modelo devolvió una respuesta vacía."
   }
 }

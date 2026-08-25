@@ -43,5 +43,6 @@
     "prometheus": "Métricas de Prometheus",
     "health": "Verificación de Estado",
     "docs": "Documentación de API"
-  }
+  },
+  "none": "Ninguno"
 }

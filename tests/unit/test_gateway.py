@@ -277,3 +277,69 @@ async def test_gateway_response_has_no_sensitive_data():
         assert "gatewaypeer" not in text
         assert "credit" not in text.lower()
         assert "api_key" not in text
+
+
+# --- Caller-requested model and tier (the public chat box's selector) ---
+#
+# The public box defaults to Auto and stays there, but a visitor who picks
+# "Frontier" is making a claim about what they want, not a suggestion. These
+# tests fix the two halves of honouring that: narrow the field, and when the
+# field is empty say so rather than serving whatever happened to be online.
+
+def _node_with(models):
+    """A node serving `models` as (name, param_count_b) locally."""
+    node = MagicMock()
+    node.inference.loaded_models = [
+        MagicMock(name=n, param_count_b=p, backend="mlx") for n, p in models
+    ]
+    # MagicMock's `name` kwarg is reserved, so set it after construction.
+    for m, (n, _) in zip(node.inference.loaded_models, models):
+        m.name = n
+    node.registry.connected_peers.return_value = []
+    node.node_registry = {}
+    return node
+
+
+def test_candidates_unfiltered_by_default():
+    from mycellm.api.gateway import _get_candidates
+    node = _node_with([("tiny-1b", 1.0), ("mid-9b", 9.0)])
+    assert len(_get_candidates(node)) == 2
+
+
+def test_tier_floor_drops_smaller_models():
+    from mycellm.api.gateway import _get_candidates
+    node = _node_with([("tiny-1b", 1.0), ("mid-9b", 9.0), ("big-70b", 70.0)])
+    names = [c[0] for c in _get_candidates(node, min_tier="capable")]
+    assert names == ["big-70b"]
+
+
+def test_tier_floor_can_empty_the_field():
+    """An empty result is the correct answer, not a bug to paper over.
+
+    Falling back to the whole list here would silently serve a 1B model to
+    someone who asked for frontier — which is exactly the behaviour that makes
+    a tier control meaningless.
+    """
+    from mycellm.api.gateway import _get_candidates
+    node = _node_with([("tiny-1b", 1.0)])
+    assert _get_candidates(node, min_tier="frontier") == []
+
+
+def test_named_model_narrows_to_one():
+    from mycellm.api.gateway import _get_candidates
+    node = _node_with([("tiny-1b", 1.0), ("mid-9b", 9.0)])
+    assert [c[0] for c in _get_candidates(node, want_model="mid-9b")] == ["mid-9b"]
+
+
+def test_named_model_that_is_not_served_yields_nothing():
+    from mycellm.api.gateway import _get_candidates
+    node = _node_with([("tiny-1b", 1.0)])
+    assert _get_candidates(node, want_model="not-here-13b") == []
+
+
+def test_unknown_tier_name_is_ignored_by_the_filter():
+    """Validation belongs at the endpoint, which 400s. The collector must not
+    silently treat a typo as "no models available"."""
+    from mycellm.api.gateway import _get_candidates
+    node = _node_with([("tiny-1b", 1.0)])
+    assert len(_get_candidates(node, min_tier="enormous")) == 1

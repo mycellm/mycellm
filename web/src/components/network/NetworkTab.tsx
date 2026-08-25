@@ -4,6 +4,7 @@ import { FleetRegistry } from './FleetRegistry'
 import { ManualNodeAdd } from './ManualNodeAdd'
 import { NetworkModels } from './NetworkModels'
 import { QuicPeers } from './QuicPeers'
+import { ServingGroups } from './ServingGroups'
 
 export function NetworkTab() {
   const { isLoading } = useFleetNodes()
@@ -21,6 +22,7 @@ export function NetworkTab() {
       <FleetRegistry />
       <ManualNodeAdd />
       <NetworkModels />
+      <ServingGroups />
       <QuicPeers />
     </div>
   )

@@ -55,7 +55,13 @@ async def announce_node(request: Request):
         return {"error": "capabilities required"}
 
     # Detect the announcing node's actual IP from the request
-    client_ip = request.client.host if request.client else "unknown"
+    # Real caller, not the reverse proxy: this value keys the announce rate
+    # limit AND becomes the node's recorded `ip`, and prime had every node in
+    # the registry stamped with the Docker bridge address because of it.
+    from mycellm.api.client_ip import DEFAULT_TRUSTED_PROXIES, client_address
+    _settings = getattr(request.app.state, "settings", None)
+    client_ip = client_address(
+        request, getattr(_settings, "trusted_proxies", None) or DEFAULT_TRUSTED_PROXIES)
     api_addr = body.get("api_addr", "")
     # If api_addr has 0.0.0.0, replace with actual IP
     if api_addr.startswith("0.0.0.0:"):

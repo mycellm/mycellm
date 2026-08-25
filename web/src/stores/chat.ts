@@ -8,6 +8,8 @@ interface ChatState {
   sending: boolean
   addMessage: (message: ChatMessage) => void
   removeMessages: (predicate: (msg: ChatMessage) => boolean) => void
+  /** Patch one message in place — how streaming appends tokens. */
+  updateMessage: (id: string, patch: (msg: ChatMessage) => ChatMessage) => void
   clearMessages: () => void
   setModel: (model: string) => void
   setRoutingOpts: (opts: Partial<RoutingOptions>) => void
@@ -18,10 +20,12 @@ export const useChatStore = create<ChatState>()((set) => ({
   messages: [],
   model: '',
   routingOpts: {
-    min_tier: 'any',
     required_tags: [],
     routing: 'best',
     fallback: 'downgrade',
+    trust: '',
+    fanout: 0,
+    token_budget: 0,
     show_reasoning: false,
   },
   sending: false,
@@ -29,6 +33,10 @@ export const useChatStore = create<ChatState>()((set) => ({
     set((state) => ({ messages: [...state.messages, message] })),
   removeMessages: (predicate) =>
     set((state) => ({ messages: state.messages.filter((m) => !predicate(m)) })),
+  updateMessage: (id, patch) =>
+    set((state) => ({
+      messages: state.messages.map((m) => (m.id === id ? patch(m) : m)),
+    })),
   clearMessages: () => set({ messages: [] }),
   setModel: (model) => set({ model }),
   setRoutingOpts: (opts) =>

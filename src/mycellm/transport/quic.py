@@ -67,9 +67,20 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
                 return
 
             if event.end_stream:
-                # Standard path: entire message in one stream
-                self._buffers.pop(stream_id, None)
-                self._dispatch_message(buf, stream_id)
+                # ⚠️ DRAIN FRAMES BEFORE FALLING BACK TO "one message per
+                # stream". A streamed reply ends by closing its frame stream,
+                # and QUIC may deliver the final frame and the FIN in the same
+                # event — parsing the whole buffer as a single CBOR message
+                # then fails, and the frame in it (usually INFERENCE_DONE) is
+                # lost. The client waits out its idle timeout for a message
+                # that arrived and was thrown away.
+                self._buffers[stream_id] = buf
+                if stream_id % 4 <= 1:
+                    self._try_framed_dispatch(stream_id)
+                leftover = self._buffers.pop(stream_id, b"")
+                if leftover:
+                    # Not framed (or a trailing partial): the legacy shape.
+                    self._dispatch_message(leftover, stream_id)
             elif stream_id % 4 <= 1:
                 # Length-prefixed framing on bidirectional streams only
                 # (iOS NWConnection sends on a single bidirectional stream)
@@ -103,8 +114,16 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
         while len(buf) >= 4:
             length = int.from_bytes(buf[:4], "big")
             if length > 10 * 1024 * 1024:
-                logger.warning(f"Framed message too large: {length}")
-                self._buffers.pop(stream_id, None)
+                # ⚠️ NOT NECESSARILY A BAD FRAME — MUCH MORE LIKELY AN UNFRAMED
+                # ONE. A bare CBOR map begins 0xA1..0xBF, which read as a length
+                # prefix is hundreds of megabytes. Dropping the buffer here
+                # discarded a legitimate single-message stream from an older
+                # peer that happened to arrive fragmented. Leave it for the
+                # end-of-stream path to parse whole.
+                logger.debug(
+                    f"Stream {stream_id}: {length} byte prefix is not a frame; "
+                    f"treating as an unframed message"
+                )
                 return
             if len(buf) < 4 + length:
                 break  # incomplete frame
@@ -147,6 +166,36 @@ class MycellmQuicProtocol(QuicConnectionProtocol):
         self._quic.send_stream_data(stream_id, data, end_stream=True)
         self.transmit()
         return stream_id
+
+    async def open_frame_stream(self, bidirectional: bool = True) -> int:
+        """Open a stream that will carry SEVERAL length-prefixed messages.
+
+        ⚠️ ONE MESSAGE PER STREAM DOES NOT WORK FOR STREAMING. `send_message`
+        opens a new stream and ends it per message, which is fine for
+        request/response but wrong for a token stream: a 40-frame reply became
+        40 streams, QUIC orders only WITHIN a stream so they raced, and iOS's
+        NWMultiplexGroup delivered 7 of them. The client saw a truncated,
+        scrambled answer and then waited out its idle timeout for frames that
+        had already been sent.
+
+        A streamed reply is ONE stream carrying framed messages, ended once at
+        the end — ordering and delivery then come from QUIC itself rather than
+        from luck.
+        """
+        await self._handshake_complete.wait()
+        return self._quic.get_next_available_stream_id(
+            is_unidirectional=not bidirectional
+        )
+
+    def send_frame(self, stream_id: int, msg: MessageEnvelope) -> None:
+        """Write one length-prefixed message to an open frame stream."""
+        self._quic.send_stream_data(stream_id, msg.to_framed(), end_stream=False)
+        self.transmit()
+
+    def end_frame_stream(self, stream_id: int) -> None:
+        """Close the sending side, which is the client's end-of-stream signal."""
+        self._quic.send_stream_data(stream_id, b"", end_stream=True)
+        self.transmit()
 
     def close_stream(self, stream_id: int) -> None:
         """Free a bidirectional request stream's receive side after the reply

@@ -107,6 +107,8 @@ class OpenAICompatibleBackend(InferenceBackend):
         text = ""
         finish_reason = "stop"
         tool_calls: list | None = None
+        prompt_tokens = 0
+        completion_tokens = 0
 
         async for chunk in self.generate_stream(request):
             if chunk.text:
@@ -115,12 +117,19 @@ class OpenAICompatibleBackend(InferenceBackend):
                 finish_reason = chunk.finish_reason
             if chunk.tool_calls is not None:
                 tool_calls = chunk.tool_calls
+            # Counts arrive on a trailing zero-text chunk. Reassembling here is
+            # what stops the non-streaming path from reporting 0+0 for a
+            # request the provider counted perfectly well.
+            if chunk.prompt_tokens is not None:
+                prompt_tokens = chunk.prompt_tokens
+            if chunk.completion_tokens is not None:
+                completion_tokens = chunk.completion_tokens
 
         return InferenceResult(
             text=text,
             tool_calls=tool_calls,
-            prompt_tokens=0,
-            completion_tokens=0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             finish_reason=finish_reason,
         )
 
@@ -139,6 +148,13 @@ class OpenAICompatibleBackend(InferenceBackend):
             "max_tokens": request.max_tokens,
             "top_p": request.top_p,
             "stream": True,
+            # ⚠️ WITHOUT THIS, A STREAMED RESPONSE CARRIES NO TOKEN COUNTS AT
+            # ALL. The OpenAI streaming spec omits `usage` unless it is asked
+            # for, so every relayed model reported 0 prompt / 0 completion
+            # tokens — which the dashboard rendered as a confident "0+0 tokens"
+            # pill and agents used for context accounting. A made-up number
+            # would be worse; an unasked-for one is simply absent.
+            "stream_options": {"include_usage": True},
         }
         if request.stop:
             body["stop"] = request.stop
@@ -156,6 +172,10 @@ class OpenAICompatibleBackend(InferenceBackend):
             body["tool_choice"] = request.tool_choice
 
         accumulated_tool_calls: dict[int, dict] = {}
+        # None (not 0) until upstream tells us: absent counts and a genuine
+        # zero are different facts, and only one of them should be reported.
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
 
         async with remote.client.stream("POST", "/chat/completions", json=body) as resp:
             resp.raise_for_status()
@@ -168,6 +188,23 @@ class OpenAICompatibleBackend(InferenceBackend):
 
                 import json
                 chunk = json.loads(payload)
+
+                # Usage is captured wherever it appears. OpenAI itself sends
+                # a dedicated final chunk with an EMPTY `choices` list, but
+                # several compatible providers attach it to the last content
+                # chunk instead — reading it only from the empty-choices frame
+                # would silently keep reporting zeros for those.
+                usage = chunk.get("usage") or {}
+                if usage:
+                    if usage.get("prompt_tokens") is not None:
+                        prompt_tokens = usage["prompt_tokens"]
+                    if usage.get("completion_tokens") is not None:
+                        completion_tokens = usage["completion_tokens"]
+
+                # The dedicated usage chunk carries no choice to index.
+                if not chunk.get("choices"):
+                    continue
+
                 choice = chunk["choices"][0]
                 delta = choice.get("delta", {})
                 content = delta.get("content", "")
@@ -196,6 +233,17 @@ class OpenAICompatibleBackend(InferenceBackend):
         if accumulated_tool_calls:
             tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls)]
             yield InferenceChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls_list)
+
+        # Trailing zero-text chunk carrying real counts, matching what the
+        # local backends do. Emitted only when upstream actually reported
+        # them — never fabricated, because agents size their context windows
+        # from these numbers.
+        if prompt_tokens is not None or completion_tokens is not None:
+            yield InferenceChunk(
+                text="",
+                prompt_tokens=prompt_tokens or 0,
+                completion_tokens=completion_tokens or 0,
+            )
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
         """Relay an embeddings request to the upstream /embeddings endpoint."""

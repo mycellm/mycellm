@@ -2,19 +2,15 @@ import { useTranslation } from 'react-i18next'
 import { Boxes } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useModels } from '@/hooks/useModels'
+import { locationStyle } from '@/lib/conventions'
 import { EmptyState } from '@/components/common/EmptyState'
 
+// ⚠️ THIS USED TO GIVE PEERS BLUE AND FLEET NODES GOLD — three colours for one
+// question ("where does this run") while `blue` also meant MLX and `gold` also
+// meant credits. Location is now one axis with two answers, matching iOS.
 function getOwnerStyle(ownedBy: string) {
-  if (ownedBy === 'local') {
-    return { icon: 'text-spore', badge: 'bg-spore/10 text-spore' }
-  }
-  if (ownedBy.startsWith('peer:')) {
-    return { icon: 'text-relay', badge: 'bg-relay/10 text-relay' }
-  }
-  if (ownedBy.startsWith('fleet:')) {
-    return { icon: 'text-ledger', badge: 'bg-ledger/10 text-ledger' }
-  }
-  return { icon: 'text-gray-500', badge: 'bg-white/5 text-gray-500' }
+  const loc = locationStyle(ownedBy)
+  return { icon: loc.text, badge: loc.badge }
 }
 
 export function NetworkModels() {

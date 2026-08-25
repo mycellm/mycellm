@@ -1,0 +1,19 @@
+{
+  "title": "Queue",
+  "blurb": "Work that waits for a device instead of failing. Jobs run when a node is free and fit — an iPad on the charger tonight, a Mac that wakes up in the morning.",
+  "refresh": "Refresh",
+  "promptPlaceholder": "What should the fleet work on?",
+  "stake": "Stake",
+  "stakeHint": "Credits staked buy position in the queue and are refunded if the job expires or is cancelled unrun. They never outrank this node's own work.",
+  "queueIt": "Queue it",
+  "cancel": "Cancel",
+  "empty": "Nothing queued.",
+  "states": {
+    "queued": "queued",
+    "running": "running",
+    "done": "done",
+    "failed": "failed",
+    "expired": "expired",
+    "cancelled": "cancelled"
+  }
+}

@@ -2,6 +2,8 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { MessageSquare, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
+import { parseSelection } from '@/lib/selection'
+import { StreamHttpError } from '@/api/client'
 import { api } from '@/api/client'
 import { API } from '@/api/endpoints'
 import { useChatStore } from '@/stores/chat'
@@ -12,9 +14,10 @@ import { useSensitiveDetect } from '@/hooks/useSensitiveDetect'
 import { ChatMessage as ChatMessageComponent } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { ModelSelector } from './ModelSelector'
-import { RoutingOptions } from './RoutingOptions'
+import { RoutingOptions, RoutingOptionsPanel } from './RoutingOptions'
 import { SensitiveWarning } from './SensitiveWarning'
-import type { ChatMessage } from '@/api/types'
+import type { ChatMessage, ExecutionMeta, SwarmProgress } from '@/api/types'
+import { SWARM_MODEL } from '@/api/types'
 
 const MAX_RETRIES = 5
 const RETRY_DELAYS = [2, 4, 8, 15, 30]
@@ -50,6 +53,49 @@ function formatUptime(seconds: number): string {
   if (d > 0) return `${d}d ${h}h ${m}m`
   if (h > 0) return `${h}h ${m}m`
   return `${m}m`
+}
+
+/**
+ * Turn a swarm progress frame into one short line.
+ *
+ * Node names, not counts alone: "3 proposers on aurora, hokulea and an iPhone"
+ * is the fact that makes a distributed fabric visible. Counts alone read like
+ * a generic spinner.
+ */
+function describePhase(p: SwarmProgress): string {
+  if (p.phase === 'proposing') {
+    const n = p.planned ?? p.targets?.length ?? 0
+    const where = p.targets?.length
+      ? ` on ${[...new Set(p.targets.map(shortTarget))].join(', ')}`
+      : ''
+    return `Asking ${n} model${n === 1 ? '' : 's'}${where}…`
+  }
+  const from = p.from_proposals ?? 0
+  const on = p.target ? ` on ${shortTarget(p.target)}` : ''
+  return `Synthesising ${from} answer${from === 1 ? '' : 's'}${on}…`
+}
+
+/**
+ * A target string rendered as something a person recognises.
+ *
+ * ⚠️ NEVER RETURN THE PLACEHOLDER. A group whose id isn't known prints as
+ * `group:external:<model>`, and naively taking the second segment showed
+ * "Asking 3 models on external" — three different models collapsed into one
+ * meaningless word. When the group has no id the MODEL is the identifying
+ * fact, so fall through to it.
+ *
+ *   local:qwen3-9b            → this node
+ *   peer:1a2b3c4d:qwen3-9b    → 1a2b3c4d
+ *   group:abc123:qwen3-9b     → abc123
+ *   group:external:qwen3-9b   → qwen3-9b
+ */
+function shortTarget(target: string): string {
+  const parts = target.split(':')
+  const [kind, second, ...rest] = parts
+  if (kind === 'local') return 'this node'
+  const model = rest.join(':') || second || target
+  if (kind === 'group' && (!second || second === 'external')) return model
+  return second ? second.slice(0, 8) : model
 }
 
 export function ChatTab() {
@@ -259,42 +305,176 @@ export function ChatTab() {
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .map((m) => ({ role: m.role, content: m.content }))
 
+      // The `mycellm` block carries two different kinds of option, and they
+      // apply under different conditions:
+      //   - resolution constraints (min_tier, tags, fallback) only mean
+      //     something when the node is choosing the model, i.e. model === ''
+      //   - execution options (trust, fanout, token_budget) apply to whatever
+      //     was chosen, including an explicitly-selected swarm
+      // `routing` is deliberately never sent: only "best" is implemented, the
+      // node rejects anything else with HTTP 400, and "best" is already the
+      // server-side default — so sending it adds a way to fail and nothing else.
+      // The selector's value carries BOTH the model and any tier floor, so the
+      // request can no longer express "this exact model, but at least that
+      // tier" — a contradiction the UI used to allow and the code then had to
+      // quietly drop. See `lib/selection.ts`.
+      const { model: wireModel, minTier } = parseSelection(model)
+      const isSwarm = wireModel === SWARM_MODEL
+      const resolving = wireModel === ''
+      const constraints =
+        resolving && (minTier !== '' || routingOpts.required_tags.length > 0)
+          ? {
+              min_tier: minTier || undefined,
+              required_tags:
+                routingOpts.required_tags.length > 0 ? routingOpts.required_tags : undefined,
+              fallback: routingOpts.fallback,
+            }
+          : {}
+      const execution = {
+        trust: routingOpts.trust || undefined,
+        fanout: isSwarm && routingOpts.fanout > 0 ? routingOpts.fanout : undefined,
+        token_budget: routingOpts.token_budget > 0 ? routingOpts.token_budget : undefined,
+      }
+      const mycellm = { ...constraints, ...execution }
+      const hasOptions = Object.values(mycellm).some((v) => v !== undefined)
+
       const reqBody = {
-        model: model || '',
+        stream: true,
+        model: wireModel,
         messages: history,
         max_tokens: 2048,
         // OpenAI-o-series style reasoning control. Toggle off → server strips
         // <think> blocks and asks Qwen3 templates to suppress thinking. Toggle
         // on → server returns reasoning_content for UI to render.
         reasoning: { exclude: !routingOpts.show_reasoning },
-        ...(model === '' &&
-        (routingOpts.min_tier !== 'any' || routingOpts.required_tags.length > 0)
-          ? {
-              mycellm: {
-                min_tier: routingOpts.min_tier !== 'any' ? routingOpts.min_tier : undefined,
-                required_tags:
-                  routingOpts.required_tags.length > 0 ? routingOpts.required_tags : undefined,
-                routing: routingOpts.routing,
-                fallback: routingOpts.fallback,
-              },
-            }
-          : {}),
+        ...(hasOptions ? { mycellm } : {}),
       }
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        // The assistant bubble is created BEFORE the first token so the phase
+        // line has somewhere to live: a swarm spends its first seconds fanning
+        // out, and "3 proposers on 2 nodes" is exactly what the user wants
+        // during that wait rather than an undifferentiated spinner.
+        const responseId = generateId()
+        let opened = false
+        let text = ''
+
+        const open = () => {
+          if (opened) return
+          opened = true
+          addMessage({
+            id: responseId,
+            role: 'assistant',
+            content: '',
+            streaming: true,
+            timestamp: Date.now(),
+          })
+        }
+        const patch = (fn: (m: ChatMessage) => ChatMessage) =>
+          useChatStore.getState().updateMessage(responseId, fn)
+
         try {
-          const resp = await api.postRaw(API.chat.completions, reqBody, {
+          const frames = api.postStream(API.chat.completions, reqBody, {
             signal: controller.signal,
           })
 
-          if (!resp.ok) {
-            const status = resp.status
-            const body = await resp.text().catch(() => '')
+          let usage: { prompt_tokens?: number; completion_tokens?: number } = {}
+          let routedTo = ''
+          let servedBy = ''
+          let plan: ChatMessage['plan']
 
-            // Retryable errors
-            if ((status === 429 || status === 503) && attempt < MAX_RETRIES) {
+          for await (const raw of frames) {
+            if (raw === '[DONE]') break
+            let data: Record<string, unknown>
+            try {
+              data = JSON.parse(raw)
+            } catch {
+              continue // a keepalive or a frame we don't understand
+            }
+
+            const meta = data.mycellm as (SwarmProgress & ExecutionMeta) | undefined
+
+            // Progress frames carry an empty delta by contract. Rendering the
+            // phase here is the whole reason the server distinguishes them
+            // from content — see api/openai.py::_stream_swarm.
+            if (meta?.type === 'progress') {
+              open()
+              patch((m) => ({ ...m, phase: describePhase(meta) }))
+              continue
+            }
+            if (meta) plan = meta as ExecutionMeta
+
+            const choice = (data.choices as Record<string, unknown>[] | undefined)?.[0]
+            const delta = (choice?.delta ?? {}) as Record<string, string>
+            if (data.model) routedTo = String(data.model)
+            if (data.usage) usage = data.usage as typeof usage
+            if (meta?.node || meta?.served_by) servedBy = String(meta.node ?? meta.served_by)
+
+            if (delta.content) {
+              open()
+              text += delta.content
+              // ⚠️ PLAIN TEXT WHILE STREAMING, MARKDOWN ONLY AT THE END.
+              // Re-parsing the whole answer on every token is quadratic work
+              // on the render thread; on iOS that froze the app outright, and
+              // the same shape here just makes long answers stutter.
+              patch((m) => ({ ...m, content: text, phase: undefined }))
+            }
+            if (delta.reasoning_content) {
+              open()
+              patch((m) => ({
+                ...m,
+                reasoning_content: (m.reasoning_content ?? '') + delta.reasoning_content,
+              }))
+            }
+          }
+
+          if (!opened) {
+            // A clean empty stream and a successful empty answer look
+            // identical on the wire; say which one this was.
+            addMessage({
+              id: generateId(),
+              role: 'error',
+              content: t('errors.emptyStream'),
+              timestamp: Date.now(),
+            })
+            break
+          }
+
+          patch((m) => ({
+            ...m,
+            streaming: false,
+            phase: undefined,
+            model: routedTo || undefined,
+            routed_to: routedTo || undefined,
+            served_by: servedBy || undefined,
+            plan,
+            tokens:
+              usage.prompt_tokens || usage.completion_tokens
+                ? {
+                    prompt: usage.prompt_tokens ?? 0,
+                    completion: usage.completion_tokens ?? 0,
+                  }
+                : undefined,
+          }))
+          break
+        } catch (e: unknown) {
+          if (e instanceof DOMException && e.name === 'AbortError') {
+            // Stop cleanly on the partial answer rather than deleting it —
+            // the tokens already on screen were real.
+            if (opened) patch((m) => ({ ...m, streaming: false, phase: undefined }))
+            break
+          }
+
+          // A failed request must not leave a half-open bubble behind.
+          if (opened) removeMessages((m) => m.id === responseId)
+
+          // ⚠️ RETRIES ARE ONLY SAFE BEFORE THE FIRST TOKEN. Re-sending after
+          // partial output would render the answer twice; `opened` is the
+          // commit point, exactly as on the node's own failover path.
+          if (e instanceof StreamHttpError) {
+            const retryable = e.status === 429 || e.status === 503
+            if (retryable && !opened && attempt < MAX_RETRIES) {
               const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)]
-              // Show retry indicator
               const retryId = `retry-${Date.now()}`
               addMessage({
                 id: retryId,
@@ -309,73 +489,52 @@ export function ChatTab() {
               try {
                 await abortableSleep(delay * 1000, controller.signal)
               } finally {
-                // Remove retry indicator
                 removeMessages((m) => m.id === retryId)
               }
               continue
             }
 
-            // Non-retryable or retries exhausted
             let errContent: string
-            if (status === 429) {
+            let errPlan: ChatMessage['plan']
+            if (e.status === 429) {
               errContent = t('retry.exhausted')
-            } else if (status === 503) {
+            } else if (e.status === 503) {
               errContent = t('retry.busy')
             } else {
-              errContent = `Error ${status}: ${body}`
+              // A swarm refusal (422) carries the plan that produced it. The
+              // refusals are the whole point: a target blocked by egress
+              // policy is otherwise indistinguishable from one never there.
+              try {
+                const parsed = JSON.parse(e.body)
+                errContent = parsed?.error?.message || `Error ${e.status}: ${e.body}`
+                errPlan = parsed?.error?.plan
+              } catch {
+                errContent = `Error ${e.status}: ${e.body}`
+              }
             }
             addMessage({
               id: generateId(),
               role: 'error',
               content: errContent,
+              plan: errPlan,
               timestamp: Date.now(),
             })
             break
           }
 
-          const data = await resp.json()
-          const respText = data.choices?.[0]?.message?.content || '[no response]'
-          const reasoning = data.choices?.[0]?.message?.reasoning_content || undefined
-          const usage = data.usage || {}
-          const routedTo = data.model || 'unknown'
-
-          addMessage({
-            id: generateId(),
-            role: 'assistant',
-            content: respText,
-            model: routedTo,
-            routed_to: data.routed_to || routedTo,
-            reasoning_content: reasoning,
-            tokens: {
-              prompt: usage.prompt_tokens || 0,
-              completion: usage.completion_tokens || 0,
-            },
-            timestamp: Date.now(),
-          })
-          break
-        } catch (e: unknown) {
-          if (e instanceof DOMException && e.name === 'AbortError') break
-
           const isNetworkError =
             e instanceof TypeError &&
             (e.message.includes('fetch') || e.message.includes('Failed'))
-
-          if (isNetworkError) {
-            addMessage({
-              id: generateId(),
-              role: 'error',
-              content: 'Cannot reach the node. Check that `mycellm serve` is running.',
-              timestamp: Date.now(),
-            })
-          } else {
-            const msg = e instanceof Error ? e.message : 'Unknown error'
-            addMessage({
-              id: generateId(),
-              role: 'error',
-              content: msg,
-              timestamp: Date.now(),
-            })
-          }
+          addMessage({
+            id: generateId(),
+            role: 'error',
+            content: isNetworkError
+              ? 'Cannot reach the node. Check that `mycellm serve` is running.'
+              : e instanceof Error
+                ? e.message
+                : 'Unknown error',
+            timestamp: Date.now(),
+          })
           break
         }
       }
@@ -474,7 +633,13 @@ export function ChatTab() {
         </button>
       </div>
 
-      {/* Routing options panel (rendered by RoutingOptions when open) */}
+      {/* Routing options panel — below the toolbar, never inside it. */}
+      <RoutingOptionsPanel
+        options={routingOpts}
+        onChange={(opts) => setRoutingOpts(opts)}
+        open={showRouting}
+        swarm={model === SWARM_MODEL}
+      />
 
       {/* Messages */}
       <div

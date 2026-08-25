@@ -137,6 +137,37 @@ class ApiClient {
     })
   }
 
+  /**
+   * POST a request and yield each `data:` payload as it arrives.
+   *
+   * ⚠️ NOT `stream()` WITH A BODY. `stream()` is GET-only and hands frames to a
+   * callback; chat completions need a POST body and a value the caller can
+   * `for await` over so it can stop on abort. Both share `readSse` below, so
+   * the frame parsing exists once.
+   *
+   * Yields the raw payload string — including the literal `[DONE]`, which the
+   * caller checks. Swallowing it here would hide the difference between "the
+   * stream ended" and "the connection dropped", and those need different
+   * handling.
+   */
+  async *postStream(
+    path: string,
+    body?: unknown,
+    opts?: RequestInit
+  ): AsyncGenerator<string, void, unknown> {
+    const response = await this.fetchWithAuth(path, {
+      ...opts,
+      method: 'POST',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new StreamHttpError(response.status, text)
+    }
+    if (!response.body) throw new StreamHttpError(0, 'No response body')
+    yield* readSse(response.body)
+  }
+
   stream(path: string): SseConnection {
     const controller = new AbortController()
     const conn: SseConnection = {
@@ -193,6 +224,58 @@ class ApiClient {
     })()
 
     return conn
+  }
+}
+
+/**
+ * Parse a `text/event-stream` body into its `data:` payloads.
+ *
+ * Split on a blank line, keep the trailing partial in the buffer — a chunk
+ * boundary lands mid-frame constantly, and treating a partial frame as
+ * complete produces a JSON parse error on perfectly good output.
+ */
+async function* readSse(
+  body: ReadableStream<Uint8Array>
+): AsyncGenerator<string, void, unknown> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      buffer = buffer.replace(/\r\n/g, '\n')
+      const frames = buffer.split('\n\n')
+      buffer = frames.pop() ?? ''
+      for (const frame of frames) {
+        const data = frame
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n')
+        if (data) yield data
+      }
+    }
+  } finally {
+    // Cancel rather than leak the reader when the consumer breaks early
+    // (abort, or a [DONE] the caller stops on).
+    try {
+      await reader.cancel()
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
+/** An HTTP failure on a streaming request, with the body for error rendering. */
+export class StreamHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string
+  ) {
+    super(`HTTP ${status}`)
+    this.name = 'StreamHttpError'
   }
 }
 

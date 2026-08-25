@@ -23,5 +23,14 @@
     "transport": "Transport",
     "models": "Models",
     "hardware": "Hardware"
+  },
+  "groups": {
+    "title": "Serving Groups",
+    "summary": "{{healthy}} healthy · {{deployments}} deployments",
+    "healthy": "healthy",
+    "noDeployments": "online · 0 deployments",
+    "offline": "offline",
+    "empty": "no deployments registered",
+    "none": "No serving groups. Add an OpenAI-compatible endpoint from the Models tab."
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect, Component } from 'react'
+import { useEffect, useState, Component } from 'react'
 import type { ReactNode, ErrorInfo } from 'react'
 import { useAuthStore } from '@/stores/auth'
 import { useNodeStore } from '@/stores/node'
@@ -17,6 +17,7 @@ import { OverviewTab } from '@/components/overview/OverviewTab'
 import { NetworkTab } from '@/components/network/NetworkTab'
 import { ModelsTab } from '@/components/models/ModelsTab'
 import { ChatTab } from '@/components/chat/ChatTab'
+import { QueueTab } from '@/components/queue/QueueTab'
 import { CreditsTab } from '@/components/credits/CreditsTab'
 import { LogsTab } from '@/components/logs/LogsTab'
 import { SettingsTab } from '@/components/settings/SettingsTab'
@@ -46,16 +47,59 @@ function DashboardLayout() {
   )
 }
 
+const TABS: Record<string, () => React.ReactNode> = {
+  overview: () => <OverviewTab />,
+  network: () => <NetworkTab />,
+  models: () => <ModelsTab />,
+  chat: () => <ChatTab />,
+  queue: () => <QueueTab />,
+  credits: () => <CreditsTab />,
+  logs: () => <LogsTab />,
+  settings: () => <SettingsTab />,
+}
+
+/**
+ * Tabs stay mounted once visited.
+ *
+ * ⚠️ THIS IS WHY THE DASHBOARD FELT LIKE SEPARATE PAGES. Each tab was rendered
+ * with `{tab === 'x' && <XTab/>}`, so switching away DESTROYED it — every
+ * accumulated thing went with it: the activity feed's entries, the log buffer,
+ * a half-typed message, scroll position, and any query result React Query had
+ * since evicted. Coming back rebuilt the tab from nothing, which is precisely
+ * what arriving at a new document feels like.
+ *
+ * It also broke scroll restoration in a way that looked like the restore was
+ * failing: leaving Overview at y=318 and returning found a page only 118px
+ * scrollable, because the feed it had accumulated was gone. The position was
+ * not lost — it had become unreachable.
+ *
+ * Hidden with `display: none` rather than unmounted: React keeps the state and
+ * the DOM, the browser keeps them out of layout, and the document height is
+ * still just the active tab's. Tabs are mounted lazily on first visit, so an
+ * unopened tab costs nothing — this is keep-alive, not render-everything.
+ */
 function TabContent({ tab }: { tab: string }) {
+  const [visited, setVisited] = useState<Set<string>>(() => new Set([tab]))
+
+  useEffect(() => {
+    setVisited((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)))
+  }, [tab])
+
   return (
     <div className="max-w-7xl mx-auto w-full">
-      {tab === 'overview' && <OverviewTab />}
-      {tab === 'network' && <NetworkTab />}
-      {tab === 'models' && <ModelsTab />}
-      {tab === 'chat' && <ChatTab />}
-      {tab === 'credits' && <CreditsTab />}
-      {tab === 'logs' && <LogsTab />}
-      {tab === 'settings' && <SettingsTab />}
+      {Object.entries(TABS).map(([id, render]) =>
+        visited.has(id) ? (
+          <div
+            key={id}
+            // `hidden` (display:none) keeps it mounted but out of layout, so
+            // the page height belongs to the active tab alone.
+            hidden={id !== tab}
+            className={id === tab ? 'tab-enter' : undefined}
+          >
+            {render()}
+          </div>
+        ) : null
+      )}
     </div>
   )
 }
@@ -73,6 +117,18 @@ function CheckingState() {
         if (apiKey) {
           headers['Authorization'] = `Bearer ${apiKey}`
         }
+
+        // ⚠️ FIRED TOGETHER, NOT IN SEQUENCE. These used to be awaited one
+        // after the other, so the dashboard paid two serial round trips before
+        // it could render anything — and both only START once the JS bundle has
+        // parsed, which is already ~850ms in. The status probe is wasted only
+        // when the node needs no auth at all, which is the case that was
+        // already fast.
+        const statusProbe = apiKey
+          ? fetch(`${window.location.origin}/v1/node/status`, {
+              headers: { Authorization: `Bearer ${apiKey}` },
+            }).catch(() => null)
+          : null
 
         const response = await fetch(`${window.location.origin}/health`, {
           headers,
@@ -99,12 +155,21 @@ function CheckingState() {
 
           // Auth is required — validate stored key if we have one
           if (apiKey) {
-            const testResp = await fetch(`${window.location.origin}/v1/node/status`, {
-              headers: { Authorization: `Bearer ${apiKey}` },
-            })
+            const testResp = await statusProbe
             if (cancelled) return
-            if (testResp.ok) {
-              setAppState('booting')
+            if (testResp?.ok) {
+              // Seed the store from the status call we JUST made. Without this
+              // the splash renders before any query has run and would report
+              // "no models / no peers" on a node that has both — replacing
+              // invented boot steps with an invented summary, which is not an
+              // improvement.
+              try {
+                useNodeStore.getState().setStatus(await testResp.json())
+              } catch {
+                /* splash falls back to the generic lines */
+              }
+              // Splash once per browser, then straight in. See `hasBooted`.
+              setAppState(useAuthStore.getState().hasBooted ? 'dashboard' : 'booting')
               return
             }
             // Stored key is invalid — clear it and show auth
@@ -118,7 +183,9 @@ function CheckingState() {
         // Can't reach server - if we have a key, try dashboard anyway
         // Otherwise show auth
         if (!cancelled) {
-          setAppState(apiKey ? 'booting' : 'auth')
+          setAppState(
+            apiKey ? (useAuthStore.getState().hasBooted ? 'dashboard' : 'booting') : 'auth'
+          )
         }
       }
     }

@@ -189,8 +189,34 @@ class MycellmSettings(BaseSettings):
     # Does NOT include: prompts, IPs, user data, API keys
     telemetry: bool = False
 
+    # Reverse proxies whose X-Forwarded-For header may be believed.
+    #
+    # ⚠️ WIDEN THIS DELIBERATELY, NEVER CASUALLY. Every per-IP limit — public
+    # chat, node announces, the anon limiter — is keyed on the result. Trusting
+    # an address you do not control lets a caller spoof a fresh IP per request
+    # and turns every one of those limits into a suggestion.
+    #
+    # Loopback is safe everywhere because the TCP peer of an established
+    # connection cannot be forged. A containerised deployment behind a local
+    # reverse proxy sees the bridge gateway instead and must add it explicitly,
+    # e.g. MYCELLM_TRUSTED_PROXIES="127.0.0.0/8,::1,192.168.80.0/24".
+    trusted_proxies: str = "127.0.0.0/8,::1"
+
     # Credit
     initial_credits: float = 100.0
+
+    # ── Async job queue ─────────────────────────────────────────────────
+    # Work that waits for a device instead of failing when none is free.
+    # ON by default: the queue only ever runs jobs that were explicitly
+    # submitted to it, so an idle node with an empty table does nothing but a
+    # 30s SELECT. Off means /v1/jobs answers 503 and nothing is scheduled.
+    queue_enabled: bool = True
+    # How many queued jobs this node runs at once. 1 is deliberate — a
+    # personal device that starts three jobs because three were waiting is a
+    # device someone force-quits.
+    queue_max_concurrent: int = 1
+    # Seconds between scheduler polls while work is pending.
+    queue_poll_interval: float = 5.0
 
     # Admission control — seeder-side peer screening
     # Minimum reputation score to serve a peer (0.0 = no minimum)
