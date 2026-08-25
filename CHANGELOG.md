@@ -4,7 +4,7 @@ All notable changes to mycellm are documented here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses semantic-ish versioning (0.x.y while pre-1.0).
 
-## [0.8.0] — unreleased
+## [0.8.0] — 2026-08-24
 
 **The adaptive inference fabric.** A request stops being "pick a node and send
 it there" and becomes a plan: a job, a set of work units, and targets chosen
