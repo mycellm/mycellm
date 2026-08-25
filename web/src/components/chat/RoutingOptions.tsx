@@ -18,7 +18,6 @@ interface RoutingPanelProps {
   swarm?: boolean
 }
 
-const TIERS = ['any', 'tiny', 'fast', 'capable', 'frontier'] as const
 const TAGS = ['code', 'reasoning', 'vision'] as const
 const TRUST = ['', 'local', 'trusted', 'any'] as const
 const FANOUTS = [0, 2, 3, 4, 5] as const
@@ -61,7 +60,6 @@ function OptionButton({
 export function RoutingOptions({ options, onChange, open, onToggle }: RoutingOptionsProps) {
   const { t } = useTranslation('chat')
   const active =
-    options.min_tier !== 'any' ||
     options.required_tags.length > 0 ||
     options.trust !== '' ||
     options.fanout > 0 ||
@@ -112,21 +110,10 @@ export function RoutingOptionsPanel({
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-white/10 bg-black/30 px-4 py-2.5 text-xs">
-      {/* Min quality */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-gray-500">{t('routing.minQuality')}:</span>
-        <div className="flex gap-1">
-          {TIERS.map((tier) => (
-            <OptionButton
-              key={tier}
-              active={options.min_tier === tier}
-              onClick={() => onChange({ ...options, min_tier: tier })}
-            >
-              {t(`tiers.${tier}`)}
-            </OptionButton>
-          ))}
-        </div>
-      </div>
+      {/* ⚠️ NO "MIN QUALITY" ROW HERE ANY MORE — the tier floor moved into the
+          model selector, because a floor and a named model are mutually
+          exclusive and two separate controls could express the contradiction.
+          See `lib/selection.ts`. */}
 
       {/* Tags */}
       <div className="flex items-center gap-1.5">

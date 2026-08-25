@@ -137,6 +137,11 @@ class MycellmNode:
         self.device_cert: DeviceCert | None = None
         self.peer_id: str = ""
         self.capabilities = Capabilities()
+        # Set by `_start_job_queue`. Declared here so every read site —
+        # the API, the scheduler, a test double — sees the attribute
+        # whether or not the queue came up.
+        self.job_queue = None
+        self.job_scheduler = None
 
         # Subsystems
         self.inference = InferenceManager(
@@ -1737,6 +1742,13 @@ class MycellmNode:
 
         # Load persisted node registry from DB
         self.node_registry = await self.node_registry_repo.load_as_dict()
+
+        # Job queue + scheduler. Started after accounting because a stake is
+        # denominated in credits and the recovery pass needs the DB, and before
+        # transport because a job queued last night should start the moment
+        # this node is fit to run it — not once a peer happens to connect.
+        await self._start_job_queue()
+
         await self._start_transport()
 
         # Start NAT discovery (non-blocking background)
@@ -2332,6 +2344,15 @@ class MycellmNode:
             conn.close()
         self._peer_connections.clear()
 
+        # Stop the job scheduler before the DHT so in-flight jobs are requeued
+        # while transport is still up — a job killed after the network is gone
+        # cannot record why it stopped.
+        if getattr(self, "job_scheduler", None):
+            try:
+                await self.job_scheduler.stop()
+            except Exception as e:  # noqa: BLE001 — shutdown must not hang
+                logger.debug(f"job scheduler stop: {e}")
+
         # Stop DHT
         if self._dht_node:
             await self._dht_node.stop()
@@ -2532,18 +2553,109 @@ class MycellmNode:
                 "inference_consumed", counterparty_id=t.peer_id)
         return res
 
-    async def execute_job(self, job, override_privacy: bool = False) -> dict:
-        """Plan and run a Job. The 0.8 entry point.
+    async def _start_job_queue(self) -> None:
+        """Bring up the async job queue, if enabled.
 
-        Direct requests still go through `route_inference`; this path is for
-        jobs whose *strategy* is the point (`mycellm/swarm`).
+        Failure here is logged and swallowed: a node that cannot queue work
+        must still serve it. The queue is an addition to what 0.7 could do, so
+        it is never allowed to be the reason a node does not start.
+        """
+        self.job_queue = None
+        self.job_scheduler = None
+        if not getattr(self._settings, "queue_enabled", True):
+            return
+        try:
+            from mycellm.execution.queue import JobQueue
+            from mycellm.execution.scheduler import JobScheduler
+
+            self.job_queue = JobQueue(owner_id=self.peer_id)
+            self.job_scheduler = JobScheduler(
+                self.job_queue,
+                self,
+                poll_interval=getattr(self._settings, "queue_poll_interval", 5.0),
+                max_concurrent=getattr(self._settings, "queue_max_concurrent", 1),
+            )
+            await self.job_scheduler.start()
+            logger.info(f"{styled_tag('QUEUE')} Job scheduler started")
+        except Exception as e:
+            logger.warning(f"Job queue not started: {e}")
+            self.job_queue = None
+            self.job_scheduler = None
+
+    async def run_work_unit_stream(self, unit):
+        """Stream one WorkUnit's output as text fragments.
+
+        Only used for swarm synthesis, which is the single point in a swarm
+        where one model is producing the final answer and streaming it means
+        something. Mirrors `run_work_unit`'s local/group vs QUIC dispatch so
+        the two cannot disagree about where a unit runs.
+        """
+        from mycellm.inference.base import InferenceRequest
+
+        t = unit.target
+        if t.kind in ("local", "group"):
+            name = self.inference.resolve_model_name(t.model) or t.model
+            async for chunk in self.inference.generate_stream(InferenceRequest(
+                messages=unit.messages,
+                model=name,
+                temperature=unit.temperature,
+                max_tokens=unit.max_tokens,
+            )):
+                text = getattr(chunk, "text", "") or ""
+                if text:
+                    yield text
+            return
+
+        # QUIC peer — reuse the routing stream so failover and accounting
+        # behave exactly as they do for an ordinary streamed request.
+        async for chunk in self.route_inference_stream(
+            t.model, unit.messages,
+            temperature=unit.temperature, max_tokens=unit.max_tokens,
+        ):
+            text = (chunk or {}).get("text", "")
+            if text:
+                yield text
+
+    async def execute_job_stream(self, job, override_privacy: bool = False,
+                                 targets: list | None = None):
+        """Plan a Job and stream it. Yields coordinator events.
+
+        The streaming twin of `execute_job`, and the reason `mycellm/swarm` is
+        reachable from a streaming client at all.
         """
         from mycellm.execution.coordinator import ExecutionCoordinator
         from mycellm.execution.planner import ExecutionPlanner
 
         if job.network_ids is None:
             job.network_ids = self._own_network_ids()
-        targets = self.execution_targets()
+        if targets is None:
+            targets = self.execution_targets()
+        plan = ExecutionPlanner().plan(job, targets, override_privacy=override_privacy)
+        coordinator = ExecutionCoordinator(
+            self.run_work_unit, stream_runner=self.run_work_unit_stream)
+        async for event in coordinator.execute_stream(job, plan):
+            yield event
+
+    async def execute_job(self, job, override_privacy: bool = False,
+                          targets: list | None = None) -> dict:
+        """Plan and run a Job. The 0.8 entry point.
+
+        Direct requests still go through `route_inference`; this path is for
+        jobs whose *strategy* is the point (`mycellm/swarm`).
+
+        `targets` lets a caller narrow the field before planning — the job
+        scheduler passes the subset that meets a queued job's tier floor, so a
+        "frontier or nothing" job cannot be planned onto a 1B model that
+        happened to be the only thing awake. Omitted, every reachable target is
+        considered, which is the 0.8 behaviour.
+        """
+        from mycellm.execution.coordinator import ExecutionCoordinator
+        from mycellm.execution.planner import ExecutionPlanner
+
+        if job.network_ids is None:
+            job.network_ids = self._own_network_ids()
+        if targets is None:
+            targets = self.execution_targets()
         plan = ExecutionPlanner().plan(job, targets, override_privacy=override_privacy)
         coordinator = ExecutionCoordinator(self.run_work_unit)
         return await coordinator.execute(job, plan)

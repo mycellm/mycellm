@@ -14,6 +14,9 @@ i18n
     fallbackLng: 'en',
     defaultNS: 'common',
     ns: ['common'],
+    // Namespaces load on demand via HttpBackend; listing 'queue' is not
+    // required, but useTranslation('queue') must find the file at
+    // /locales/{lng}/queue.json.
     supportedLngs: supportedLanguages,
     interpolation: {
       escapeValue: false,

@@ -6,11 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#0A0A0A" />
     <title>mycellm_</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/assets/index-C3D5BJlB.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-S7_GJcG2.css">
+    <!-- ⚠️ FONTS ARE SELF-HOSTED, DELIBERATELY. This used to be a
+         render-blocking <link> to fonts.googleapis.com, which cost ~286ms
+         before first paint on every load — and, worse, meant the dashboard of
+         a tool whose whole claim is that you control what leaves your network
+         made an uninvited request to Google every time it was opened. Serving
+         them from the node fixes both. Subsets are unicode-range gated, so a
+         browser fetches only what it renders. -->
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+    <script type="module" crossorigin src="/assets/index-Cog3rwUn.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-loip_CEm.css">
   </head>
   <body>
     <div id="root"></div>

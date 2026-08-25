@@ -345,6 +345,16 @@ class MLXVLMBackend(InferenceBackend):
         tok = getattr(processor, "tokenizer", None) or processor
         stop_strings = chat_stop_strings(tok, request.stop)
         seen_text = ""
+        # ⚠️ TOKEN COUNTS MUST RIDE THE TERMINAL CHUNK, AND THEY DID NOT.
+        # `generate()` counts via `_count_tokens`; this path yielded chunks with
+        # neither field, so `stream_options.include_usage` produced no usage
+        # block at all and every streamed reply from a VLM-backed model
+        # reported nothing. Confirmed live on a Qwen3.5-9B node: the
+        # non-streaming twin of the same request reported 13+9 while the
+        # streamed one reported nothing, because non-streaming has a
+        # re-encode fallback that masked it.
+        all_text = ""
+        saw_finish = False
 
         def _run_stream():
             try:
@@ -383,11 +393,35 @@ class MLXVLMBackend(InferenceBackend):
                 cut, hit = truncate_at_stops(seen_text, stop_strings)
                 if hit:
                     tail = cut[len(seen_text) - len(text):]
-                    yield InferenceChunk(text=tail, finish_reason="stop")
+                    all_text += tail
+                    saw_finish = True
+                    pt, ct = self._count_tokens(processor, prompt, all_text)
+                    yield InferenceChunk(
+                        text=tail, finish_reason="stop",
+                        prompt_tokens=pt, completion_tokens=ct,
+                    )
                     break
 
             if text or finish:
-                yield InferenceChunk(text=text, finish_reason=finish)
+                all_text += text
+                if finish:
+                    saw_finish = True
+                    pt, ct = self._count_tokens(processor, prompt, all_text)
+                    yield InferenceChunk(
+                        text=text, finish_reason=finish,
+                        prompt_tokens=pt, completion_tokens=ct,
+                    )
+                else:
+                    yield InferenceChunk(text=text, finish_reason=finish)
+
+        # mlx-vlm does not guarantee a final chunk carrying `finish_reason`.
+        # When none arrived, counts would be lost entirely, so emit a trailing
+        # zero-text chunk to carry them — the same shape the other local
+        # backends use, and one the API layer already handles (it records usage
+        # before the empty-text guard, so no extra SSE envelope is produced).
+        if all_text and not saw_finish:
+            pt, ct = self._count_tokens(processor, prompt, all_text)
+            yield InferenceChunk(text="", prompt_tokens=pt, completion_tokens=ct)
 
     # ---- introspection -------------------------------------------------
 

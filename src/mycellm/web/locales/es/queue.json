@@ -1,0 +1,19 @@
+{
+  "title": "Cola",
+  "blurb": "Trabajo que espera a un dispositivo en vez de fallar. Los trabajos se ejecutan cuando un nodo está libre y en condiciones.",
+  "refresh": "Actualizar",
+  "promptPlaceholder": "¿En qué debe trabajar la flota?",
+  "stake": "Apuesta",
+  "stakeHint": "Los créditos apostados compran posición en la cola y se devuelven si el trabajo caduca o se cancela sin ejecutarse. Nunca superan al trabajo propio de este nodo.",
+  "queueIt": "Encolar",
+  "cancel": "Cancelar",
+  "empty": "Nada en cola.",
+  "states": {
+    "queued": "en cola",
+    "running": "ejecutando",
+    "done": "hecho",
+    "failed": "fallido",
+    "expired": "caducado",
+    "cancelled": "cancelado"
+  }
+}

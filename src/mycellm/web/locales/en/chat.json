@@ -10,7 +10,9 @@
     "local": "Local",
     "fleet": "Fleet",
     "peers": "Peers",
-    "strategies": "Strategies"
+    "strategies": "Strategies",
+    "tier": "Quality floor",
+    "tierEmpty": "none available"
   },
   "routing": {
     "title": "Routing Options",
@@ -27,7 +29,7 @@
   },
   "tiers": {
     "any": "Any",
-    "tiny": "Tiny (1B+)",
+    "tiny": "Tiny (<3B)",
     "fast": "Fast (3B+)",
     "capable": "Capable (13B+)",
     "frontier": "Frontier (65B+)"
@@ -77,5 +79,8 @@
     "servedBy": "Served by",
     "spent": "Tokens",
     "cancelledForBudget": "{{count}} cancelled for budget"
+  },
+  "errors": {
+    "emptyStream": "The model returned an empty response."
   }
 }

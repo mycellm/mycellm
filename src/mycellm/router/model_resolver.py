@@ -46,13 +46,33 @@ _PARAM_PATTERNS = [
 ]
 
 
-def estimate_param_count(model_name: str) -> float:
-    """Estimate parameter count in billions from model name."""
+def parse_param_count(model_name: str) -> float | None:
+    """Parameter count in billions read from the name, or None if absent.
+
+    ⚠️ THE DIFFERENCE FROM `estimate_param_count` IS "MEASURED" VS "ASSUMED",
+    AND IT MATTERS WHEREVER THE ANSWER IS SHOWN OR ENFORCED. Scoring can live
+    with a default — ranking two unknowns identically is harmless. A tier label
+    cannot: `relay-model` has no size in its name, and defaulting it to 7B made
+    /v1/models report `tier: "fast"`, which is a guess wearing the clothes of a
+    measurement. A `min_tier: fast` request would then admit a model nobody
+    sized.
+    """
     for pattern, extract in _PARAM_PATTERNS:
         match = re.search(pattern, model_name)
         if match:
             return extract(match)
-    return 7.0  # default assumption
+    return None
+
+
+def estimate_param_count(model_name: str) -> float:
+    """Estimate parameter count in billions from model name.
+
+    Falls back to 7B when the name says nothing. Fine for *ranking*, where
+    every unknown gets the same score; use `parse_param_count` anywhere the
+    value is displayed or used as a threshold.
+    """
+    parsed = parse_param_count(model_name)
+    return parsed if parsed is not None else 7.0  # default assumption
 
 
 def derive_tier(param_count_b: float) -> str:

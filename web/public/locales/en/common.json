@@ -6,7 +6,8 @@
     "chat": "Chat",
     "credits": "Credits",
     "logs": "Logs",
-    "settings": "Settings"
+    "settings": "Settings",
+    "queue": "Queue"
   },
   "auth": {
     "title": "mycellm_",

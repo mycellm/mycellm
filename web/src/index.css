@@ -174,3 +174,31 @@ input:-webkit-autofill:focus {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/*
+ * Tab change.
+ *
+ * ⚠️ WITHOUT THIS THE APP READS AS SEPARATE PAGES. Switching tabs replaced the
+ * entire content area in one frame, with no motion — an instant, total swap
+ * between two unrelated layouts is exactly what a full page navigation looks
+ * like, so a single-page app that does it feels like a multi-page site. A short
+ * fade is enough to read the change as "this app is showing me something else"
+ * rather than "a new document loaded".
+ *
+ * Deliberately brief (120ms) and opacity-led: anything longer or with more
+ * travel gets in the way of someone switching tabs quickly, which is the whole
+ * point of tabs.
+ */
+@keyframes tabIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tab-enter {
+  animation: tabIn 120ms ease-out both;
+}
+
+/* Honour the OS setting — motion here is decoration, not information. */
+@media (prefers-reduced-motion: reduce) {
+  .tab-enter { animation: none; }
+}

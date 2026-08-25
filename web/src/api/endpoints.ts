@@ -59,6 +59,12 @@ export const API = {
   chat: {
     completions: '/v1/chat/completions',
   },
+  jobs: {
+    list: '/v1/jobs',
+    submit: '/v1/jobs',
+    get: (id: string) => `/v1/jobs/${encodeURIComponent(id)}`,
+    cancel: (id: string) => `/v1/jobs/${encodeURIComponent(id)}`,
+  },
   admin: {
     nodes: '/v1/admin/nodes',
     approveNode: (peerId: string) => `/v1/admin/nodes/${peerId}/approve`,

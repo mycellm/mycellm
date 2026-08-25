@@ -10,6 +10,13 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
+      // ⚠️ WITHOUT A staleTime EVERY TAB RETURN REFETCHES FROM COLD. Queries
+      // default to stale-immediately, so switching away and back re-ran every
+      // request and the panels visibly rebuilt themselves — measured at CLS
+      // 0.15 on Credits, which is "poor" territory and reads as a page load.
+      // Most of these endpoints also poll on their own `refetchInterval`, so
+      // the data was never actually stale; only React Query thought so.
+      staleTime: 30_000,
     },
   },
 })

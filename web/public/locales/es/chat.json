@@ -10,7 +10,9 @@
     "local": "Local",
     "fleet": "Flota",
     "peers": "Pares",
-    "strategies": "Estrategias"
+    "strategies": "Estrategias",
+    "tier": "Nivel mínimo",
+    "tierEmpty": "ninguno disponible"
   },
   "routing": {
     "title": "Opciones de Enrutamiento",
@@ -27,7 +29,7 @@
   },
   "tiers": {
     "any": "Cualquiera",
-    "tiny": "Pequeño (1B+)",
+    "tiny": "Mínimo (<3B)",
     "fast": "Rápido (3B+)",
     "capable": "Capaz (13B+)",
     "frontier": "Frontera (65B+)"
@@ -77,5 +79,8 @@
     "servedBy": "Servido por",
     "spent": "Tokens",
     "cancelledForBudget": "{{count}} cancelados por presupuesto"
+  },
+  "errors": {
+    "emptyStream": "El modelo devolvió una respuesta vacía."
   }
 }

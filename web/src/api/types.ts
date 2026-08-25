@@ -1,10 +1,27 @@
+/// A model as reported by `/v1/node/status`.
+export interface LoadedModelSummary {
+  name: string
+  quant?: string
+  ctx_len?: number
+  backend?: string
+  loaded_bytes?: number
+}
+
 export interface NodeStatus {
   node_name: string
   peer_id: string
   uptime_seconds: number
   mode: string
   role: string
-  models: string[]
+  /// ⚠️ THESE ARE OBJECTS, NOT STRINGS. The type said `string[]` for a long
+  /// time while `/v1/node/status` returned
+  /// `{name, quant, ctx_len, backend, loaded_bytes}` — so TypeScript could not
+  /// catch a component rendering an entry directly, and React threw #31
+  /// ("objects are not valid as a React child") the moment anyone opened the
+  /// detail modal for their own node. Fleet nodes were mapped through
+  /// `m.name`; `self` was not, so the crash only reproduced when the dashboard
+  /// was viewed on a node that had a model loaded.
+  models: LoadedModelSummary[]
   peers: { peer_id: string; transport: string }[]
   hardware: {
     gpu_name: string
@@ -116,6 +133,10 @@ export interface Model {
   tags?: string[]
   description?: string
   context_length?: number
+  // Quality tier: 'frontier' | 'capable' | 'fast' | 'tiny'. Absent when the
+  // node could not derive one (unparseable name, no advertised param count) —
+  // treat missing as unknown, never as qualifying.
+  tier?: string
 }
 
 export interface SavedModel {
@@ -267,6 +288,13 @@ export interface ChatMessage {
   // swarm answers, which are paid for per proposer — the caller is entitled
   // to see what ran, what was refused, and whether the job degraded.
   plan?: ExecutionMeta
+  /// True while tokens are still arriving. Drives the cursor AND suppresses
+  /// markdown parsing — see MarkdownMessage on iOS for why parsing every
+  /// token is quadratic work on the render thread.
+  streaming?: boolean
+  /// Live swarm phase, e.g. "3 proposers on 2 nodes" → "synthesising".
+  /// Present only while a swarm is mid-flight; cleared when the answer lands.
+  phase?: string
   timestamp: number
 }
 
@@ -286,6 +314,17 @@ export interface PlanRejection {
 }
 
 /** `ExecutionPlan.to_dict()` plus the coordinator's post-run counters. */
+/// Progress frame from a streaming swarm. Carried on `mycellm` with an EMPTY
+/// `delta`, so a client that only concatenates content is unaffected.
+export interface SwarmProgress {
+  type: 'progress'
+  phase: 'proposing' | 'synthesizing'
+  planned?: number
+  targets?: string[]
+  target?: string
+  from_proposals?: number
+}
+
 export interface ExecutionMeta {
   job_id: string
   strategy: 'direct' | 'replica' | 'swarm'
@@ -300,6 +339,10 @@ export interface ExecutionMeta {
   completion_tokens_spent?: number
   synthesized_by?: string
   served_by?: string
+  /// Anonymised serving-node hash, sent by the PUBLIC gateway only. The node's
+  /// own API uses `served_by`; both are read because the dashboard can be
+  /// pointed at either.
+  node?: string
   elapsed_s?: number
   degraded?: boolean
   degradation?: string
@@ -340,7 +383,11 @@ export interface GroupsResponse {
 }
 
 export interface RoutingOptions {
-  min_tier: string
+  // ⚠️ `min_tier` IS NOT HERE — it moved into the model selector's value.
+  // A tier floor only applies while the node is still resolving, so it is
+  // now expressed as `tier:<name>` in the selection itself (see
+  // `lib/selection.ts`). Keeping it here as well would let the UI hold a
+  // floor that the request is contractually unable to send.
   required_tags: string[]
   // ⚠️ `routing` is NOT a user choice. The node implements exactly one mode
   // and returns HTTP 400 for anything else, so offering "fastest" here put a
@@ -365,3 +412,50 @@ export interface RoutingOptions {
 export const SWARM_MODEL = 'mycellm/swarm'
 
 export type Tab = 'overview' | 'network' | 'models' | 'chat' | 'credits' | 'logs' | 'settings'
+
+
+/// A job in the async queue.
+///
+/// The queue exists because a fleet of personal devices is intermittent by
+/// nature — phones sleep, laptops close, iPads charge overnight. `state` says
+/// where a job is; `waiting_reason` says why it is still there, which is the
+/// field a user actually reads.
+export interface QueuedJob {
+  job_id: string
+  owner_id: string
+  model: string
+  min_tier: string
+  trust: string
+  messages: { role: string; content: unknown }[]
+  state: 'queued' | 'running' | 'done' | 'failed' | 'expired' | 'cancelled'
+  stake: number
+  /// Plain-language explanation of why this job has not started. Empty when
+  /// it is running or finished.
+  waiting_reason: string
+  created_at: number
+  updated_at: number
+  started_at: number
+  finished_at: number
+  expires_at: number
+  attempts: number
+  result_text: string
+  error: string
+  /// Which node and model actually answered — a queued job may run hours
+  /// later on a different machine than the one that would have taken it at
+  /// submit time, so this is not derivable after the fact.
+  served_by: string
+  served_model: string
+  position?: number
+}
+
+export interface QueueListResponse {
+  jobs: QueuedJob[]
+  counts: Record<string, number>
+  scheduler: {
+    running: number
+    /// Device-level reason nothing is starting (Low Power Mode, thermal
+    /// throttling, already busy). True even when every job looks fine on its
+    /// own, which is exactly when it is hardest to guess.
+    reason: string
+  }
+}
